@@ -10,6 +10,7 @@ import postRouter from './routes/postRoute.js';
 import { setupSocket } from './configs/socket.js';
 import http from 'http';
 import storyRouter from './routes/storyRoute.js';
+import messageRouter from './routes/messageRoute.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -28,7 +29,7 @@ app.use('/api/inngest', serve({ client: inngest, functions }))
 app.use('/api/user', userRouter)
 app.use('/api/post', postRouter)
 app.use('/api/story', storyRouter)
-
+app.use('/api/message', messageRouter)
 
 const PORT = process.env.PORT || 4000;
 

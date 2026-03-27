@@ -3,6 +3,7 @@ import User from "../models/User.js";
 import Connection from "../models/Connection.js";
 import sendEmail from "../configs/nodeMailer.js";
 import Story from "../models/Story.js";
+import Message from "../models/Message.js";
 
 export const inngest = new Inngest({ id: "tarous-app" });
 
@@ -146,11 +147,70 @@ const deleteStory = inngest.createFunction(
     }
 )
 
+const sendNotificationOfUnseenMessages = inngest.createFunction(
+    {
+        id: "seen-unseen-messages-notification",
+        cron: "TZ=Asia/Ho_Chi_Minh 0 9 * * *"
+    },
+    async () => {
+        const messages = await Message.find({ seen: false })
+            .populate('to_user_id')
+
+        const unseenCount = {}
+
+        messages.forEach(message => {
+            const user = message.to_user_id
+            const id = user._id.toString()
+
+            if (!unseenCount[id]) {
+                unseenCount[id] = {
+                    count: 0,
+                    user
+                }
+            }
+
+            unseenCount[id].count++
+        })
+
+        for (const userId in unseenCount) {
+            const { count, user } = unseenCount[userId]
+
+            const subject = `You have ${count} unseen messages`
+
+            const body = `
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Hi ${user.full_name},</h2>
+                    <p>You have ${count} unseen messages</p>
+                    <p>
+                        Click <a href="${process.env.FRONTEND_URL}/messages" style="color: #10b981">
+                        here</a> to view them
+                    </p>
+                    <br/>
+                    <p>Thanks,<br/>Tarous - Stay Connected</p>
+                </div>
+            `
+
+            try {
+                await sendEmail({
+                    to: user.email,
+                    subject,
+                    body
+                })
+            } catch (err) {
+                console.log("Email error:", err)
+            }
+        }
+
+        return { message: "Notification sent" }
+    }
+)
+
 // EXPORT
 export const functions = [
     syncUserCreation,
     syncUserUpdation,
     syncUserDeletion,
     sendNewConnectionRequestReminder,
-    deleteStory
+    deleteStory,
+    sendNotificationOfUnseenMessages
 ];
