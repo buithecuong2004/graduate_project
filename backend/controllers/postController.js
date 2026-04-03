@@ -3,7 +3,6 @@ import imagekit from "../configs/imageKit.js";
 import Post from "../models/Post.js";
 import Comment from "../models/Comment.js";
 import User from "../models/User.js";
-import { io } from "../server.js";
 
 export const addPost = async (req, res) => {
     try {
@@ -102,14 +101,7 @@ export const addComment = async (req, res) => {
         post.comments.push(comment._id)
         await post.save()
 
-        // Populate user info before emitting
         const populatedComment = await comment.populate('user')
-
-        // Emit real-time event to all users in the post room
-        io.to(`post-${postId}`).emit('comment-added', {
-            comment: populatedComment,
-            postId
-        })
 
         res.json({ success: true, message: 'Comment added', comment: populatedComment })
     } catch (error) {
@@ -144,19 +136,11 @@ export const deleteComment = async (req, res) => {
             return res.json({ success: false, message: 'You can only delete your own comments' })
         }
 
-        const postId = comment.post
-
         await Comment.findByIdAndDelete(commentId)
 
         const post = await Post.findById(comment.post)
         post.comments = post.comments.filter(c => c.toString() !== commentId)
         await post.save()
-
-        // Emit real-time event
-        io.to(`post-${postId}`).emit('comment-deleted', {
-            commentId,
-            postId
-        })
 
         res.json({ success: true, message: 'Comment deleted' })
     } catch (error) {
@@ -171,8 +155,6 @@ export const likeComment = async (req, res) => {
         const { commentId } = req.body
 
         const comment = await Comment.findById(commentId)
-        const postId = comment.post
-        let liked = false
 
         if (comment.likes_count.includes(userId)) {
             comment.likes_count = comment.likes_count.filter(user => user !== userId)
@@ -181,17 +163,9 @@ export const likeComment = async (req, res) => {
         } else {
             comment.likes_count.push(userId)
             await comment.save()
-            liked = true
             res.json({ success: true, message: 'Comment liked' })
         }
 
-        // Emit real-time event
-        io.to(`post-${postId}`).emit('comment-liked', {
-            commentId,
-            postId,
-            liked,
-            likes_count: comment.likes_count.length
-        })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
