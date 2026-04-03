@@ -1,18 +1,34 @@
 import React, { useEffect, useState } from 'react'
-import { dummyStoriesData } from '../assets/assets'
 import { Plus } from 'lucide-react'
 import moment from 'moment'
 import StoryModal from './StoryModal'
 import StoryViewer from './StoryViewer'
+import { useAuth } from '@clerk/clerk-react'
+import api from '../api/axios'
+import toast from 'react-hot-toast'
 
 const StoriesBar = () => {
+
+    const {getToken} = useAuth()
 
     const [stories, setStories] = useState([])
     const [showModal, setShowModal] = useState(false)
     const [viewStory, setViewStory] = useState(false)
 
     const fetchStories = async () => {
-        setStories(dummyStoriesData)
+        try {
+            const token = await getToken()
+            const {data} = await api.post('/api/story/get', {}, {
+                headers: {Authorization: `Bearer ${token}`}
+            })
+            if(data.success) {
+                setStories(data.stories)
+            }else {
+                toast.error(data.message)
+            }
+        } catch (error) {
+            toast.error(error.message)
+        }
     }
 
     useEffect(()=>{
@@ -40,7 +56,7 @@ const StoriesBar = () => {
                             story.media_type !== 'text' && (
                                 <div className='absolute inset-0 z-1 rounded-lg bg-black overflow-hidden'>
                                     {
-                                        stories.media_type === "image" ?
+                                        story.media_type === "image" ?
                                         <img src={story.media_url} alt="" className='h-full w-full object-cover hover:scale-110 transition duration-500 opacity-70 hover:opacity-80'/>
                                         :
                                         <video src={story.media_url} className='h-full w-full object-cover hover:scale-110 transition duration-500 opacity-70 hover:opacity-80'/>
