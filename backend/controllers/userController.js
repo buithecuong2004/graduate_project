@@ -106,7 +106,7 @@ export const discoverUsers = async (req,res) => {
                 ]
             }
         )
-        const filteredUsers = allUsers.fileter(user=> user._id !== userId)
+        const filteredUsers = allUsers.filter(user=> user._id !== userId)
         return res.json({success: true, users: filteredUsers})
 
     } catch (error) {
@@ -167,7 +167,7 @@ export const sendConnectionRequest = async (req, res) => {
         const {userId} = req.auth()
         const {id} = req.body
 
-        const last24Hours = new Date(Data.now() - 24 * 60 * 60 * 1000)
+        const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000)
         const connectionRequests = await Connection.find({from_user_id: userId, created_at: { $gt: last24Hours }})
         if(connectionRequests.length >= 20) {
             return res.json({success: false, message: 'You have sent more 20 connection requests in the last 24 hours'})
@@ -258,11 +258,10 @@ export const getUserProfiles = async (req, res) =>{
         const profile = await User.findById(profileId)
         if(!profile) {
             return res.json({ success: false, message: "Profile not found" })
-            const posts = await Post.find({user: profileId}).populate('user')
-
-            res.json({success: true, profile, posts})
-
         }
+        const posts = await Post.find({user: profileId}).populate('user')
+        res.json({success: true, profile, posts})
+
     } catch (error) {
         res.json({success: false, message: error.message })
     }
