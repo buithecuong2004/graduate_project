@@ -1,5 +1,5 @@
 import React from 'react'
-import { Route, Routes } from 'react-router-dom'
+import { Route, Routes, useLocation } from 'react-router-dom'
 import Login from './pages/Login'
 import Feed from './pages/Feed'
 import Message from './pages/Message'
@@ -12,31 +12,72 @@ import { useUser, useAuth } from '@clerk/clerk-react'
 import Layout from './pages/Layout'
 import {Toaster} from 'react-hot-toast'
 import { useEffect } from 'react'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import { fetchUser } from './features/user/userSlice'
 import { fetchConnections } from './features/connections/connectionsSlice'
+import { useRef } from 'react'
+import { addMessages } from './features/messages/messagesSlice'
 
 const App = () => {
-  const {user} = useUser()
+  const {user: clerkUser} = useUser()
   const {getToken} = useAuth()
-
+  const {pathname} = useLocation()
+  const pathnameRef = useRef(pathname)
+  const currentUser = useSelector((state)=>state.user.value)
   const dispatch = useDispatch()
 
   useEffect(()=>{
     const fetchData = async () => {
-      if(user) {
+      if(clerkUser) {
         const token = await getToken()
         dispatch(fetchUser(token))
         dispatch(fetchConnections(token))
       }
     }
     fetchData()
-  },[user, getToken, dispatch])
+  },[clerkUser, getToken, dispatch])
+
+  useEffect(()=>{
+    pathnameRef.current = pathname
+  },[pathname])
+
+  useEffect(()=>{
+    if(currentUser?._id){
+      const eventSource = new EventSource(import.meta.env.VITE_BASEURL + '/api/message/' + currentUser._id)
+
+      eventSource.onopen = () => {
+        console.log('EventSource connected for user:', currentUser._id)
+      }
+
+      eventSource.onmessage = (event)=>{
+        try {
+          const message = JSON.parse(event.data)
+          console.log('Received message via SSE:', message)
+          if(pathnameRef.current === ('/messages/'+message.from_user_id._id)){
+            dispatch(addMessages(message))
+          }
+        } catch (error) {
+          console.error('Error parsing SSE message:', error)
+        }
+      }
+
+      eventSource.onerror = (error) => {
+        console.error('EventSource error:', error)
+        eventSource.close()
+      }
+
+      return ()=>{
+        console.log('Closing EventSource')
+        eventSource.close()
+      }
+    }
+  },[currentUser?._id,dispatch])
+
   return (
     <>
     <Toaster/>
       <Routes>
-        <Route path='/' element={ user ? <Layout/> : <Login/>}>
+        <Route path='/' element={ clerkUser ? <Layout/> : <Login/>}>
           <Route index element={<Feed/>}/>
           <Route path='messages' element={<Message/>}/>
           <Route path='messages/:userId' element={<ChatBox/>}/>

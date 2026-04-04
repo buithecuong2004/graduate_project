@@ -41,40 +41,46 @@ export const sendMessage = async (req, res) => {
         let media_url = ''
         let message_type = image ? 'image' : 'text'
 
-        if(message_type === 'image') {
-            const fileBuffer = fs.readFileSync(image.path)
-            const response = await imagekit.upload({
-                file: fileBuffer,
-                fileName: image.originalname
-            })
-            media_url = imagekit.url({
-                path: response.filePath,
-                transformation: [
-                    {quality: 'auto'},
-                    {format: 'webp'},
-                    {width: '1280'}
-                ]
-            })
+        if(message_type === 'image' && image) {
+            try {
+                const fileBuffer = fs.readFileSync(image.path)
+                const response = await imagekit.upload({
+                    file: fileBuffer,
+                    fileName: image.originalname
+                })
+                // Use the URL directly from ImageKit response
+                media_url = response.url || imagekit.url({
+                    path: response.filePath,
+                    transformation: [
+                        {quality: 'auto'},
+                        {format: 'webp'},
+                        {width: '1280'}
+                    ]
+                })
+            } catch (uploadError) {
+                console.error('ImageKit upload error:', uploadError)
+                throw uploadError
+            }
         }
 
         const  message = await Message.create({
             from_user_id: userId,
             to_user_id,
-            text,
+            text: text || '',
             message_type,
             media_url
         })
 
-        res.json({ success: true, message })
-
         const messageWithUserData = await Message.findById(message._id).populate('from_user_id')
+
+        res.json({ success: true, message: messageWithUserData })
 
         if(connections[to_user_id]) {
             connections[to_user_id].write(`data: ${JSON.stringify(messageWithUserData)}\n\n`)
         }
     } catch (error) {
         console.log(error)
-        res.json({success: false, message: error.Message})
+        res.json({success: false, message: error.message})
     }
 }
 
