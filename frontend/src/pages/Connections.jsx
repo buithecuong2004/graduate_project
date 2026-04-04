@@ -1,26 +1,84 @@
-import React, { useState } from 'react'
-import { Users, UserPlus, UserCheck, UserRoundPen, MessageSquare } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Users, UserPlus, UserCheck, UserRoundPen, MessageSquare, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import {
-  dummyConnectionsData as connections,
-  dummyFollowersData as followers,
-  dummyFollowingData as following,
-  dummyPendingConnectionsData as pendingConnections
-} from '../assets/assets'
+
+
+import { useDispatch, useSelector } from 'react-redux'
+import { useAuth } from '@clerk/clerk-react'
+import { fetchConnections } from '../features/connections/connectionsSlice'
+import api from '../api/axios'
+import toast from 'react-hot-toast'
 
 const Connections = () => {
 
   const [currentTab, setCurrentTab] = useState('Followers')
 
   const navigate = useNavigate()
+  const {getToken} = useAuth()
+  const dispatch = useDispatch()
+
+  const {connections, pendingConnections, followers, following} = useSelector((state)=>state.connections)
 
   const dataArray = [
     {label: 'Followers', value: followers, icon: Users},
     {label: 'Following', value: following, icon: UserCheck},
     {label: 'Pending', value: pendingConnections, icon: UserRoundPen},
     {label: 'Connections', value: connections, icon: UserPlus}
-
   ]
+
+  const handleUnFollow = async (userId) => {
+    try {
+      const {data}  = await api.post('/api/user/unfollow', {id: userId}, {
+        headers: {Authorization: `Bearer ${await getToken()}`}
+      })
+      if (data.success) {
+        toast.success(data.message)
+        dispatch(fetchConnections(await getToken()))
+      } else {
+        toast(data.message)
+      }
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
+  const acceptConnection = async (userId) => {
+    try {
+      const {data}  = await api.post('/api/user/accept', {id: userId}, {
+        headers: {Authorization: `Bearer ${await getToken()}`}
+      })
+      if (data.success) {
+        toast.success(data.message)
+        dispatch(fetchConnections(await getToken()))
+      } else {
+        toast(data.message)
+      }
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
+  const removeConnection = async (userId) => {
+    try {
+      const {data}  = await api.post('/api/user/remove-connection', {id: userId}, {
+        headers: {Authorization: `Bearer ${await getToken()}`}
+      })
+      if (data.success) {
+        toast.success(data.message)
+        dispatch(fetchConnections(await getToken()))
+      } else {
+        toast.error(data.message)
+      }
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
+  useEffect(()=>{
+    getToken().then((token)=>{
+      dispatch(fetchConnections(token))
+    })
+  },[])
 
   return (
     <div className='min-h-screen bg-slate-50'>
@@ -58,38 +116,42 @@ const Connections = () => {
 
       <div className='flex flex-wrap gap-6 mt-6'>
         {dataArray.find((item)=>item.label === currentTab).value.map((user)=>(
-          <div key={user._id} className='w-full max-w-88 flex gap-5 p-6 bg-white shadow rounded-md'>
-            <img src={user.profile_picture} alt="" className='rounded-full w-12 h-12 shadow-md mx-auto'/>
+          <div key={user._id} className='flex gap-6 p-6 bg-white shadow-sm rounded-lg border border-gray-100'>
+            <img src={user.profile_picture} alt="" className='rounded-full w-16 h-16 shadow-md flex-shrink-0'/>
             <div className='flex-1'>
-              <p className='font-medium text-slate-700'>{user.full_name}</p>
-              <p className='text-slate-500'>@{user.username}</p>
-              <p className='text-sm text-gray-600'>{user.bio.slice(0,30)}...</p>
-              <div className='flex max-sm:flex-col gap-2 mt-4'>
-                {
-                  <button onClick={()=>navigate(`/profile/${user._id}`)} className='w-full p-2 text-sm rounded bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-95 transition text-white cursor-pointer'>
-                    View Profile
-                  </button>
-                }
+              <p className='font-semibold text-slate-800 text-lg'>{user.full_name}</p>
+              <p className='text-slate-500 text-sm'>@{user.username}</p>
+              <p className='text-sm text-gray-600 mt-2'>{user.bio.slice(0,50)}...</p>
+              <div className='flex flex-wrap gap-2 mt-4'>
+                <button onClick={()=>navigate(`/profile/${user._id}`)} className='px-4 py-2 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 active:scale-95 transition cursor-pointer border border-indigo-300'>
+                  View Profile
+                </button>
                 {
                   currentTab === 'Following' && (
-                  <button className='w-full p-2 text-sm rounded bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-95 transition text-white cursor-pointer'>
-                  Unfollow
+                  <button onClick={()=>handleUnFollow(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 active:scale-95 transition cursor-pointer border border-orange-300'>
+                    Unfollow
                   </button>
                   )
                 }
                 {
                   currentTab === 'Pending' && (
-                  <button className='w-full p-2 text-sm rounded bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-95 transition text-white cursor-pointer'>
-                   Accept
+                  <button onClick={()=>acceptConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-green-100 text-green-700 hover:bg-green-200 active:scale-95 transition cursor-pointer border border-green-300'>
+                    Accept
                   </button>
                   )
                 }
                 {
                   currentTab === 'Connections' && (
-                  <button onClick={()=>navigate(`/messages/${user._id}`)} className='w-full p-2 text-sm rounded bg-slate-100 hover:bg-slate-200 text-slate-800 active:scale-95 transition cursor-pointer flex items-center justify-center gap-1'>
-                   <MessageSquare className='w-4 h-4'/>
-                   Message
-                  </button>
+                    <>
+                      <button onClick={()=>navigate(`/messages/${user._id}`)} className='px-4 py-2 text-sm font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 transition cursor-pointer border border-slate-300 flex items-center gap-2'>
+                        <MessageSquare className='w-4 h-4'/>
+                        Message
+                      </button>
+                      <button onClick={()=>removeConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 active:scale-95 transition cursor-pointer border border-red-300 flex items-center gap-2'>
+                        <X className='w-4 h-4'/>
+                        Disconnect
+                      </button>
+                    </>
                   )
                 }
               </div>
@@ -97,9 +159,8 @@ const Connections = () => {
           </div>
         ))}
       </div>
-
       </div>
-    </div>
+      </div>
   )
 }
 

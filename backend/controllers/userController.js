@@ -96,6 +96,7 @@ export const discoverUsers = async (req,res) => {
         const { userId } = req.auth()
         const { input } = req.body
 
+        const currentUser = await User.findById(userId)
         const allUsers = await User.find(
             {
                 $or : [
@@ -106,7 +107,11 @@ export const discoverUsers = async (req,res) => {
                 ]
             }
         )
-        const filteredUsers = allUsers.filter(user=> user._id !== userId)
+        const filteredUsers = allUsers.filter(user=> user._id != userId).map(user => ({
+            ...user.toObject(),
+            isFollowing: currentUser.following.includes(user._id),
+            isConnected: currentUser.connections.includes(user._id)
+        }))
         return res.json({success: true, users: filteredUsers})
 
     } catch (error) {
@@ -245,6 +250,38 @@ export const acceptConnectionRequest = async (req, res) => {
         await connection.save()
 
         res.json({success: true, message: 'Connection accepted successfully'})
+
+    } catch (error) {
+        console.log(error)
+        return res.json({success: false, message: error.message})
+    }
+}
+
+export const removeConnection = async (req, res) => {
+    try {
+        const {userId} = req.auth()
+        const {id} = req.body
+        
+        const user = await User.findById(userId)
+        user.connections = user.connections.filter(connection=> connection.toString() !== id)
+        await user.save()
+
+        const toUser = await User.findById(id)
+        toUser.connections = toUser.connections.filter(connection=> connection.toString() !== userId)
+        await toUser.save()
+
+        const connection = await Connection.findOne({
+            $or: [
+                {from_user_id: userId, to_user_id: id},
+                {from_user_id: id, to_user_id: userId},
+            ]
+        })
+
+        if(connection) {
+            await Connection.findByIdAndDelete(connection._id)
+        }
+
+        res.json({success: true, message: 'Connection removed successfully'})
 
     } catch (error) {
         console.log(error)
