@@ -4,12 +4,14 @@ import moment from 'moment'
 import StoryModal from './StoryModal'
 import StoryViewer from './StoryViewer'
 import { useAuth } from '@clerk/clerk-react'
+import { useSelector } from 'react-redux'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 
 const StoriesBar = () => {
 
     const {getToken} = useAuth()
+    const currentUser = useSelector((state)=>state.user.value)
 
     const [stories, setStories] = useState([])
     const [showModal, setShowModal] = useState(false)
@@ -24,6 +26,24 @@ const StoriesBar = () => {
             if(data.success) {
                 setStories(data.stories)
             }else {
+                toast.error(data.message)
+            }
+        } catch (error) {
+            toast.error(error.message)
+        }
+    }
+
+    const deleteStory = async (storyId) => {
+        try {
+            const token = await getToken()
+            const {data} = await api.post('/api/story/delete', {storyId}, {
+                headers: {Authorization: `Bearer ${token}`}
+            })
+            if(data.success) {
+                toast.success('Story deleted successfully')
+                setViewStory(null)
+                fetchStories()
+            } else {
                 toast.error(data.message)
             }
         } catch (error) {
@@ -69,7 +89,7 @@ const StoriesBar = () => {
             }
         </div>
         {showModal && <StoryModal setShowModal={setShowModal} fetchStories={fetchStories}/>}
-        {viewStory && <StoryViewer viewStory={viewStory} setViewStory={setViewStory}/>}
+        {viewStory && <StoryViewer viewStory={viewStory} setViewStory={setViewStory} currentUser={currentUser} onDeleteStory={deleteStory}/>}
 
     </div>
   )

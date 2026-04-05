@@ -34,13 +34,17 @@ const Feed = () => {
     fetchFeeds()
   }, [])
 
+  const handlePostDeleted = (postId) => {
+    setFeeds(feeds.filter(post => post._id !== postId))
+  }
+
   return !loading ? (
     <div className='h-full overflow-y-scroll no-scrollbar py-10 xl:pr-5 flex items-start justify-center xl:gap-8'>
        <div >
         <StoriesBar/>
         <div className='p-4 space-y-6'>
           {feeds.map((post)=>(
-            <PostCard key={post._id} post={post}/>
+            <PostCard key={post._id} post={post} onPostDeleted={handlePostDeleted}/>
           ))}
         </div>
        </div>

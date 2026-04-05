@@ -35,40 +35,78 @@ export const sseController = (req, res) => {
 export const sendMessage = async (req, res) => {
     try {
         const { userId } = req.auth()
-        const { to_user_id, text } = req.body
-        const image = req.file
+        const { to_user_id } = req.body
+        let { text } = req.body
+        const images = req.files
 
-        let media_url = ''
-        let message_type = image ? 'image' : 'text'
+        // Trim text
+        text = (text || '').trim()
 
-        if(message_type === 'image' && image) {
-            try {
-                const fileBuffer = fs.readFileSync(image.path)
-                const response = await imagekit.upload({
-                    file: fileBuffer,
-                    fileName: image.originalname
-                })
-                // Use the URL directly from ImageKit response
-                media_url = response.url || imagekit.url({
-                    path: response.filePath,
-                    transformation: [
-                        {quality: 'auto'},
-                        {format: 'webp'},
-                        {width: '1280'}
-                    ]
-                })
-            } catch (uploadError) {
-                console.error('ImageKit upload error:', uploadError)
-                throw uploadError
-            }
+        // Validate inputs
+        if(!text && (!images || images.length === 0)) {
+            return res.json({ success: false, message: 'Message cannot be empty' })
         }
 
-        const  message = await Message.create({
+        let media_urls = []
+        let message_type = 'text'
+
+        try {
+            if(images && images.length > 0) {
+                if(images.length > 5) {
+                    return res.json({ success: false, message: 'Maximum 5 images per message' })
+                }
+
+                message_type = 'images'
+
+                media_urls = await Promise.all(
+                    images.map(async (image) => {
+                        try {
+                            const fileBuffer = fs.readFileSync(image.path)
+                            const response = await imagekit.upload({
+                                file: fileBuffer,
+                                fileName: image.originalname,
+                                folder: 'messages'
+                            })
+                            return response.url || imagekit.url({
+                                path: response.filePath,
+                                transformation: [
+                                    {quality: 'auto'},
+                                    {format: 'webp'},
+                                    {width: '800'}
+                                ]
+                            })
+                        } catch (uploadError) {
+                            console.error('ImageKit upload error:', uploadError)
+                            throw uploadError
+                        }
+                    })
+                )
+
+                // Cleanup uploaded files
+                images.forEach(img => {
+                    fs.unlink(img.path, (err) => {
+                        if(err) console.log('File cleanup error:', err)
+                    })
+                })
+            }
+        } catch(uploadError) {
+            // Cleanup all files on error
+            if(images && images.length > 0) {
+                images.forEach(img => {
+                    fs.unlink(img.path, (err) => {
+                        if(err) console.log('File cleanup error:', err)
+                    })
+                })
+            }
+            throw uploadError
+        }
+
+        const message = await Message.create({
             from_user_id: userId,
             to_user_id,
             text: text || '',
             message_type,
-            media_url
+            media_urls
         })
 
         const messageWithUserData = await Message.findById(message._id).populate('from_user_id')
@@ -89,15 +127,27 @@ export const getChatMessages = async (req, res) => {
         const { userId } = req.auth()
         const { to_user_id } = req.body
 
-        const messages = await Message.find({
+        let messages = await Message.find({
             $or: [
                 {from_user_id: userId, to_user_id},
                 {from_user_id: to_user_id, to_user_id: userId}
             ]
-        }).sort({createdAt: -1 })
+        }).populate('from_user_id').sort({createdAt: 1 })
+
+        // Convert old media_url to media_urls array for compatibility
+        messages = messages.map(msg => {
+            const msgObj = msg.toObject ? msg.toObject() : msg
+            if(msgObj.media_url && (!msgObj.media_urls || msgObj.media_urls.length === 0)) {
+                msgObj.media_urls = [msgObj.media_url]
+                msgObj.message_type = 'images'
+            }
+            return msgObj
+        })
+
         await Message.updateMany({from_user_id: to_user_id, to_user_id: userId}, {seen: true})
         res.json({ success: true, messages })
     } catch (error) {
+        console.log(error)
         res.json({ success: false, message: error.message })
     }
 }

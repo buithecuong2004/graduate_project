@@ -62,10 +62,14 @@ const StoryModal = ({setShowModal, fetchStories}) => {
         }
 
         let formData = new FormData()
-        formData.append('content', text)
+        formData.append('content', text || '')
         formData.append('media_type', media_type)
-        formData.append('media', media)
         formData.append('background_color', background)
+
+        // Only append media if it exists
+        if(media) {
+            formData.append('media', media)
+        }
 
         const token = await getToken()
         try {

@@ -1,9 +1,14 @@
-import { BadgeCheck, X } from 'lucide-react'
+import { BadgeCheck, X, Trash2 } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
+import ConfirmDialog from './ConfirmDialog'
 
-const StoryViewer = ({viewStory, setViewStory}) => {
+const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
 
     const [progress, setProgress] = useState(0)
+    const [isDeleting, setIsDeleting] = useState(false)
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const isOwner = viewStory?.user?._id === currentUser?._id
+
     useEffect(()=>{
         let timer, progressInterval;
 
@@ -33,6 +38,21 @@ const StoryViewer = ({viewStory, setViewStory}) => {
 
     const handleClose = () => {
         setViewStory(null)
+    }
+
+    const handleDelete = async () => {
+        try {
+            setIsDeleting(true)
+            await onDeleteStory(viewStory._id)
+        } catch (error) {
+            console.log(error)
+        } finally {
+            setIsDeleting(false)
+        }
+    }
+
+    const handleDeleteClick = () => {
+        setShowDeleteConfirm(true)
     }
 
     if(!viewStory) return null
@@ -73,13 +93,35 @@ const StoryViewer = ({viewStory, setViewStory}) => {
                 <BadgeCheck size={18}/>
             </div>
         </div>
-        <button onClick={handleClose} className='absolute top-4 right-4 text-white text-3xl font-bold focus:outline-none'>
-            <X className='w-8 h-8 hover:scale-110 transition cursor-pointer'/>
-        </button>
+        <div className='absolute top-4 right-4 flex items-center gap-2'>
+            {isOwner && (
+                <button
+                    onClick={handleDeleteClick}
+                    disabled={isDeleting}
+                    className='text-white hover:text-red-500 transition disabled:opacity-50'
+                    title='Delete story'
+                >
+                    <Trash2 className='w-6 h-6'/>
+                </button>
+            )}
+            <button onClick={handleClose} className='text-white text-3xl font-bold focus:outline-none'>
+                <X className='w-8 h-8 hover:scale-110 transition cursor-pointer'/>
+            </button>
+        </div>
 
         <div className='max-w-[90vw] max-h-[90vh] flex items-center justify-center'>
             {renderContent()}
         </div>
+
+        <ConfirmDialog
+            isOpen={showDeleteConfirm}
+            title="Delete Story"
+            message="Are you sure you want to delete this story? This action cannot be undone."
+            isDangerous={true}
+            isLoading={isDeleting}
+            onConfirm={handleDelete}
+            onCancel={() => setShowDeleteConfirm(false)}
+        />
     </div>
   )
 }

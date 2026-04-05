@@ -47,6 +47,10 @@ const Profile = () => {
     }
   },[profileId, currentUser])
 
+  const handlePostDeleted = (postId) => {
+    setPosts(posts.filter(post => post._id !== postId))
+  }
+
   return user ? (
     <div className='relative h-full overflow-y-scroll bg-gray-50 p-6'>
       <div className='max-w-3xl mx-auto'>
@@ -54,7 +58,7 @@ const Profile = () => {
           <div className='h-40 md:h-56 bg-linear-to-r from-indigo-200 via-purple-200 to-pink-200'>
             {user.cover_photo && <img src={user.cover_photo} alt='' className='w-full h-full object-cover'/>}
           </div>
-          
+
           <UserProfileInfo user={user} posts={posts} profileId={profileId} setShowEdit={setShowEdit}/>
         </div>
 
@@ -70,7 +74,7 @@ const Profile = () => {
 
           {activeTab === "posts" && (
             <div className='mt-6 flex flex-col items-center gap-6'>
-              {posts.map((post)=><PostCard key={post._id} post={post}/>)}
+              {posts.map((post)=><PostCard key={post._id} post={post} onPostDeleted={handlePostDeleted}/>)}
             </div>
           )}
           {activeTab === "media" && (
