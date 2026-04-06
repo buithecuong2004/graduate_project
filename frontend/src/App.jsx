@@ -8,6 +8,7 @@ import Connections from './pages/Connections'
 import Discover from './pages/Discover'
 import Profile from './pages/Profile'
 import CreatePost from './pages/CreatePost'
+import Notification from './components/Notification'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import Layout from './pages/Layout'
 import {Toaster} from 'react-hot-toast'
@@ -17,6 +18,8 @@ import { fetchUser } from './features/user/userSlice'
 import { fetchConnections } from './features/connections/connectionsSlice'
 import { useRef } from 'react'
 import { addMessages } from './features/messages/messagesSlice'
+import toast from 'react-hot-toast'
+
 
 const App = () => {
   const {user: clerkUser} = useUser()
@@ -55,6 +58,10 @@ const App = () => {
           console.log('Received message via SSE:', message)
           if(pathnameRef.current === ('/messages/'+message.from_user_id._id)){
             dispatch(addMessages(message))
+          } else {
+            toast.custom((t)=>(
+              <Notification t={t} message={message}/>
+            ), {position: "bottom-right"})
           }
         } catch (error) {
           console.error('Error parsing SSE message:', error)

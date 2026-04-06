@@ -15,7 +15,7 @@ const Message = () => {
           <p className='text-slate-600'>Talk to your friends</p>
         </div>
 
-        <div className='flex flex-col gap-3'>
+        <div className='flex gap-3'>
           {connections.map((user)=>(
             <div key={user._id} className='max-w-xl flex gap-5 p-6 bg-white shadow rounded-md'>
               <img src={user.profile_picture} alt="" className='rounded-full size-12 mx-auto'/>
