@@ -49,27 +49,38 @@ const App = () => {
       const eventSource = new EventSource(import.meta.env.VITE_BASEURL + '/api/message/' + currentUser._id)
 
       eventSource.onopen = () => {
-        console.log('EventSource connected for user:', currentUser._id)
+        console.log('✅ EventSource connected for user:', currentUser._id)
       }
 
       eventSource.onmessage = (event)=>{
         try {
+          console.log('📨 Raw event data:', event.data)
           const message = JSON.parse(event.data)
-          console.log('Received message via SSE:', message)
-          if(pathnameRef.current === ('/messages/'+message.from_user_id._id)){
+          console.log('✅ Parsed message:', message)
+          console.log('📍 Current pathname:', pathnameRef.current)
+          console.log('💬 Message from_user_id._id:', message.from_user_id?._id)
+          
+          if(pathnameRef.current === ('/messages/'+message.from_user_id?._id)){
+            console.log('📝 Adding to current chat')
             dispatch(addMessages(message))
           } else {
-            toast.custom((t)=>(
+            console.log('🔔 Showing notification toast')
+            const toastId = toast.custom((t)=>(
               <Notification t={t} message={message}/>
             ), {position: "bottom-right"})
+            console.log('✅ Toast created with id:', toastId)
           }
         } catch (error) {
-          console.error('Error parsing SSE message:', error)
+          console.error('❌ Error parsing SSE message:', error, 'Event data:', event.data)
+          toast.error('Failed to process message')
         }
       }
 
       eventSource.onerror = (error) => {
-        console.error('EventSource error:', error)
+        console.error('❌ EventSource error:', error)
+        if(eventSource.readyState === EventSource.CLOSED) {
+          console.log('EventSource closed, reconnecting...')
+        }
         eventSource.close()
       }
 
