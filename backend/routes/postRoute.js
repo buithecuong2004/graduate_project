@@ -1,5 +1,5 @@
 import express from 'express';
-import { addPost, getFeedPosts, likePost, addComment, getComments, deleteComment, likeComment, deletePost } from '../controllers/postController.js';
+import { addPost, getFeedPosts, likePost, addComment, getComments, deleteComment, likeComment, deletePost, addReply, getReplies, deleteReply } from '../controllers/postController.js';
 import { upload } from '../configs/multer.js';
 import { protect } from '../middlewares/auth.js';
 
@@ -16,5 +16,8 @@ postRouter.post('/comment/add', protect, addComment)
 postRouter.get('/comment/:postId', protect, getComments)
 postRouter.post('/comment/delete', protect, deleteComment)
 postRouter.post('/comment/like', protect, likeComment)
+postRouter.post('/reply/add', protect, addReply)
+postRouter.get('/reply/:commentId', protect, getReplies)
+postRouter.post('/reply/delete', protect, deleteReply)
 
 export default postRouter

@@ -2,11 +2,13 @@ import { BadgeCheck, Heart, MessageCircle, Share2, Trash2 } from 'lucide-react'
 import moment from 'moment'
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useSelector } from 'react-redux'
+import { useSelector, useDispatch } from 'react-redux'
+import { updateCommentCount } from '../features/posts/postSlice'
 import { useAuth } from '@clerk/clerk-react'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 import ConfirmDialog from './ConfirmDialog'
+import CommentModal from './CommentModal'
 
 const PostCard = ({post, onPostDeleted}) => {
 
@@ -14,7 +16,10 @@ const PostCard = ({post, onPostDeleted}) => {
     const [likes, setLikes] = useState(post.likes_count)
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [showCommentModal, setShowCommentModal] = useState(false)
+    const commentCount = post.total_comments_count ?? post.comments?.length ?? 0
     const currentUser = useSelector((state)=>state.user.value)
+    const dispatch = useDispatch()
 
     const { getToken } = useAuth()
     const navigate = useNavigate()
@@ -113,9 +118,9 @@ const PostCard = ({post, onPostDeleted}) => {
                 <Heart className={`w-4 h-4 cursor-pointer ${likes.includes(currentUser._id) && 'text-red-500 fill-red-500'}`} onClick={handleLike}/>
                 <span>{likes.length}</span>
             </div>
-            <div className='flex items-center gap-1'>
+            <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowCommentModal(true)}>
                 <MessageCircle className='w-4 h-4'/>
-                <span>{12}</span>
+                <span>{commentCount}</span>
             </div>
             <div className='flex items-center gap-1'>
                 <Share2 className='w-4 h-4'/>
@@ -131,6 +136,16 @@ const PostCard = ({post, onPostDeleted}) => {
             isLoading={isDeleting}
             onConfirm={handleDelete}
             onCancel={() => setShowDeleteConfirm(false)}
+        />
+
+        <CommentModal
+            isOpen={showCommentModal}
+            onClose={() => setShowCommentModal(false)}
+            post={post}
+            onCommentAdded={() => dispatch(updateCommentCount({ postId: post._id, count: commentCount + 1 }))}
+            onReplyAdded={() => dispatch(updateCommentCount({ postId: post._id, count: commentCount + 1 }))}
+            onTotalCount={(total) => dispatch(updateCommentCount({ postId: post._id, count: total }))}
+            onCountChange={(delta) => dispatch(updateCommentCount({ postId: post._id, count: commentCount + delta }))}
         />
     </div>
   )

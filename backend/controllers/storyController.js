@@ -4,6 +4,7 @@ import Story from "../models/Story.js"
 import User from "../models/User.js"
 import { inngest } from "../inngest/index.js"
 import axios from "axios"
+import { connections } from "./messageController.js"
 
 // Helper to delete file from ImageKit using file path
 const deleteImageKitFile = async (url) => {
@@ -85,6 +86,28 @@ export const addUserStory = async (req, res) => {
         })
 
         res.json({success: true, message: 'Story created successfully'})
+
+        // Broadcast new story to all connections
+        const storyUser = await User.findById(userId)
+        const followersFollowing = [...(storyUser.followers || []), ...(storyUser.following || []), ...(storyUser.connections || [])]
+        
+        const storyWithUser = {
+            ...story.toObject(),
+            user: storyUser
+        }
+
+        const newStoryEvent = {
+            type: 'new-story',
+            story: storyWithUser,
+            message: `${storyUser.full_name} posted a new story!`
+        }
+
+        followersFollowing.forEach(userId => {
+            if(connections[userId]) {
+                console.log('📖 Broadcasting new story to:', userId)
+                connections[userId].write(`data: ${JSON.stringify(newStoryEvent)}\n\n`)
+            }
+        })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })

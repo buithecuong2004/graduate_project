@@ -55,9 +55,62 @@ const App = () => {
       eventSource.onmessage = (event)=>{
         try {
           console.log('📨 Raw event data:', event.data)
-          const message = JSON.parse(event.data)
-          console.log('✅ Parsed message:', message)
+          const data = JSON.parse(event.data)
+          console.log('✅ Parsed data:', data)
           console.log('📍 Current pathname:', pathnameRef.current)
+          
+          // Handle new post event
+          if(data.type === 'new-post') {
+            console.log('📢 New post event received')
+            toast.success(data.message, {
+              position: 'bottom-right',
+              icon: '📝'
+            })
+            return
+          }
+
+          // Handle new story event
+          if(data.type === 'new-story') {
+            console.log('📖 New story event received')
+            toast.success(data.message, {
+              position: 'bottom-right',
+              icon: '📖'
+            })
+            return
+          }
+
+          // Handle like event
+          if(data.type === 'new-like') {
+            console.log('👍 Like event received')
+            toast.success(data.message, {
+              position: 'bottom-right',
+              icon: '👍'
+            })
+            return
+          }
+
+          // Handle comment events
+          if(data.type === 'new-comment') {
+            console.log('📝 New comment event received for post:', data.postId)
+            toast.success(`${data.comment.user?.full_name} commented on your post!`, {
+              position: 'bottom-right',
+              icon: '💬'
+            })
+            return
+          }
+
+          // Handle reply events
+          if(data.type === 'new-reply') {
+            console.log('📮 New reply event received')
+            toast.success(`${data.reply.user?.full_name} replied to your comment!`, {
+              position: 'bottom-right',
+              icon: '💬'
+            })
+            return
+          }
+
+          // Handle message events (original logic)
+          const message = data
           console.log('💬 Message from_user_id._id:', message.from_user_id?._id)
           
           if(pathnameRef.current === ('/messages/'+message.from_user_id?._id)){

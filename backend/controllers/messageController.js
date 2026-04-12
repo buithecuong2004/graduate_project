@@ -4,7 +4,7 @@ import Message from "../models/Message.js";
 import User from "../models/User.js";
 
 // Create an empty object to store event connection
-const connections = {};
+export const connections = {};
 
 //Controller function for the SSE endpoint
 export const sseController = (req, res) => {

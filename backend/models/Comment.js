@@ -5,6 +5,8 @@ const commentSchema = new mongoose.Schema({
     user: {type: String, ref: 'User', required: true},
     content: {type: String, required: true},
     likes_count: [{type: String, ref: 'User'}],
+    parent_comment_id: {type: String, ref: 'Comment'}, // For nested replies
+    replies: [{type: String, ref: 'Comment'}], // Array of reply IDs
 }, {timestamps: true, minimize: false})
 
 const Comment = mongoose.model('Comment', commentSchema)

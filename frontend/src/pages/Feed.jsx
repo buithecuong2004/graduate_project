@@ -1,49 +1,37 @@
-import React, { useEffect, useState } from 'react'
-import { assets, dummyPostsData } from '../assets/assets'
+import React, { useEffect } from 'react'
+import { assets } from '../assets/assets'
 import Loading from '../components/Loading'
 import StoriesBar from '../components/StoriesBar'
 import PostCard from '../components/PostCard'
 import RecentMessages from '../components/RecentMessages'
 import { useAuth } from '@clerk/clerk-react'
-import api from '../api/axios'
-import toast from 'react-hot-toast'
+import { useDispatch, useSelector } from 'react-redux'
+import { fetchPosts, deletePost } from '../features/posts/postSlice'
 
 const Feed = () => {
 
-  const [feeds, setFeeds] = useState([])
-  const [loading, setLoading] = useState(true)
-  const {getToken} = useAuth()
+  const dispatch = useDispatch()
+  const { posts, loading } = useSelector((state) => state.posts)
+  const { getToken } = useAuth()
 
-  const fetchFeeds = async() => {
-    try {
-      setLoading(true)
-      const {data} = await api.get('/api/post/feed', {headers: {Authorization: `Bearer ${await getToken()}`}})
-
-      if (data.success) {
-        setFeeds(data.posts)
-      } else {
-        toast.error(data.message)
-      }
-    } catch (error) {
-        toast.error(error.message)
+  useEffect(() => {
+    const load = async () => {
+      const token = await getToken()
+      dispatch(fetchPosts(token))
     }
-    setLoading(false)
-  }
-
-  useEffect(()=>{
-    fetchFeeds()
+    load()
   }, [])
 
   const handlePostDeleted = (postId) => {
-    setFeeds(feeds.filter(post => post._id !== postId))
+    dispatch(deletePost(postId))
   }
 
   return !loading ? (
     <div className='h-full overflow-y-scroll no-scrollbar py-10 xl:pr-5 flex items-start justify-center xl:gap-8'>
-       <div >
+       <div>
         <StoriesBar/>
         <div className='p-4 space-y-6'>
-          {feeds.map((post)=>(
+          {posts.map((post) => (
             <PostCard key={post._id} post={post} onPostDeleted={handlePostDeleted}/>
           ))}
         </div>
