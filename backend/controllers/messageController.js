@@ -36,7 +36,7 @@ export const sseController = (req, res) => {
 export const sendMessage = async (req, res) => {
     try {
         const { userId } = req.auth()
-        const { to_user_id } = req.body
+        const { to_user_id, shared_post_id } = req.body
         let { text } = req.body
         
         // Get images and videos from req.files (multer with fields returns an object)
@@ -148,7 +148,8 @@ export const sendMessage = async (req, res) => {
             to_user_id,
             text: text || '',
             message_type,
-            media_urls
+            media_urls,
+            shared_post_id: shared_post_id || null
         })
 
         // Manually fetch user data since we're using String IDs, not ObjectId

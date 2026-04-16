@@ -6,25 +6,14 @@ import { inngest } from "../inngest/index.js"
 import axios from "axios"
 import { connections } from "./messageController.js"
 
-// Helper to delete file from ImageKit using file path
-const deleteImageKitFile = async (url) => {
+// Helper to delete file from ImageKit using file ID
+const deleteImageKitFile = async (fileId) => {
     try {
-        if(!url) return true
+        if(!fileId) return true
 
-        // Extract file path from URL
-        const urlEndpoint = process.env.IMAGEKIT_URL_ENDPOINT
-        const startIndex = url.indexOf(urlEndpoint) + urlEndpoint.length
-        const filePath = url.substring(startIndex)
-
-        if(!filePath) return true
-
-        const response = await axios.delete(`https://api.imagekit.io/v1/files`, {
-            params: { filePath },
-            auth: {
-                username: process.env.IMAGEKIT_PRIVATE_KEY
-            }
-        })
-        return response.status === 204 || response.data?.success
+        // Use ImageKit SDK to delete file by ID
+        await imagekit.deleteFile(fileId)
+        return true
     } catch (error) {
         console.log('ImageKit delete error:', error.message)
         return false
@@ -48,6 +37,7 @@ export const addUserStory = async (req, res) => {
         }
 
         // Process media if it exists
+        let media_id = '';
         if(media && (media_type === 'image' || media_type === 'video')) {
             try {
                 const fileBuffer = fs.readFileSync(media.path)
@@ -56,6 +46,7 @@ export const addUserStory = async (req, res) => {
                     fileName: media.originalname
                 })
                 media_url = response.url || ''
+                media_id = response.fileId || ''
 
                 // Cleanup file
                 fs.unlink(media.path, (err) => {
@@ -76,6 +67,7 @@ export const addUserStory = async (req, res) => {
             user: userId,
             content: content || '',
             media_url,
+            media_id,
             media_type,
             background_color
         })
@@ -148,11 +140,8 @@ export const deleteStory = async (req, res) => {
         }
 
         // Delete media file from ImageKit if it exists
-        if(story.media_url && story.media_url.length > 0) {
-            const mediaUrl = Array.isArray(story.media_url) ? story.media_url[0] : story.media_url
-            if(mediaUrl) {
-                await deleteImageKitFile(mediaUrl)
-            }
+        if(story.media_id) {
+            await deleteImageKitFile(story.media_id)
         }
 
         // Delete the story

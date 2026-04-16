@@ -6,25 +6,14 @@ import User from "../models/User.js";
 import axios from "axios";
 import { connections } from "./messageController.js";
 
-// Helper to delete file from ImageKit using file path
-const deleteImageKitFile = async (url) => {
+// Helper to delete file from ImageKit using file ID
+const deleteImageKitFile = async (fileId) => {
     try {
-        if(!url) return true
+        if(!fileId) return true
 
-        // Extract file path from URL: https://ik.imagekit.io/xxxx/path/to/file -> /path/to/file
-        const urlEndpoint = process.env.IMAGEKIT_URL_ENDPOINT
-        const startIndex = url.indexOf(urlEndpoint) + urlEndpoint.length
-        const filePath = url.substring(startIndex)
-
-        if(!filePath) return true
-
-        const response = await axios.delete(`https://api.imagekit.io/v1/files`, {
-            params: { filePath },
-            auth: {
-                username: process.env.IMAGEKIT_PRIVATE_KEY
-            }
-        })
-        return response.status === 204 || response.data?.success
+        // Use ImageKit SDK to delete file by ID
+        await imagekit.deleteFile(fileId)
+        return true
     } catch (error) {
         console.log('ImageKit delete error:', error.message)
         return false
@@ -34,7 +23,7 @@ const deleteImageKitFile = async (url) => {
 export const addPost = async (req, res) => {
     try {
         const { userId } = req.auth();
-        let { content, post_type } = req.body;
+        let { content, post_type, shared_from } = req.body;
         const files = req.files || {};
 
         const images = files.images || [];
@@ -53,7 +42,9 @@ export const addPost = async (req, res) => {
         }
 
         let image_urls = [];
+        let image_ids = [];
         let video_url = '';
+        let video_id = '';
 
         try {
             // Process images (max 4)
@@ -62,7 +53,7 @@ export const addPost = async (req, res) => {
                     return res.json({ success: false, message: 'Maximum 4 images allowed per post' })
                 }
 
-                image_urls = await Promise.all(
+                const uploadedImages = await Promise.all(
                     images.map(async (image) => {
                         const fileBuffer = fs.readFileSync(image.path)
                         const response = await imagekit.upload({
@@ -71,16 +62,22 @@ export const addPost = async (req, res) => {
                             folder: "posts",
                         })
 
-                        return response.url || imagekit.url({
-                            path: response.filePath,
-                            transformation: [
-                                {quality: 'auto'},
-                                {format: 'webp'},
-                                {width: '1280'}
-                            ]
-                        })
+                        return {
+                            url: response.url || imagekit.url({
+                                path: response.filePath,
+                                transformation: [
+                                    {quality: 'auto'},
+                                    {format: 'webp'},
+                                    {width: '1280'}
+                                ]
+                            }),
+                            id: response.fileId
+                        }
                     })
                 )
+
+                image_urls = uploadedImages.map(img => img.url)
+                image_ids = uploadedImages.map(img => img.id)
 
                 // Cleanup uploaded files
                 images.forEach(img => {
@@ -109,6 +106,7 @@ export const addPost = async (req, res) => {
                 video_url = response.url || imagekit.url({
                     path: response.filePath
                 })
+                video_id = response.fileId
 
                 // Cleanup uploaded video
                 fs.unlink(video.path, (err) => {
@@ -131,18 +129,22 @@ export const addPost = async (req, res) => {
             user: userId,
             content,
             image_urls,
+            image_ids,
             video_url,
-            post_type
+            video_id,
+            post_type,
+            shared_from: shared_from || null
         })
 
-        // Fetch post with user data
-        const postUser = await User.findById(userId)
-        const postWithUser = {
-            ...newPost.toObject(),
-            user: postUser
-        }
+        // Fetch post with user data and shared_from details
+        const populatedPost = await Post.findById(newPost._id)
+            .populate('user')
+            .populate({
+                path: 'shared_from',
+                populate: { path: 'user' }
+            })
 
-        res.json({ success: true, message: 'Post created successfully'})
+        res.json({ success: true, message: 'Post created successfully', post: populatedPost})
 
         // Broadcast new post to all connections (followers/connected users)
         const currentUser = await User.findById(userId)
@@ -169,10 +171,25 @@ export const addPost = async (req, res) => {
 export const getFeedPosts = async (req, res) => {
     try {
         const { userId } = req.auth()
+        const { page = 1, limit = 10 } = req.query
+        const skip = (page - 1) * limit
+
         const user = await User.findById(userId)
 
         const userIds = [userId, ...user.connections, ...user.following]
-        const posts = await Post.find({user: {$in: userIds}}).populate('user').sort({createdAt: -1})
+        
+        // Get total count for pagination
+        const totalPosts = await Post.countDocuments({user: {$in: userIds}})
+
+        const posts = await Post.find({user: {$in: userIds}})
+            .populate('user')
+            .populate({
+                path: 'shared_from',
+                populate: { path: 'user' }
+            })
+            .sort({createdAt: -1})
+            .skip(skip)
+            .limit(parseInt(limit))
 
         // Dếm tổng comment (top-level + replies) vì replies cũng có field post: postId
         const postsWithCount = await Promise.all(posts.map(async (post) => {
@@ -180,7 +197,32 @@ export const getFeedPosts = async (req, res) => {
             return { ...post.toObject(), total_comments_count: totalComments }
         }))
 
-        res.json({ success: true, posts: postsWithCount })
+        const hasMore = skip + parseInt(limit) < totalPosts
+
+        res.json({ success: true, posts: postsWithCount, hasMore, page: parseInt(page) })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+export const getPostById = async (req, res) => {
+    try {
+        const { postId } = req.params
+        
+        const post = await Post.findById(postId).populate('user').populate({
+            path: 'shared_from',
+            populate: { path: 'user' }
+        })
+        
+        if (!post) {
+            return res.json({ success: false, message: 'Post not found' })
+        }
+
+        const totalComments = await Comment.countDocuments({ post: postId })
+        const postWithCount = { ...post.toObject(), total_comments_count: totalComments }
+
+        res.json({ success: true, post: postWithCount })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -270,13 +312,23 @@ export const addComment = async (req, res) => {
 export const getComments = async (req, res) => {
     try {
         const { postId } = req.params
+        const { page = 1, limit = 10 } = req.query
+        const skip = (page - 1) * limit
 
-        // Only fetch top-level comments (not replies)
+        // Get total count of top-level comments
+        const totalComments = await Comment.countDocuments({
+            post: postId,
+            parent_comment_id: { $in: [null, undefined] }
+        })
+
+        // Only fetch top-level comments (not replies) with pagination
         let comments = await Comment.find({
             post: postId,
             parent_comment_id: { $in: [null, undefined] }
         })
             .sort({createdAt: -1})
+            .skip(skip)
+            .limit(parseInt(limit))
 
         // Manually fetch user data since we're using String IDs, not ObjectId
         comments = await Promise.all(
@@ -288,7 +340,9 @@ export const getComments = async (req, res) => {
             })
         )
 
-        res.json({ success: true, comments })
+        const hasMore = skip + parseInt(limit) < totalComments
+
+        res.json({ success: true, comments, hasMore, page: parseInt(page) })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -361,14 +415,14 @@ export const deletePost = async (req, res) => {
         }
 
         // Delete files from ImageKit
-        if(post.image_urls && post.image_urls.length > 0) {
-            for(let url of post.image_urls) {
-                await deleteImageKitFile(url)
+        if(post.image_ids && post.image_ids.length > 0) {
+            for(let fileId of post.image_ids) {
+                await deleteImageKitFile(fileId)
             }
         }
 
-        if(post.video_url) {
-            await deleteImageKitFile(post.video_url)
+        if(post.video_id) {
+            await deleteImageKitFile(post.video_id)
         }
 
         // Delete all comments associated with the post
@@ -470,6 +524,35 @@ export const getReplies = async (req, res) => {
         )
 
         res.json({ success: true, replies })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// Share post
+export const sharePost = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const { postId } = req.body
+
+        const post = await Post.findById(postId)
+        if (!post.shares_count) {
+            post.shares_count = []
+        }
+
+        const isSharing = !post.shares_count.includes(userId)
+
+        if(isSharing) {
+            post.shares_count.push(userId)
+            await post.save()
+            res.json({ success: true, message: 'Post shared', shares_count: post.shares_count })
+        } else {
+            post.shares_count = post.shares_count.filter(user => user !== userId)
+            await post.save()
+            res.json({ success: true, message: 'Share removed', shares_count: post.shares_count })
+        }
+
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })

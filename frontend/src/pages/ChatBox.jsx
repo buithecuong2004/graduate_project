@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { ImageIcon, SendHorizonal, X, Video } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import api from '../api/axios'
 import { addMessages, fetchMessages, resetMessages } from '../features/messages/messagesSlice'
@@ -15,6 +15,7 @@ const ChatBox = () => {
   const currentUser = useSelector((state)=>state.user.value)
   const { userId } = useParams()
   const { getToken } = useAuth()
+  const navigate = useNavigate()
   const dispatch = useDispatch()
 
   const [text, setText] = useState('')
@@ -26,6 +27,52 @@ const ChatBox = () => {
   const messagesContainerRef = useRef(null)
   const shouldAutoScrollRef = useRef(true)
 
+  // Render message text with clickable links
+  const renderMessageText = (text) => {
+    if (!text) return null
+    
+    // Match URLs like /post/123abc or http://...
+    const urlPattern = /(\/post\/[a-zA-Z0-9]{0,}|https?:\/\/[^\s]+)/g
+    const parts = text.split(urlPattern)
+    
+    return (
+      <p className='break-words'>
+        {parts.map((part, idx) => {
+          if (!part) return null
+          
+          // Check if it's a URL
+          if (part.match(urlPattern)) {
+            // Extract just the /post/id part if it's a full URL with /post/ in it
+            const postMatch = part.match(/\/post\/[a-zA-Z0-9]+/)
+            const postId = postMatch ? postMatch[0].replace('/post/', '') : null
+            
+            return postId ? (
+              <a
+                key={idx}
+                onClick={() => navigate(`/post/${postId}`)}
+                className='text-blue-300 underline cursor-pointer hover:text-blue-100'
+                title={`View post ${postId}`}
+              >
+                {part}
+              </a>
+            ) : (
+              <a
+                key={idx}
+                href={part}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='text-blue-300 underline cursor-pointer hover:text-blue-100'
+              >
+                {part}
+              </a>
+            )
+          }
+          
+          return <span key={idx}>{part}</span>
+        })}
+      </p>
+    )
+  }
   // Check if we should show timestamp for this message
   const shouldShowTimestamp = (currentMsg, previousMsg) => {
     // Always show for first message
@@ -266,9 +313,9 @@ const ChatBox = () => {
 
   return user && (
     <div className='flex flex-col h-screen'>
-      <div className='flex items-center gap-3 p-4 md:px-10 bg-linear-to-r from-indigo-50 to-purple-50 border-b border-gray-200 shadow-sm'>
+      <div className='flex items-center pl-8 pt-2 pb-2 bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 shadow-sm'>
         <img src={user.profile_picture} alt="" className='size-10 rounded-full shadow-sm'/>
-        <div>
+        <div className='ml-4'>
           <p className='font-semibold text-slate-800'>{user.full_name}</p>
           <p className='text-sm text-gray-500'>@{user.username}</p>
         </div>
@@ -311,7 +358,7 @@ const ChatBox = () => {
                             })}
                           </div>
                       )}
-                      {message.text && <p className='break-words'>{message.text}</p>}
+                      {message.text && renderMessageText(message.text)}
                     </div>
                   </div>
                 </div>

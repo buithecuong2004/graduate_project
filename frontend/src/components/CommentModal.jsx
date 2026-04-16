@@ -17,26 +17,43 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     const [replyCommentId, setReplyCommentId] = useState(null)
     const [replyText, setReplyText] = useState('')
     const [replies, setReplies] = useState({})
-    const [deleteTarget, setDeleteTarget] = useState(null) // { type: 'comment'|'reply', id, commentId? }
+    const [deleteTarget, setDeleteTarget] = useState(null)
+    const [commentPage, setCommentPage] = useState(1)
+    const [hasMoreComments, setHasMoreComments] = useState(true)
+    const [isLoadingMore, setIsLoadingMore] = useState(false)
+    const commentsRef = React.useRef(null)
     const currentUser = useSelector((state) => state.user.value)
     const { getToken } = useAuth()
     const navigate = useNavigate()
 
     useEffect(() => {
         if (isOpen && post?._id) {
+            setCommentPage(1)
+            setComments([])
+            setHasMoreComments(true)
             fetchComments()
         }
     }, [isOpen, post?._id])
 
-    const fetchComments = async () => {
+    const fetchComments = async (pageNum = 1) => {
         try {
-            setIsLoadingComments(true)
+            if (pageNum === 1) setIsLoadingComments(true)
+            else setIsLoadingMore(true)
+            
             const token = await getToken()
             const { data } = await api.get(`/api/post/comment/${post._id}`, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
+                params: { page: pageNum, limit: 10 }
             })
+            
             if (data.success) {
-                setComments(data.comments)
+                if (pageNum === 1) {
+                    setComments(data.comments)
+                } else {
+                    setComments(prev => [...prev, ...data.comments])
+                }
+                setHasMoreComments(data.hasMore !== false)
+                setCommentPage(pageNum)
                 const total = data.comments.reduce((sum, c) => sum + 1 + (c.replies?.length || 0), 0)
                 if (onTotalCount) onTotalCount(total)
             }
@@ -45,6 +62,14 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             toast.error('Failed to load comments')
         } finally {
             setIsLoadingComments(false)
+            setIsLoadingMore(false)
+        }
+    }
+
+    const handleCommentsScroll = (e) => {
+        const { scrollTop, scrollHeight, clientHeight } = e.target
+        if (scrollHeight - scrollTop - clientHeight < 200 && hasMoreComments && !isLoadingMore && !isLoadingComments) {
+            fetchComments(commentPage + 1)
         }
     }
 
@@ -96,9 +121,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 setComments([data.comment, ...comments])
                 setNewComment('')
                 toast.success('Comment added')
-                if(onCommentAdded) {
-                    onCommentAdded()
-                }
+                if(onCommentAdded) onCommentAdded()
             }
         } catch (error) {
             console.log('Error adding comment:', error)
@@ -124,27 +147,24 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 { headers: { Authorization: `Bearer ${token}` } }
             )
             if (data.success) {
-                // Update replies state
                 setReplies(prev => ({
                     ...prev,
                     [commentId]: [data.reply, ...(prev[commentId] || [])]
                 }))
                 
-                // Also update the comments array to increment the replies count
-                setComments(prev => prev.map(comment => {
-                    if (comment._id === commentId) {
-                        return {
-                            ...comment,
-                            replies: [...(comment.replies || []), data.reply._id]
-                        }
-                    }
-                    return comment
-                }))
+                setComments(prev =>
+                    prev.map(c =>
+                        c._id === commentId
+                            ? { ...c, replies: [data.reply, ...(c.replies || [])] }
+                            : c
+                    )
+                )
                 
-                setReplyText('')
                 setReplyCommentId(null)
+                setReplyText('')
                 toast.success('Reply added')
-                if (onReplyAdded) onReplyAdded()
+                if(onReplyAdded) onReplyAdded()
+                if(onCountChange) onCountChange(1)
             }
         } catch (error) {
             console.log('Error adding reply:', error)
@@ -155,54 +175,89 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     }
 
     const handleLikeComment = async (commentId) => {
+        const alreadyLiked = comments.find(c => c._id === commentId)?.likes_count?.includes(currentUser._id)
+
+        // Optimistic update ngay lập tức, không chờ API
+        setComments(prev =>
+            prev.map(c =>
+                c._id === commentId
+                    ? {
+                        ...c,
+                        likes_count: alreadyLiked
+                            ? c.likes_count.filter(id => id !== currentUser._id)
+                            : [...(c.likes_count || []), currentUser._id]
+                      }
+                    : c
+            )
+        )
+
         try {
             const token = await getToken()
-            const { data } = await api.post(
+            await api.post(
                 '/api/post/comment/like',
                 { commentId },
                 { headers: { Authorization: `Bearer ${token}` } }
             )
-            if (data.success) {
-                setComments(prev => prev.map(comment => {
-                    if (comment._id !== commentId) return comment
-                    const liked = comment.likes_count.includes(currentUser._id)
-                    return {
-                        ...comment,
-                        likes_count: liked
-                            ? comment.likes_count.filter(id => id !== currentUser._id)
-                            : [...comment.likes_count, currentUser._id]
-                    }
-                }))
-            }
+            // Không sync lại từ server — optimistic đã đúng
         } catch (error) {
+            // Rollback về trạng thái cũ nếu API lỗi
+            setComments(prev =>
+                prev.map(c =>
+                    c._id === commentId
+                        ? {
+                            ...c,
+                            likes_count: alreadyLiked
+                                ? [...(c.likes_count || []), currentUser._id]
+                                : c.likes_count.filter(id => id !== currentUser._id)
+                          }
+                        : c
+                )
+            )
             toast.error('Failed to like comment')
         }
     }
 
     const handleLikeReply = async (replyId, commentId) => {
+        const alreadyLiked = replies[commentId]?.find(r => r._id === replyId)?.likes_count?.includes(currentUser._id)
+
+        // Optimistic update ngay lập tức, không chờ API
+        setReplies(prev => ({
+            ...prev,
+            [commentId]: (prev[commentId] || []).map(r =>
+                r._id === replyId
+                    ? {
+                        ...r,
+                        likes_count: alreadyLiked
+                            ? r.likes_count.filter(id => id !== currentUser._id)
+                            : [...(r.likes_count || []), currentUser._id]
+                      }
+                    : r
+            )
+        }))
+
         try {
             const token = await getToken()
-            const { data } = await api.post(
+            await api.post(
                 '/api/post/comment/like',
                 { commentId: replyId },
                 { headers: { Authorization: `Bearer ${token}` } }
             )
-            if (data.success) {
-                setReplies(prev => ({
-                    ...prev,
-                    [commentId]: (prev[commentId] || []).map(reply => {
-                        if (reply._id !== replyId) return reply
-                        const liked = reply.likes_count.includes(currentUser._id)
-                        return {
-                            ...reply,
-                            likes_count: liked
-                                ? reply.likes_count.filter(id => id !== currentUser._id)
-                                : [...reply.likes_count, currentUser._id]
-                        }
-                    })
-                }))
-            }
+            // Không sync lại từ server — optimistic đã đúng
         } catch (error) {
+            // Rollback về trạng thái cũ nếu API lỗi
+            setReplies(prev => ({
+                ...prev,
+                [commentId]: (prev[commentId] || []).map(r =>
+                    r._id === replyId
+                        ? {
+                            ...r,
+                            likes_count: alreadyLiked
+                                ? [...(r.likes_count || []), currentUser._id]
+                                : r.likes_count.filter(id => id !== currentUser._id)
+                          }
+                        : r
+                )
+            }))
             toast.error('Failed to like reply')
         }
     }
@@ -228,11 +283,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                     { headers: { Authorization: `Bearer ${token}` } }
                 )
                 if (data.success) {
-                    const deletedComment = comments.find(c => c._id === deleteTarget.id)
-                    const replyCount = deletedComment?.replies?.length || 0
                     setComments(prev => prev.filter(c => c._id !== deleteTarget.id))
-                    // Trừ: 1 comment + số reply của nó
-                    if (onCountChange) onCountChange(-(1 + replyCount))
                     toast.success('Comment deleted')
                 }
             } else {
@@ -246,13 +297,13 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                         ...prev,
                         [deleteTarget.commentId]: prev[deleteTarget.commentId].filter(r => r._id !== deleteTarget.id)
                     }))
-                    setComments(prev => prev.map(comment => {
-                        if (comment._id === deleteTarget.commentId) {
-                            return { ...comment, replies: comment.replies.filter(r => r !== deleteTarget.id) }
-                        }
-                        return comment
-                    }))
-                    if (onCountChange) onCountChange(-1)
+                    setComments(prev =>
+                        prev.map(c =>
+                            c._id === deleteTarget.commentId
+                                ? { ...c, replies: c.replies.filter(r => r._id !== deleteTarget.id) }
+                                : c
+                        )
+                    )
                     toast.success('Reply deleted')
                 }
             }
@@ -270,7 +321,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 <img
                     src={comment.user?.profile_picture}
                     alt=""
-                    className='w-10 h-10 rounded-full cursor-pointer hover:opacity-80'
+                    className='w-10 h-10 rounded-full cursor-pointer hover:opacity-80 flex-shrink-0'
                     onClick={() => {
                         navigate(`/profile/${comment.user?._id}`)
                         onClose()
@@ -331,9 +382,9 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
 
     return (
         <div className='fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4'>
-            <div className='bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col'>
+            <div className='bg-white rounded-2xl shadow-xl w-full max-w-5xl h-[90vh] flex flex-col'>
                 {/* Header */}
-                <div className='flex items-center justify-between p-6 border-b border-gray-200'>
+                <div className='flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0'>
                     <h2 className='text-xl font-semibold'>Post of {post.user.full_name}</h2>
                     <button
                         onClick={onClose}
@@ -343,150 +394,169 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                     </button>
                 </div>
 
-                {/* Post Content */}
-                <div className='p-6 border-b border-gray-200'>
-                    <div className='flex gap-4 mb-4 cursor-pointer'
-                        onClick={() => {
-                            navigate(`/profile/${post.user._id}`)
-                            onClose()
-                        }}
-                    >
-                        <img src={post.user.profile_picture} alt="" className='w-12 h-12 rounded-full hover:opacity-80' />
-                        <div>
-                            <h3 className='font-semibold hover:text-indigo-600'>{post.user.full_name}</h3>
-                            <p className='text-sm text-gray-500'>@{post.user.username}</p>
+                {/* Main Content Area - Two Column */}
+                <div className='flex flex-col md:flex-row flex-1 min-h-0'>
+                    {/* Post Content - Left Side (40%) */}
+                    <div className='w-full md:w-2/5 border-b md:border-b-0 md:border-r border-gray-200 overflow-y-auto p-6 flex flex-col md:max-h-full max-h-[35vh]'>
+                        {/* Post Header */}
+                        <div className='flex gap-4 mb-4 cursor-pointer'
+                            onClick={() => {
+                                navigate(`/profile/${post.user._id}`)
+                                onClose()
+                            }}
+                        >
+                            <img src={post.user.profile_picture} alt="" className='w-12 h-12 rounded-full hover:opacity-80 flex-shrink-0' />
+                            <div>
+                                <h3 className='font-semibold hover:text-indigo-600'>{post.user.full_name}</h3>
+                                <p className='text-sm text-gray-500'>@{post.user.username}</p>
+                            </div>
                         </div>
+
+                        {/* Post Content */}
+                        {post.content && (
+                            <p className='text-gray-800 mb-4 whitespace-pre-line text-sm leading-relaxed'>{post.content}</p>
+                        )}
+
+                        {/* Post Video */}
+                        {post.video_url && (
+                            <video src={post.video_url} controls className='w-full max-h-64 object-contain rounded-lg bg-black mb-4' />
+                        )}
+
+                        {/* Post Images */}
+                        {post.image_urls && post.image_urls.length > 0 && (
+                            <div className={`grid gap-2 mb-4 ${post.image_urls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                {post.image_urls.map((img, idx) => (
+                                    <img key={idx} src={img} alt="" className='w-full h-auto max-h-64 object-cover rounded-lg' />
+                                ))}
+                            </div>
+                        )}
                     </div>
-                    {post.content && (
-                        <p className='text-gray-800 mb-4 whitespace-pre-line'>{post.content}</p>
-                    )}
-                    {post.video_url && (
-                        <video src={post.video_url} controls className='w-full h-auto rounded-lg bg-black mb-4' />
-                    )}
-                    {post.image_urls && post.image_urls.length > 0 && (
-                        <div className='grid grid-cols-2 gap-2 mb-4'>
-                            {post.image_urls.map((img, idx) => (
-                                <img key={idx} src={img} alt="" className='w-full h-48 object-cover rounded-lg' />
-                            ))}
-                        </div>
-                    )}
-                </div>
 
-                {/* Comments Section */}
-                <div className='flex-1 overflow-y-auto px-6 py-4'>
-                    {isLoadingComments ? (
-                        <div className='flex justify-center items-center h-32'>
-                            <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600'></div>
-                        </div>
-                    ) : comments.length === 0 ? (
-                        <p className='text-center text-gray-500 py-8'>No comments yet. Be the first to comment!</p>
-                    ) : (
-                        <div className='space-y-4'>
-                            {comments.map((comment) => (
-                                <div key={comment._id}>
-                                    <CommentItem comment={comment} />
-                                    
-                                    {/* Reply Input */}
-                                    {replyCommentId === comment._id && (
-                                        <form onSubmit={(e) => handleAddReply(e, comment._id)} className='mt-3 ml-6 border-l-2 border-indigo-200 pl-4'>
-                                            <div className='flex gap-2'>
-                                                <img src={currentUser?.profile_picture} alt="" className='w-8 h-8 rounded-full' />
-                                                <div className='flex-1'>
-                                                    <textarea
-                                                        value={replyText}
-                                                        onChange={(e) => setReplyText(e.target.value)}
-                                                        placeholder='Write a reply...'
-                                                        className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none'
-                                                        rows="2"
-                                                        disabled={isLoading}
-                                                    />
-                                                    <div className='flex justify-end gap-2 mt-2'>
-                                                        <button
-                                                            type='button'
-                                                            onClick={() => {
-                                                                setReplyCommentId(null)
-                                                                setReplyText('')
-                                                            }}
-                                                            className='px-3 py-1 text-gray-600 rounded hover:bg-gray-100'
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                        <button
-                                                            type='submit'
-                                                            disabled={isLoading || !replyText.trim()}
-                                                            className='px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50'
-                                                        >
-                                                            {isLoading ? 'Replying...' : 'Reply'}
-                                                        </button>
+                    {/* Comments Section - Right Side (60%) */}
+                    <div className='w-full md:w-3/5 flex flex-col min-h-0'>
+                        {/* Comments List */}
+                        <div className='flex-1 overflow-y-auto px-6 py-4' ref={commentsRef} onScroll={handleCommentsScroll}>
+                            {isLoadingComments ? (
+                                <div className='flex justify-center items-center h-32'>
+                                    <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600'></div>
+                                </div>
+                            ) : comments.length === 0 ? (
+                                <p className='text-center text-gray-500 py-8 text-sm'>No comments yet. Be the first!</p>
+                            ) : (
+                                <div className='space-y-4'>
+                                    {comments.map((comment) => (
+                                        <div key={comment._id}>
+                                            <CommentItem comment={comment} />
+                                            
+                                            {/* Reply Input */}
+                                            {replyCommentId === comment._id && (
+                                                <form onSubmit={(e) => handleAddReply(e, comment._id)} className='mt-3 ml-6 border-l-2 border-indigo-200 pl-4'>
+                                                    <div className='flex gap-2'>
+                                                        <img src={currentUser?.profile_picture} alt="" className='w-8 h-8 rounded-full flex-shrink-0' />
+                                                        <div className='flex-1'>
+                                                            <textarea
+                                                                value={replyText}
+                                                                onChange={(e) => setReplyText(e.target.value)}
+                                                                placeholder='Write a reply...'
+                                                                className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none text-sm'
+                                                                rows="2"
+                                                                disabled={isLoading}
+                                                            />
+                                                            <div className='flex justify-end gap-2 mt-2'>
+                                                                <button
+                                                                    type='button'
+                                                                    onClick={() => {
+                                                                        setReplyCommentId(null)
+                                                                        setReplyText('')
+                                                                    }}
+                                                                    className='px-3 py-1 text-gray-600 rounded hover:bg-gray-100 text-xs'
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                                <button
+                                                                    type='submit'
+                                                                    disabled={isLoading || !replyText.trim()}
+                                                                    className='px-3 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50'
+                                                                >
+                                                                    {isLoading ? 'Replying...' : 'Reply'}
+                                                                </button>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </div>
-                                        </form>
-                                    )}
+                                                </form>
+                                            )}
 
-                                    {/* Replies Section */}
-                                    {comment.replies && comment.replies.length > 0 && (
-                                        <div className='mt-3 ml-6 border-l-2 border-gray-200 pl-4'>
-                                            <button
-                                                onClick={() => toggleReplies(comment._id)}
-                                                className='flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 mb-3'
-                                            >
-                                                {expandedReplies[comment._id] ? (
-                                                    <>
-                                                        <ChevronUp className='w-4 h-4' />
-                                                        Hide replies ({comment.replies.length})
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <ChevronDown className='w-4 h-4' />
-                                                        Show replies ({comment.replies.length})
-                                                    </>
-                                                )}
-                                            </button>
+                                            {/* Replies Section */}
+                                            {comment.replies && comment.replies.length > 0 && (
+                                                <div className='mt-3 ml-6 border-l-2 border-gray-200 pl-4'>
+                                                    <button
+                                                        onClick={() => toggleReplies(comment._id)}
+                                                        className='flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 mb-3'
+                                                    >
+                                                        {expandedReplies[comment._id] ? (
+                                                            <>
+                                                                <ChevronUp className='w-4 h-4' />
+                                                                Hide replies ({comment.replies.length})
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <ChevronDown className='w-4 h-4' />
+                                                                Show replies ({comment.replies.length})
+                                                            </>
+                                                        )}
+                                                    </button>
 
-                                            {expandedReplies[comment._id] && replies[comment._id] && (
-                                                <div className='space-y-3'>
-                                                    {replies[comment._id].map((reply) => (
-                                                        <CommentItem key={reply._id} comment={reply} isReply={true} />
-                                                    ))}
+                                                    {expandedReplies[comment._id] && replies[comment._id] && (
+                                                        <div className='space-y-3'>
+                                                            {replies[comment._id].map((reply) => (
+                                                                <CommentItem key={reply._id} comment={reply} isReply={true} />
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
+                                    ))}
+
+                                    {isLoadingMore && (
+                                        <div className='flex justify-center py-4'>
+                                            <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600'></div>
+                                        </div>
                                     )}
                                 </div>
-                            ))}
+                            )}
                         </div>
-                    )}
-                </div>
 
-                {/* Comment Input */}
-                <div className='border-t border-gray-200 p-4'>
-                    <form onSubmit={handleAddComment} className='flex gap-3'>
-                        <img
-                            src={currentUser?.profile_picture}
-                            alt=""
-                            className='w-10 h-10 rounded-full'
-                        />
-                        <div className='flex-1'>
-                            <textarea
-                                value={newComment}
-                                onChange={(e) => setNewComment(e.target.value)}
-                                placeholder='Add a comment...'
-                                className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none'
-                                rows="2"
-                                disabled={isLoading}
-                            />
-                            <div className='flex justify-end mt-2'>
-                                <button
-                                    type='submit'
-                                    disabled={isLoading || !newComment.trim()}
-                                    className='px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium'
-                                >
-                                    {isLoading ? 'Posting...' : 'Post'}
-                                </button>
-                            </div>
+                        {/* Comment Input */}
+                        <div className='border-t border-gray-200 p-4 flex-shrink-0'>
+                            <form onSubmit={handleAddComment} className='flex gap-3'>
+                                <img
+                                    src={currentUser?.profile_picture}
+                                    alt=""
+                                    className='w-8 h-8 rounded-full flex-shrink-0'
+                                />
+                                <div className='flex-1'>
+                                    <textarea
+                                        value={newComment}
+                                        onChange={(e) => setNewComment(e.target.value)}
+                                        placeholder='Add a comment...'
+                                        className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none text-sm'
+                                        rows="2"
+                                        disabled={isLoading}
+                                    />
+                                    <div className='flex justify-end mt-2'>
+                                        <button
+                                            type='submit'
+                                            disabled={isLoading || !newComment.trim()}
+                                            className='px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium'
+                                        >
+                                            {isLoading ? 'Posting...' : 'Post'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
                         </div>
-                    </form>
+                    </div>
                 </div>
             </div>
 

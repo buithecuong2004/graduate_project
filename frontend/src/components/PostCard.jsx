@@ -9,14 +9,17 @@ import api from '../api/axios'
 import toast from 'react-hot-toast'
 import ConfirmDialog from './ConfirmDialog'
 import CommentModal from './CommentModal'
+import ShareModal from './ShareModal'
 
 const PostCard = ({post, onPostDeleted}) => {
 
     const postWithHashtags = post.content.replace(/(#\w+)/g, '<span class="text-indigo-600">$1</span>')
-    const [likes, setLikes] = useState(post.likes_count)
+    const [likes, setLikes] = useState(Array.isArray(post.likes_count) ? post.likes_count : [])
+    const [shares, setShares] = useState(post.shares_count || [])
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [showCommentModal, setShowCommentModal] = useState(false)
+    const [showShareModal, setShowShareModal] = useState(false)
     const commentCount = post.total_comments_count ?? post.comments?.length ?? 0
     const currentUser = useSelector((state)=>state.user.value)
     const dispatch = useDispatch()
@@ -113,6 +116,36 @@ const PostCard = ({post, onPostDeleted}) => {
             </div>
         )}
 
+        {post.shared_from && post.shared_from.user && (
+            <div className='bg-gray-50 border border-gray-200 rounded-lg p-3 mt-2'>
+                <div onClick={() => navigate('/profile/' + post.shared_from.user._id)} className='inline-flex items-center gap-2 cursor-pointer mb-2'>
+                    <img src={post.shared_from.user.profile_picture} alt="" className='w-8 h-8 rounded-full shadow'/>
+                    <div>
+                        <div className='flex items-center space-x-1 text-sm'>
+                            <span className='font-semibold'>{post.shared_from.user.full_name}</span>
+                            <BadgeCheck className='w-3 h-3 text-blue-500'/>
+                        </div>
+                        <div className='text-gray-500 text-xs'>@{post.shared_from.user.username}</div>
+                    </div>
+                </div>
+                {post.shared_from.content && <div className='text-gray-800 text-sm whitespace-pre-line' dangerouslySetInnerHTML={{__html: post.shared_from.content.replace(/(#\w+)/g, '<span class="text-indigo-600">$1</span>')}}/>}
+                {post.shared_from.video_url && (
+                    <video
+                        src={post.shared_from.video_url}
+                        controls
+                        className='w-full h-auto rounded-lg bg-black mt-2'
+                    />
+                )}
+                {post.shared_from.image_urls && post.shared_from.image_urls.length > 0 && (
+                    <div className='grid grid-cols-2 gap-2 mt-2'>
+                        {post.shared_from.image_urls.map((img, index)=>(
+                            <img src={img} key={index} className={`w-full h-32 object-cover rounded-lg ${post.shared_from.image_urls.length === 1 && 'col-span-2 h-auto'}`} alt="" />
+                        ))}
+                    </div>
+                )}
+            </div>
+        )}
+
         <div className='flex items-center gap-4 text-gray-600 text-sm pt-2 border-t border-gray-300'>
             <div className='flex items-center gap-1'>
                 <Heart className={`w-4 h-4 cursor-pointer ${likes.includes(currentUser._id) && 'text-red-500 fill-red-500'}`} onClick={handleLike}/>
@@ -122,9 +155,9 @@ const PostCard = ({post, onPostDeleted}) => {
                 <MessageCircle className='w-4 h-4'/>
                 <span>{commentCount}</span>
             </div>
-            <div className='flex items-center gap-1'>
+            <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowShareModal(true)}>
                 <Share2 className='w-4 h-4'/>
-                <span>{7}</span>
+                <span>{shares.length}</span>
             </div>
         </div>
 
@@ -146,6 +179,13 @@ const PostCard = ({post, onPostDeleted}) => {
             onReplyAdded={() => dispatch(updateCommentCount({ postId: post._id, count: commentCount + 1 }))}
             onTotalCount={(total) => dispatch(updateCommentCount({ postId: post._id, count: total }))}
             onCountChange={(delta) => dispatch(updateCommentCount({ postId: post._id, count: commentCount + delta }))}
+        />
+
+        <ShareModal
+            isOpen={showShareModal}
+            onClose={() => setShowShareModal(false)}
+            post={post.shared_from || post}
+            onShareAdded={() => setShares([...shares, currentUser._id])}
         />
     </div>
   )

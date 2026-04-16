@@ -1,22 +1,34 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Image, X, Video } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useSelector } from 'react-redux'
 import { useAuth } from '@clerk/clerk-react'
 import api from '../api/axios'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
+import SharedPostPreview from '../components/SharedPostPreview'
 
 const CreatePost = () => {
 
   const navigate = useNavigate()
+  const location = useLocation()
   const [content, setContent] = useState('')
   const [images, setImages] = useState([])
   const [video, setVideo] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [sharedPost, setSharedPost] = useState(null)
 
   const user = useSelector((state)=>state.user.value)
 
   const {getToken} = useAuth()
+
+  // Get shared post from location state
+  useEffect(() => {
+    if (location.state?.sharedPost) {
+      setSharedPost(location.state.sharedPost)
+      // Clear the location state to avoid reusing it
+      window.history.replaceState({}, document.title)
+    }
+  }, [location])
 
   const validateVideo = (file) => {
     const maxSize = 500 * 1024 * 1024; // 500MB
@@ -116,6 +128,9 @@ const CreatePost = () => {
       const formData = new FormData()
       formData.append('content', content)
       formData.append('post_type', postType)
+      if (sharedPost) {
+        formData.append('shared_from', sharedPost._id)
+      }
 
       if(images.length) {
         images.forEach((image)=>{
@@ -133,6 +148,7 @@ const CreatePost = () => {
         setContent('')
         setImages([])
         setVideo(null)
+        setSharedPost(null)
         navigate('/')
       } else {
         console.log(data.message)
@@ -163,6 +179,14 @@ const CreatePost = () => {
             </div>
           </div>
 
+          {sharedPost && (
+            <div className='bg-blue-50 border-l-4 border-blue-500 p-4 rounded'>
+              <p className='text-xs text-blue-600 font-semibold mb-3'>SHARING FROM</p>
+              <SharedPostPreview post={sharedPost} />
+            </div>
+          )}
+
+          
           <textarea name="" id="" className='w-full resize-none max-h-20 mt-4 text-sm outline-none placeholder-gray-400' placeholder="What's happening"
           onChange={(e)=>setContent(e.target.value)} value={content}/>
 
