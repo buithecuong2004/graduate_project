@@ -4,7 +4,6 @@ import Story from "../models/Story.js"
 import User from "../models/User.js"
 import { inngest } from "../inngest/index.js"
 import axios from "axios"
-import { connections } from "./messageController.js"
 
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
@@ -79,27 +78,52 @@ export const addUserStory = async (req, res) => {
 
         res.json({success: true, message: 'Story created successfully'})
 
-        // Broadcast new story to all connections
+        // Send new story notification to all followers/connections via socket
         const storyUser = await User.findById(userId)
-        const followersFollowing = [...(storyUser.followers || []), ...(storyUser.following || []), ...(storyUser.connections || [])]
-        
+        // ✅ postController.js — trong addPost
+        const followersFollowing = [...new Set([
+            ...(currentUser.followers || []),
+            ...(currentUser.following || []),
+            ...(currentUser.connections || [])
+        ])]
         const storyWithUser = {
             ...story.toObject(),
             user: storyUser
         }
 
-        const newStoryEvent = {
-            type: 'new-story',
-            story: storyWithUser,
-            message: `${storyUser.full_name} posted a new story!`
-        }
-
-        followersFollowing.forEach(userId => {
-            if(connections[userId]) {
-                console.log('📖 Broadcasting new story to:', userId)
-                connections[userId].write(`data: ${JSON.stringify(newStoryEvent)}\n\n`)
+        const io = req.app.locals.io
+        if(io && storyUser) {
+            const storyUserData = {
+                _id: storyUser._id,
+                full_name: storyUser.full_name,
+                username: storyUser.username,
+                profile_picture: storyUser.profile_picture
             }
-        })
+            const storyData = {
+                _id: story._id,
+                content: story.content,
+                media_url: story.media_url,
+                media_type: story.media_type,
+                background_color: story.background_color,
+                createdAt: story.createdAt
+            }
+            const newStoryNotification = {
+                type: 'new_story',
+                data: {
+                    story_id: story._id,
+                    user: storyUserData,
+                    story: storyData
+                }
+            }
+
+            // Only send notification to followers/connections, not to the story creator
+            followersFollowing.forEach(followerId => {
+                if(followerId !== userId) {
+                    console.log('📖 Sending new story notification to:', followerId, 'from:', storyUser.full_name)
+                    io.to(`user-${followerId}`).emit('new-story', newStoryNotification)
+                }
+            })
+        }
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })

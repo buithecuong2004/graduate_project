@@ -9,10 +9,18 @@ import userRouter from './routes/userRoutes.js';
 import postRouter from './routes/postRoute.js';
 import storyRouter from './routes/storyRoute.js';
 import messageRouter from './routes/messageRoute.js';
+import { createServer } from 'http'
+import { setupSocket } from './configs/socket.js'
 
 const app = express();
+const server = createServer(app);
+const { io, connectedUsers } = setupSocket(server);
 
 await connectDB();
+
+// Make io and connectedUsers available globally
+app.locals.io = io;
+app.locals.connectedUsers = connectedUsers;
 
 app.use(express.json());
 app.use(cors());
@@ -29,6 +37,6 @@ app.use('/api/message', messageRouter)
 
 const PORT = process.env.PORT || 4000
 
-app.listen(PORT, ()=>console.log(`Server is running on port ${PORT}`))
+server.listen(PORT, ()=>console.log(`🚀 Server is running on port ${PORT}`))
 
 export default app; 

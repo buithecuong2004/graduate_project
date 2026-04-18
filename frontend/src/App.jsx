@@ -18,15 +18,19 @@ import { useDispatch, useSelector } from 'react-redux'
 import { fetchUser } from './features/user/userSlice'
 import { fetchConnections } from './features/connections/connectionsSlice'
 import { useRef } from 'react'
-import { addMessages } from './features/messages/messagesSlice'
+import { addMessages, setNewMessageTrigger } from './features/messages/messagesSlice'
+import { addNotification } from './features/notifications/notificationsSlice'
 import toast from 'react-hot-toast'
+import { Navigate } from 'react-router-dom'
 
+import { io } from 'socket.io-client'
 
 const App = () => {
   const {user: clerkUser} = useUser()
   const {getToken} = useAuth()
   const {pathname} = useLocation()
   const pathnameRef = useRef(pathname)
+  const socketRef = useRef(null)
   const currentUser = useSelector((state)=>state.user.value)
   const dispatch = useDispatch()
 
@@ -45,112 +49,95 @@ const App = () => {
     pathnameRef.current = pathname
   },[pathname])
 
+  // Initialize Socket.IO connection
   useEffect(()=>{
-    if(currentUser?._id){
-      const eventSource = new EventSource(import.meta.env.VITE_BASEURL + '/api/message/' + currentUser._id)
+    if(currentUser?._id) {
+      if(!socketRef.current) {
+        const socket = io(import.meta.env.VITE_BASEURL, {
+          reconnection: true,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          reconnectionAttempts: 5
+        })
 
-      eventSource.onopen = () => {
-        console.log('✅ EventSource connected for user:', currentUser._id)
-      }
+        socketRef.current = socket
 
-      eventSource.onmessage = (event)=>{
-        try {
-          console.log('📨 Raw event data:', event.data)
-          const data = JSON.parse(event.data)
-          console.log('✅ Parsed data:', data)
-          console.log('📍 Current pathname:', pathnameRef.current)
-          
-          // Handle new post event
-          if(data.type === 'new-post') {
-            console.log('📢 New post event received')
-            toast.success(data.message, {
-              position: 'bottom-right',
-              icon: '📝'
-            })
-            return
-          }
+        socket.on('connect', () => {
+          console.log('🔌 Socket connected:', socket.id)
+          socket.emit('user-connect', currentUser._id)
+        })
 
-          // Handle new story event
-          if(data.type === 'new-story') {
-            console.log('📖 New story event received')
-            toast.success(data.message, {
-              position: 'bottom-right',
-              icon: '📖'
-            })
-            return
-          }
-
-          // Handle like event
-          if(data.type === 'new-like') {
-            console.log('👍 Like event received')
-            toast.success(data.message, {
-              position: 'bottom-right',
-              icon: '👍'
-            })
-            return
-          }
-
-          // Handle comment events
-          if(data.type === 'new-comment') {
-            console.log('📝 New comment event received for post:', data.postId)
-            toast.success(`${data.comment.user?.full_name} commented on your post!`, {
-              position: 'bottom-right',
-              icon: '💬'
-            })
-            return
-          }
-
-          // Handle reply events
-          if(data.type === 'new-reply') {
-            console.log('📮 New reply event received')
-            toast.success(`${data.reply.user?.full_name} replied to your comment!`, {
-              position: 'bottom-right',
-              icon: '💬'
-            })
-            return
-          }
-
-          // Handle message events (original logic)
-          const message = data
-          console.log('💬 Message from_user_id._id:', message.from_user_id?._id)
-          
-          if(pathnameRef.current === ('/messages/'+message.from_user_id?._id)){
-            console.log('📝 Adding to current chat')
+        // Listen for new messages
+       socket.on('new-message', (message) => {
+        if(pathnameRef.current === (`/messages/${message.from_user_id?._id}`)) {
             dispatch(addMessages(message))
-          } else {
-            console.log('🔔 Showing notification toast')
-            const toastId = toast.custom((t)=>(
-              <Notification t={t} message={message}/>
-            ), {position: "bottom-right"})
-            console.log('✅ Toast created with id:', toastId)
-          }
-        } catch (error) {
-          console.error('❌ Error parsing SSE message:', error, 'Event data:', event.data)
-          toast.error('Failed to process message')
+        } else {
+            toast.custom((t) => <Notification t={t} message={message}/>, {position: "bottom-right"})
         }
-      }
+        dispatch(setNewMessageTrigger(Date.now())) // ← thêm dòng này
+    })
 
-      eventSource.onerror = (error) => {
-        console.error('❌ EventSource error:', error)
-        if(eventSource.readyState === EventSource.CLOSED) {
-          console.log('EventSource closed, reconnecting...')
-        }
-        eventSource.close()
-      }
+        // Listen for friend requests
+        socket.on('friend-request', (notification) => {
+          console.log('🤝 Friend request received:', notification)
+          dispatch(addNotification(notification))
+        })
 
-      return ()=>{
-        console.log('Closing EventSource')
-        eventSource.close()
+        // Listen for new stories
+        socket.on('new-story', (notification) => {
+          console.log('📖 New story received:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        // Listen for new posts
+        socket.on('new-post-notification', (notification) => {
+          console.log('📝 New post notification:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        // Listen for new comments
+        socket.on('new-comment-notification', (notification) => {
+          console.log('💬 New comment notification:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        // Listen for new replies
+        socket.on('new-reply-notification', (notification) => {
+          console.log('💬 New reply notification:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        // Listen for likes
+        socket.on('new-like-notification', (notification) => {
+          console.log('👍 New like notification:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        socket.on('disconnect', () => {
+          console.log('❌ Socket disconnected')
+        })
+
+        socket.on('error', (error) => {
+          console.error('❌ Socket error:', error)
+        })
       }
     }
-  },[currentUser?._id,dispatch])
+
+    return () => {
+      if(socketRef.current) {
+        socketRef.current.disconnect()
+        socketRef.current = null
+      }
+    }
+  },[currentUser?._id, dispatch])
 
   return (
     <>
     <Toaster/>
       <Routes>
         <Route path='/' element={ clerkUser ? <Layout/> : <Login/>}>
-          <Route index element={<Feed/>}/>
+          <Route index element={<Navigate to="/feed" replace />}/>
+          <Route path='feed' element={<Feed/>}/>
           <Route path='messages' element={<Message/>}/>
           <Route path='messages/:userId' element={<ChatBox/>}/>
           <Route path='connections' element={<Connections/>}/>

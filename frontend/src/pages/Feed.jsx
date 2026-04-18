@@ -6,10 +6,11 @@ import PostCard from '../components/PostCard'
 import RecentMessages from '../components/RecentMessages'
 import { useAuth } from '@clerk/clerk-react'
 import { useDispatch, useSelector } from 'react-redux'
+import { useLocation } from 'react-router-dom'
 import { fetchPosts, deletePost, incrementPage } from '../features/posts/postSlice'
 
 const Feed = () => {
-
+  const location = useLocation()
   const dispatch = useDispatch()
   const { posts, loading, hasMore, page } = useSelector((state) => state.posts)
   const { getToken } = useAuth()
@@ -22,7 +23,7 @@ const Feed = () => {
       dispatch(fetchPosts({ token, page: 1, limit: 10 }))
     }
     load()
-  }, [])
+  }, [location.state?.refresh])
 
   const handlePostDeleted = (postId) => {
     dispatch(deletePost(postId))
@@ -46,7 +47,7 @@ const Feed = () => {
   return !loading ? (
     <div ref={feedRef} onScroll={handleScroll} className='h-full overflow-y-scroll py-10 xl:pr-5 flex items-start justify-center xl:gap-8'>
        <div>
-        <StoriesBar/>
+        <StoriesBar refreshTrigger={location.state?.refresh}/>
         <div className='p-4 space-y-6'>
           {posts.map((post) => (
             <PostCard key={post._id} post={post} onPostDeleted={handlePostDeleted}/>

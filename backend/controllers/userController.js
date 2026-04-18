@@ -196,6 +196,27 @@ export const sendConnectionRequest = async (req, res) => {
                 data: {connectionId: newConnection._id}
             })
 
+            // Send friend request notification via socket
+            const requesterUser = await User.findById(userId)
+            const io = req.app.locals.io
+            if(io && requesterUser) {
+                const requesterData = {
+                    _id: requesterUser._id,
+                    full_name: requesterUser.full_name,
+                    username: requesterUser.username,
+                    profile_picture: requesterUser.profile_picture
+                }
+                const friendRequestNotification = {
+                    type: 'friend_request',
+                    data: {
+                        from_user: requesterData,
+                        connection_id: newConnection._id
+                    }
+                }
+                console.log('🤝 Sending friend request notification to:', id, 'from:', requesterUser.full_name)
+                io.to(`user-${id}`).emit('friend-request', friendRequestNotification)
+            }
+
             return res.json({success: true, message: 'Connection request sent successfully'})
         }else if(connection && connection.status === 'accepted') {
             return res.json({success: false, message: 'You are already connected with this user'})

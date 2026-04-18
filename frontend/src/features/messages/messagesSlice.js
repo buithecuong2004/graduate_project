@@ -2,8 +2,11 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 import api from '../../api/axios'
 
 const initialState = {
-    messages: []
+    messages: [],
+    newMessageTrigger: null, // ← thêm
 }
+
+
 
 export const fetchMessages = createAsyncThunk('messages/fetchMessages', async({token,userId})=>{
     const { data } = await api.post('/api/message/get', {to_user_id: userId}, {
@@ -25,6 +28,9 @@ const messagesSlice = createSlice({
         resetMessages: (state)=>{
             state.messages = []
         },
+        setNewMessageTrigger: (state, action) => {
+            state.newMessageTrigger = action.payload
+        },
     },
     extraReducers: (builder) => {
         builder.addCase(fetchMessages.fulfilled, (state, action)=>{
@@ -35,6 +41,6 @@ const messagesSlice = createSlice({
     }
 })
 
-export const {setMessages, addMessages, resetMessages} = messagesSlice.actions
+export const {setMessages, addMessages, resetMessages, setNewMessageTrigger } = messagesSlice.actions
 
 export default messagesSlice.reducer

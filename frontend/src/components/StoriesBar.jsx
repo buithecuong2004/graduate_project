@@ -8,7 +8,7 @@ import { useSelector } from 'react-redux'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 
-const StoriesBar = () => {
+const StoriesBar = ({ refreshTrigger }) => {
 
     const {getToken} = useAuth()
     const currentUser = useSelector((state)=>state.user.value)
@@ -53,7 +53,7 @@ const StoriesBar = () => {
 
     useEffect(()=>{
         fetchStories()
-    },[])
+    },[refreshTrigger])
 
   return (
     <div className='w-screen sm:w-[calc(100vw-240px)] lg:max-w-2xl no-scrollbar overflow-x-auto px-4'>

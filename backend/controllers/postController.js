@@ -4,7 +4,6 @@ import Post from "../models/Post.js";
 import Comment from "../models/Comment.js";
 import User from "../models/User.js";
 import axios from "axios";
-import { connections } from "./messageController.js";
 
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
@@ -146,22 +145,46 @@ export const addPost = async (req, res) => {
 
         res.json({ success: true, message: 'Post created successfully', post: populatedPost})
 
-        // Broadcast new post to all connections (followers/connected users)
+        // Broadcast new post to all connections (followers/connected users) via socket
         const currentUser = await User.findById(userId)
-        const followersFollowing = [...(currentUser.followers || []), ...(currentUser.following || []), ...(currentUser.connections || [])]
+       // ✅ postController.js — trong addPost
+        const followersFollowing = [...new Set([
+            ...(currentUser.followers || []),
+            ...(currentUser.following || []),
+            ...(currentUser.connections || [])
+        ])]
         
-        const newPostEvent = {
-            type: 'new-post',
-            post: postWithUser,
-            message: `${postUser.full_name} just posted something new!`
+        const postUser = await User.findById(userId)
+        const postUserData = {
+            _id: postUser._id,
+            full_name: postUser.full_name,
+            username: postUser.username,
+            profile_picture: postUser.profile_picture
         }
 
-        followersFollowing.forEach(userId => {
-            if(connections[userId]) {
-                console.log('📢 Broadcasting new post to:', userId)
-                connections[userId].write(`data: ${JSON.stringify(newPostEvent)}\n\n`)
+        const newPostNotification = {
+            type: 'new_post',
+            data: {
+                post_id: newPost._id,
+                user: postUserData,
+                post: {
+                    _id: newPost._id,
+                    content: newPost.content,
+                    image_urls: newPost.image_urls,
+                    video_url: newPost.video_url
+                }
             }
-        })
+        }
+
+        const io = req.app.locals.io
+        if(io && postUser) {
+            followersFollowing.forEach(followerId => {
+                if(followerId !== userId) {
+                    console.log('📖 Broadcasting new post to:', followerId, 'from:', postUser.full_name)
+                    io.to(`user-${followerId}`).emit('new-post-notification', newPostNotification)
+                }
+            })
+        }
     } catch(error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -242,19 +265,31 @@ export const likePost = async (req, res) => {
             await post.save()
             res.json({ success: true, message: 'Post liked' })
 
-            // Broadcast like event to post owner
+            // Send like notification via socket to post owner (only if not self-like)
             const postOwner = post.user
             const liker = await User.findById(userId)
             
-            if(connections[postOwner]) {
-                const likeEvent = {
-                    type: 'new-like',
-                    postId,
-                    liker,
-                    message: `${liker.full_name} liked your post!`
+            // Only send notification if the liker is not the post owner
+            if(userId !== postOwner && liker) {
+                const io = req.app.locals.io
+                if(io) {
+                    const likerData = {
+                        _id: liker._id,
+                        full_name: liker.full_name,
+                        username: liker.username,
+                        profile_picture: liker.profile_picture
+                    }
+                    const likeNotification = {
+                        type: 'new_like',
+                        data: {
+                            post_id: postId,
+                            liked_type: 'post',
+                            user: likerData
+                        }
+                    }
+                    console.log('👍 Sending like notification to:', postOwner, 'from:', liker.full_name)
+                    io.to(`user-${postOwner}`).emit('new-like-notification', likeNotification)
                 }
-                console.log('👍 Broadcasting like to:', postOwner)
-                connections[postOwner].write(`data: ${JSON.stringify(likeEvent)}\n\n`)
             }
         } else {
             post.likes_count = post.likes_count.filter(user => user !== userId)
@@ -283,7 +318,12 @@ export const addComment = async (req, res) => {
         const commentUser = await User.findById(userId)
         const commentWithUser = {
             ...comment.toObject(),
-            user: commentUser
+            user: commentUser ? {
+                _id: commentUser._id,
+                full_name: commentUser.full_name,
+                username: commentUser.username,
+                profile_picture: commentUser.profile_picture
+            } : null
         }
 
         const post = await Post.findById(postId)
@@ -292,16 +332,18 @@ export const addComment = async (req, res) => {
 
         res.json({ success: true, message: 'Comment added', comment: commentWithUser })
 
-        // Broadcast comment event to post owner via SSE
-        if(connections[post.user]) {
-            const commentEvent = {
-                type: 'new-comment',
-                postId,
-                comment: commentWithUser,
-                commenterId: userId
+        // Send comment notification via socket to post owner (only if not self-comment)
+        const io = req.app.locals.io
+        if(io && userId !== post.user && commentUser) {
+            const commentNotification = {
+                type: 'new_comment',
+                data: {
+                    post_id: postId,
+                    comment: commentWithUser
+                }
             }
-            console.log('📝 Broadcasting comment SSE event to:', post.user)
-            connections[post.user].write(`data: ${JSON.stringify(commentEvent)}\n\n`)
+            console.log('💬 Sending comment notification to:', post.user, 'from:', commentUser.full_name)
+            io.to(`user-${post.user}`).emit('new-comment-notification', commentNotification)
         }
     } catch (error) {
         console.log(error)
@@ -382,15 +424,41 @@ export const likeComment = async (req, res) => {
         const { commentId } = req.body
 
         const comment = await Comment.findById(commentId)
+        const isLiking = !comment.likes_count.includes(userId)
 
-        if (comment.likes_count.includes(userId)) {
-            comment.likes_count = comment.likes_count.filter(user => user !== userId)
-            await comment.save()
-            res.json({ success: true, message: 'Comment unliked' })
-        } else {
+        if (isLiking) {
             comment.likes_count.push(userId)
             await comment.save()
             res.json({ success: true, message: 'Comment liked' })
+
+            // Send like notification via socket to comment author (only if not self-like)
+            const commentAuthor = comment.user
+            if(userId !== commentAuthor) {
+                const liker = await User.findById(userId)
+                const io = req.app.locals.io
+                if(io && liker) {
+                    const likerData = {
+                        _id: liker._id,
+                        full_name: liker.full_name,
+                        username: liker.username,
+                        profile_picture: liker.profile_picture
+                    }
+                    const likeNotification = {
+                        type: 'new_like',
+                        data: {
+                            post_id: comment.post.toString(),
+                            liked_type: 'comment',
+                            user: likerData
+                        }
+                    }
+                    console.log('👍 Sending like comment notification to:', commentAuthor, 'from:', liker.full_name)
+                    io.to(`user-${commentAuthor}`).emit('new-like-notification', likeNotification)
+                }
+            }
+        } else {
+            comment.likes_count = comment.likes_count.filter(user => user !== userId)
+            await comment.save()
+            res.json({ success: true, message: 'Comment unliked' })
         }
 
     } catch (error) {
@@ -465,34 +533,43 @@ export const addReply = async (req, res) => {
         const replyUser = await User.findById(userId)
         const replyWithUser = {
             ...reply.toObject(),
-            user: replyUser
+            user: replyUser ? {
+                _id: replyUser._id,
+                full_name: replyUser.full_name,
+                username: replyUser.username,
+                profile_picture: replyUser.profile_picture
+            } : null
         }
 
         res.json({ success: true, message: 'Reply added', reply: replyWithUser })
 
-        // Broadcast to post owner and parent comment author
+        // Send reply notification via socket to post owner and comment author
         const post = await Post.findById(parentComment.post)
         const postOwner = post.user
         const commentAuthor = parentComment.user
+        const io = req.app.locals.io
 
-        const replyEvent = {
-            type: 'new-reply',
-            postId: parentComment.post,
-            commentId,
-            reply: replyWithUser,
-            replyAuthor: replyUser
-        }
+        if(io && replyUser) {
+            const replyNotification = {
+                type: 'new_reply',
+                data: {
+                    post_id: parentComment.post.toString(),
+                    comment_id: commentId,
+                    reply: replyWithUser
+                }
+            }
 
-        // Send to post owner
-        if(connections[postOwner]) {
-            console.log('📮 Broadcasting reply to post owner:', postOwner)
-            connections[postOwner].write(`data: ${JSON.stringify(replyEvent)}\n\n`)
-        }
+            // Send to comment author only if not replying to own comment
+            if(commentAuthor !== userId) {
+                console.log('💬 Sending reply notification to comment author:', commentAuthor, 'from:', replyUser.full_name)
+                io.to(`user-${commentAuthor}`).emit('new-reply-notification', replyNotification)
+            }
 
-        // Send to comment author (if different from post owner)
-        if(commentAuthor !== postOwner && connections[commentAuthor]) {
-            console.log('📮 Broadcasting reply to comment author:', commentAuthor)
-            connections[commentAuthor].write(`data: ${JSON.stringify(replyEvent)}\n\n`)
+            // Send to post owner only if different from comment author and not replying to own post comment
+            if(postOwner !== commentAuthor && postOwner !== userId) {
+                console.log('💬 Sending reply notification to post owner:', postOwner, 'from:', replyUser.full_name)
+                io.to(`user-${postOwner}`).emit('new-reply-notification', replyNotification)
+            }
         }
     } catch (error) {
         console.log(error)

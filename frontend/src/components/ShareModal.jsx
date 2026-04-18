@@ -4,6 +4,8 @@ import { useAuth } from '@clerk/clerk-react'
 import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 import { addPost } from '../features/posts/postSlice'
+import { setNewMessageTrigger } from '../features/messages/messagesSlice'
+
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 
@@ -131,6 +133,8 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                     )
                 )
             )
+
+            dispatch(setNewMessageTrigger(Date.now()))
 
             toast.success('Shared to selected users')
             onShareAdded && onShareAdded()

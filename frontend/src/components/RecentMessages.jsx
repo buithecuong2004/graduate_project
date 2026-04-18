@@ -81,16 +81,14 @@ const RecentMessages = () => {
         }
     }
 
-    // ✅ Chỉ dùng polling, KHÔNG mở SSE ở đây nữa.
-    // App.jsx đã mở SSE và xử lý notification + dispatch addMessages.
-    // Polling 5s đảm bảo danh sách luôn cập nhật (kể cả tin nhắn mình gửi).
+        // RecentMessages.jsx
+    const newMessageTrigger = useSelector(state => state.messages.newMessageTrigger)
+
     useEffect(()=>{
         if(currentUser?._id) {
             fetchRecentMessages()
-            const interval = setInterval(fetchRecentMessages, 5000)
-            return () => clearInterval(interval)
         }
-    },[currentUser?._id])
+    }, [pathname, currentUser?._id, newMessageTrigger]) // ← thêm trigger
 
   return (
     <div className='bg-white max-w-xs mt-4 p-4 min-h-20 rounded-md shadow text-xs text-slate-800'>
@@ -123,7 +121,7 @@ const RecentMessages = () => {
 
                     return (
                         <Link 
-                            to={`messages/${conversation.sender._id}`} 
+                            to={`/messages/${conversation.sender._id}`} 
                             key={index} 
                             className='flex items-start gap-2 py-2 hover:bg-slate-100 cursor-pointer'
                             onClick={() => conversation.unreadCount > 0 && handleMarkAsRead(conversation.sender._id)}
