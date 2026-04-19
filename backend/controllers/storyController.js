@@ -134,13 +134,19 @@ export const getStories = async (req, res) => {
         const { userId } = req.auth()
         const user = await User.findById(userId)
 
+        // If user not yet in DB, return empty stories (race condition on first login)
+        if(!user) return res.json({success: true, stories: []})
+
         const userIds = [userId, ...user.connections, ...user.following]
 
         const stories = await Story.find({
             user: {$in: userIds}
         }).populate('user').sort({ createdAt: -1 })
 
-        res.json({success: true, stories})
+        // Filter out stories whose user account no longer exists in DB
+        const validStories = stories.filter(story => story.user !== null)
+
+        res.json({success: true, stories: validStories})
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })

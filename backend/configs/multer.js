@@ -11,12 +11,13 @@ const limits = {
 const fileFilter = (req, file, cb) => {
   const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
   const allowedVideoTypes = ['video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg']
-  const allowedTypes = [...allowedImageTypes, ...allowedVideoTypes]
+  const allowedAudioTypes = ['audio/webm', 'audio/ogg', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/x-m4a']
+  const allowedTypes = [...allowedImageTypes, ...allowedVideoTypes, ...allowedAudioTypes]
 
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true)
   } else {
-    cb(new Error('Invalid file type. Only images and videos are allowed'))
+    cb(new Error('Invalid file type. Only images, videos and audio are allowed'))
   }
 }
 

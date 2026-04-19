@@ -8,12 +8,22 @@ const initialState = {
     following: []
 }
 
-export const fetchConnections = createAsyncThunk('connections/fetchConnections',
-    async (token) => {
-        const { data } = await api.get('/api/user/connections', {
-            headers: {Authorization: `Bearer ${token}`}
-        })
-        return data.success ? data : null
+export const fetchConnections = createAsyncThunk(
+    'connections/fetchConnections',
+    async (token, { rejectWithValue }) => {
+        try {
+            const { data } = await api.get('/api/user/connections', {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+
+            if (!data.success) {
+                return rejectWithValue(data.message)
+            }
+
+            return data
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.message || error.message)
+        }
     }
 )
 
@@ -23,15 +33,19 @@ const connectionsSlice = createSlice({
     reducers: {
 
     },
-    extraReducers: (builder)=>{
-        builder.addCase(fetchConnections.fulfilled,  (state, action)=>{
-            if(action.payload){
+    extraReducers: (builder) => {
+        builder
+            .addCase(fetchConnections.fulfilled, (state, action) => {
                 state.connections = action.payload.connections
                 state.pendingConnections = action.payload.pendingConnections
                 state.followers = action.payload.followers
                 state.following = action.payload.following
-            }
-        })
+            })
+            .addCase(fetchConnections.rejected, (state, action) => {
+                console.error("Connections error:", action.payload)
+                state.connections = []
+                state.pendingConnections = []
+            })
     }
 })
 

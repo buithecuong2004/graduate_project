@@ -7,7 +7,8 @@ const messageRouter = express.Router()
 
 messageRouter.post('/send', upload.fields([
   { name: 'images', maxCount: 5 },
-  { name: 'videos', maxCount: 3 }
+  { name: 'videos', maxCount: 3 },
+  { name: 'voice', maxCount: 1 }
 ]), protect, sendMessage)
 messageRouter.post('/get', protect, getChatMessages)
 messageRouter.post('/get-recent', protect, getUserRecentMessages)

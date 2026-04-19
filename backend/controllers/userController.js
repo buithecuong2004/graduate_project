@@ -4,14 +4,67 @@ import Connection from "../models/Connection.js"
 import Post from "../models/Post.js"
 import User from "../models/User.js"
 import fs  from 'fs'
+import { createClerkClient } from '@clerk/express'
+
+const clerkClient = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
 
 export const getUserData = async (req,res) => {
     try {
         const { userId } = req.auth()
-        const user = await User.findById(userId)
+        let user = await User.findById(userId)
+
         if(!user) {
-            return res.json({success: false, message: "User not found"})
+            // User exists in Clerk but not yet in MongoDB (e.g. Inngest webhook delay after re-registration)
+            // Auto-create from Clerk data to prevent infinite loading
+            try {
+                const clerkUser = await clerkClient.users.getUser(userId)
+                const email = clerkUser.emailAddresses[0]?.emailAddress || ''
+                const fullName = `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim()
+
+                // Generate a unique username
+                let username = email.split('@')[0]
+                const existingUser = await User.findOne({ username })
+                if(existingUser) {
+                    username = username + Math.floor(Math.random() * 10000)
+                }
+
+                user = await User.create({
+                    _id: userId,
+                    email,
+                    full_name: fullName || email,
+                    profile_picture: clerkUser.imageUrl || '',
+                    username
+                })
+            } catch(clerkError) {
+                console.error('Failed to auto-create user from Clerk:', clerkError.message)
+                return res.json({success: false, message: "User not found"})
+            }
         }
+
+        // Clean up dangling references: remove IDs of deleted users from this user's arrays
+        // This fixes crash when a connection/follower/following account was deleted
+        const allRefs = [...(user.connections || []), ...(user.followers || []), ...(user.following || [])]
+        if(allRefs.length > 0) {
+            const existingUsers = await User.find({ _id: { $in: allRefs } }).select('_id')
+            const existingIds = new Set(existingUsers.map(u => u._id.toString()))
+
+            const hasStale = allRefs.some(id => !existingIds.has(id.toString()))
+            if(hasStale) {
+                user = await User.findByIdAndUpdate(
+                    userId,
+                    {
+                        $set: {
+                            connections: (user.connections || []).filter(id => existingIds.has(id.toString())),
+                            followers: (user.followers || []).filter(id => existingIds.has(id.toString())),
+                            following: (user.following || []).filter(id => existingIds.has(id.toString()))
+                        }
+                    },
+                    { new: true }
+                )
+                console.log(`🧹 Cleaned dangling refs for user ${userId}`)
+            }
+        }
+
         res.json({success: true, user})
     } catch (error) {
         console.log(error)
@@ -235,13 +288,19 @@ export const getUserConnections = async (req, res) => {
         const {userId} = req.auth()
         const user = await User.findById(userId).populate('connections followers following')
 
-        const connections = user.connections
-        const followers = user.followers
-        const following = user.following
+        // If user not yet in DB (race condition on first login), return empty
+        if(!user) return res.json({success: true, connections: [], followers: [], following: [], pendingConnections: []})
 
-        const pendingConnections = (await Connection.find({to_user_id: userId, status: 'pending'}).populate('from_user_id')).map(connection=>connection.from_user_id)
+        // Filter out null values from arrays (can happen when a referenced user was deleted)
+        const connections = (user.connections || []).filter(Boolean)
+        const followers = (user.followers || []).filter(Boolean)
+        const following = (user.following || []).filter(Boolean)
 
-        res.json({success: true, connections,followers, following, pendingConnections})
+        const pendingConnections = (await Connection.find({to_user_id: userId, status: 'pending'}).populate('from_user_id'))
+            .map(connection => connection.from_user_id)
+            .filter(Boolean)
+
+        res.json({success: true, connections, followers, following, pendingConnections})
 
     } catch (error) {
         console.log(error)

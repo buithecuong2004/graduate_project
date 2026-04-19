@@ -104,6 +104,8 @@ const RecentMessages = () => {
                     let content = ''
                     if(messageText) {
                         content = messageText.length > 30 ? messageText.slice(0, 30) + '...' : messageText
+                    } else if(type === 'voice') {
+                        content = '🎤 Sent a voice message'
                     } else if(type?.includes('image')) {
                         content = `Sent ${mediaUrls.length} image${mediaUrls.length > 1 ? 's' : ''}`
                     } else if(type?.includes('video')) {

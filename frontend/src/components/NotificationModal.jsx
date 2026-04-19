@@ -14,7 +14,7 @@ const NotificationModal = ({ isOpen, onClose }) => {
     const unreadCount = useSelector(state => state.notifications.unreadCount)
 
     const getNotificationIcon = (type) => {
-        switch(type) {
+        switch (type) {
             case 'friend_request':
                 return '🤝'
             case 'connection_accepted':
@@ -36,7 +36,7 @@ const NotificationModal = ({ isOpen, onClose }) => {
 
     const getNotificationText = (notification) => {
         const { type, data } = notification
-        switch(type) {
+        switch (type) {
             case 'friend_request':
                 return `${data.from_user?.full_name || data.from_user?.username} sent you a friend request`
             case 'connection_accepted':
@@ -62,32 +62,32 @@ const NotificationModal = ({ isOpen, onClose }) => {
         }
 
         const { type, data } = notification
-        
+
         // Navigate based on notification type
-        switch(type) {
+        switch (type) {
             case 'friend_request':
-                navigate('/connections', {state: { refresh: Date.now() } })
+                navigate('/connections', { state: { refresh: Date.now() } })
                 break
             case 'connection_accepted':
-                navigate('/connections', {state: { refresh: Date.now() } })
+                navigate('/connections', { state: { refresh: Date.now() } })
                 break
             case 'new_story':
-                 navigate('/feed', { state: { refresh: Date.now() } })
+                navigate('/feed', { state: { refresh: Date.now() } })
                 break
             case 'new_post':
-                 navigate('/feed', { state: { refresh: Date.now() } })
+                navigate('/feed', { state: { refresh: Date.now() } })
                 break
             case 'new_comment':
-                navigate(`/post/${data.post_id}`)
+                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
                 break
             case 'new_reply':
-                navigate(`/post/${data.post_id}`)
+                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
                 break
             case 'new_like':
-                if(data.liked_type === 'post') {
-                    navigate(`/post/${data.post_id}`)
-                } else if(data.post_id) {
-                    navigate(`/post/${data.post_id}`)
+                if (data.liked_type === 'post') {
+                    navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
+                } else if (data.post_id) {
+                    navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
                 }
                 break
         }
@@ -97,12 +97,12 @@ const NotificationModal = ({ isOpen, onClose }) => {
     // Thêm helper này vào trong component, trước phần return
     const getNotificationUser = (notification) => {
         const { type, data } = notification
-        switch(type) {
-            case 'friend_request':      return data?.from_user
+        switch (type) {
+            case 'friend_request': return data?.from_user
             case 'connection_accepted': return data?.from_user
-            case 'new_comment':     return data?.comment?.user
-            case 'new_reply':       return data?.reply?.user
-            default:                return data?.user  // new_like, new_post, new_story
+            case 'new_comment': return data?.comment?.user
+            case 'new_reply': return data?.reply?.user
+            default: return data?.user  // new_like, new_post, new_story
         }
     }
 
@@ -149,9 +149,8 @@ const NotificationModal = ({ isOpen, onClose }) => {
                         notifications.map(notification => (
                             <div
                                 key={notification.id}
-                                className={`border-b border-gray-100 p-3 sm:p-4 cursor-pointer transition hover:bg-gray-50 ${
-                                    !notification.read ? 'bg-indigo-50' : ''
-                                }`}
+                                className={`border-b border-gray-100 p-3 sm:p-4 cursor-pointer transition hover:bg-gray-50 ${!notification.read ? 'bg-indigo-50' : ''
+                                    }`}
                                 onClick={() => handleNotificationClick(notification)}
                             >
                                 <div className="flex gap-2 sm:gap-3 items-start">

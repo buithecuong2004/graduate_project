@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { ImageIcon, SendHorizonal, X, Video } from 'lucide-react'
+﻿import React, { useEffect, useRef, useState } from 'react'
+import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
@@ -21,13 +21,31 @@ const ChatBox = () => {
   const [text, setText] = useState('')
   const [images, setImages] = useState([])
   const [videos, setVideos] = useState([])
-  const [imagePreviews, setImagePreviews] = useState([])  // ✅ lưu URL preview
-  const [videoPreviews, setVideoPreviews] = useState([])  // ✅ lưu URL preview
+  const [imagePreviews, setImagePreviews] = useState([])
+  const [videoPreviews, setVideoPreviews] = useState([])
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const shouldAutoScrollRef = useRef(true)
+
+  // Voice recording states
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
+  const [audioBlob, setAudioBlob] = useState(null)
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState(null)
+  const [isSendingVoice, setIsSendingVoice] = useState(false)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+  const timerRef = useRef(null)
+  const streamRef = useRef(null)
+
+  // Format recording time as MM:SS
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0')
+    const s = (seconds % 60).toString().padStart(2, '0')
+    return `${m}:${s}`
+  }
 
   // Render message text with clickable links
   const renderMessageText = (text) => {
@@ -129,7 +147,6 @@ const ChatBox = () => {
     return true
   }
 
-  // ✅ Tạo preview URL 1 lần khi chọn file
   const handleImagesChange = (e) => {
     const newFiles = Array.from(e.target.files)
     if (images.length + newFiles.length > 5) {
@@ -143,7 +160,6 @@ const ChatBox = () => {
     }
   }
 
-  // ✅ Tạo preview URL 1 lần khi chọn file
   const handleVideosChange = (e) => {
     const newFiles = Array.from(e.target.files)
     if (videos.length + newFiles.length > 3) {
@@ -157,19 +173,134 @@ const ChatBox = () => {
     }
   }
 
-  // ✅ Revoke đúng URL khi xóa
   const removeImage = (index) => {
     URL.revokeObjectURL(imagePreviews[index])
     setImages(images.filter((_, i) => i !== index))
     setImagePreviews(imagePreviews.filter((_, i) => i !== index))
   }
 
-  // ✅ Revoke đúng URL khi xóa
   const removeVideo = (index) => {
     URL.revokeObjectURL(videoPreviews[index])
     setVideos(videos.filter((_, i) => i !== index))
     setVideoPreviews(videoPreviews.filter((_, i) => i !== index))
   }
+
+  // ──────────────────────────────────────────────────────────────
+  // Voice recording functions
+  // ──────────────────────────────────────────────────────────────
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      audioChunksRef.current = []
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/ogg'
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: mimeType })
+        setAudioBlob(blob)
+        const url = URL.createObjectURL(blob)
+        setAudioPreviewUrl(url)
+        // Stop all tracks
+        stream.getTracks().forEach(t => t.stop())
+      }
+
+      mediaRecorder.start(100)
+      setIsRecording(true)
+      setRecordingTime(0)
+
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1)
+      }, 1000)
+    } catch (err) {
+      toast.error('Microphone access denied. Please allow microphone permission.')
+      console.error('Recording error:', err)
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    clearInterval(timerRef.current)
+    setIsRecording(false)
+  }
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    clearInterval(timerRef.current)
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+    }
+    setIsRecording(false)
+    setRecordingTime(0)
+    setAudioBlob(null)
+    if (audioPreviewUrl) {
+      URL.revokeObjectURL(audioPreviewUrl)
+      setAudioPreviewUrl(null)
+    }
+  }
+
+  const sendVoiceMessage = async () => {
+    if (!audioBlob) return
+    try {
+      setIsSendingVoice(true)
+      const token = await getToken()
+      const formData = new FormData()
+      formData.append('to_user_id', userId)
+
+      // Determine extension from mimeType
+      const ext = audioBlob.type.includes('ogg') ? 'ogg' : 'webm'
+      formData.append('voice', audioBlob, `voice_${Date.now()}.${ext}`)
+
+      const { data } = await api.post('/api/message/send', formData, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (data.success) {
+        // Clean up
+        URL.revokeObjectURL(audioPreviewUrl)
+        setAudioBlob(null)
+        setAudioPreviewUrl(null)
+        setRecordingTime(0)
+        dispatch(addMessages(data.message))
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        }, 100)
+      } else {
+        throw new Error(data.message)
+      }
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsSendingVoice(false)
+    }
+  }
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      clearInterval(timerRef.current)
+      if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl)
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
+    }
+  }, [])
+
+  // ──────────────────────────────────────────────────────────────
 
   const fetchUserData = async () => {
     try {
@@ -211,7 +342,6 @@ const ChatBox = () => {
 
       if (data.success) {
         setText('')
-        // ✅ Revoke tất cả preview URLs sau khi gửi
         imagePreviews.forEach(url => URL.revokeObjectURL(url))
         videoPreviews.forEach(url => URL.revokeObjectURL(url))
         setImages([])
@@ -242,23 +372,19 @@ const ChatBox = () => {
     }
   }
 
-  // ✅ Dependency array chỉ còn [userId] — không có videos/images
   useEffect(() => {
     fetchUserData()
     fetchUserMessages()
     markMessagesAsRead()
 
     return () => {
-      markMessagesAsRead() // ✅ Gọi khi rời ChatBox
+      markMessagesAsRead()
       dispatch(resetMessages())
-      // ✅ Revoke tất cả preview URLs khi unmount
       imagePreviews.forEach(url => URL.revokeObjectURL(url))
       videoPreviews.forEach(url => URL.revokeObjectURL(url))
     }
   }, [userId])
 
-  // ✅ KHÔNG dùng SSE ở đây nữa — App.jsx đã xử lý socket
-  // Chỉ cần mark as read khi nhận tin nhắn mới từ người kia (qua Redux)
   useEffect(() => {
     if (messages.length === 0) return
     const sorted = [...messages].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -305,6 +431,7 @@ const ChatBox = () => {
             const sorted = messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
             const previousMessage = index > 0 ? sorted[index - 1] : null
             const showTimestamp = shouldShowTimestamp(message, previousMessage)
+            const isVoice = message.message_type === 'voice'
 
             return (
               <div key={index}>
@@ -317,7 +444,20 @@ const ChatBox = () => {
                 )}
                 <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
                   <div className={`p-3 text-sm max-w-sm rounded-2xl shadow-sm ${isOwn ? 'bg-indigo-500 text-white rounded-br-none' : 'bg-white text-slate-800 rounded-bl-none border border-gray-200'}`}>
-                    {mediaUrls.length > 0 && (
+                    {/* Voice message */}
+                    {isVoice && mediaUrls.length > 0 && (
+                      <div className='flex items-center gap-2 min-w-[200px]'>
+                        <span className='text-lg'>🎤</span>
+                        <audio
+                          controls
+                          src={mediaUrls[0]}
+                          className='h-8 w-full max-w-[220px]'
+                          style={{ accentColor: isOwn ? '#fff' : '#6366f1' }}
+                        />
+                      </div>
+                    )}
+                    {/* Media (image/video) */}
+                    {!isVoice && mediaUrls.length > 0 && (
                       <div className='flex flex-wrap gap-2 mb-2'>
                         {mediaUrls.map((url, idx) => {
                           const isVideo = url.includes('.mp4') || url.includes('.webm') || url.includes('.mov')
@@ -342,7 +482,6 @@ const ChatBox = () => {
       <div className='px-4 pb-5'>
         {(imagePreviews.length > 0 || videoPreviews.length > 0) && (
           <div className='flex flex-wrap gap-2 mb-3 p-3 bg-white rounded-lg border border-gray-200 max-w-4xl mx-auto'>
-            {/* ✅ Dùng imagePreviews thay vì createObjectURL inline */}
             {imagePreviews.map((url, idx) => (
               <div key={`img-${idx}`} className='relative group'>
                 <img src={url} alt="" className='h-16 rounded-md' />
@@ -354,7 +493,6 @@ const ChatBox = () => {
                 </button>
               </div>
             ))}
-            {/* ✅ Dùng videoPreviews thay vì createObjectURL inline */}
             {videoPreviews.map((url, idx) => (
               <div key={`vid-${idx}`} className='relative group'>
                 <video src={url} className='h-16 rounded-md' />
@@ -370,6 +508,67 @@ const ChatBox = () => {
           </div>
         )}
 
+        {/* ── Voice recording panel ── */}
+        {(isRecording || audioBlob) && (
+          <div className='flex items-center gap-3 mb-3 px-4 py-3 bg-white rounded-2xl border border-indigo-200 shadow-sm max-w-2xl mx-auto'>
+            {isRecording ? (
+              <>
+                {/* Animated recording indicator */}
+                <span className='relative flex h-3 w-3'>
+                  <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75'></span>
+                  <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500'></span>
+                </span>
+                <span className='text-red-500 font-mono text-sm font-semibold flex-1'>
+                  Recording... {formatTime(recordingTime)}
+                </span>
+                {/* Stop recording */}
+                <button
+                  onClick={stopRecording}
+                  className='flex items-center gap-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-medium transition'
+                >
+                  <Square size={12} fill='currentColor' />
+                  Stop
+                </button>
+                {/* Cancel */}
+                <button
+                  onClick={cancelRecording}
+                  className='flex items-center gap-1 text-gray-400 hover:text-red-500 px-2 py-1.5 rounded-full text-xs transition'
+                >
+                  <Trash2 size={14} />
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Audio preview */}
+                <span className='text-indigo-500 text-lg'>🎤</span>
+                <audio controls src={audioPreviewUrl} className='h-8 flex-1' />
+                <span className='text-xs text-gray-400 font-mono'>{formatTime(recordingTime)}</span>
+                {/* Send voice */}
+                <button
+                  onClick={sendVoiceMessage}
+                  disabled={isSendingVoice}
+                  className='bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-60 text-white px-4 py-1.5 rounded-full text-xs font-medium transition flex items-center gap-1'
+                >
+                  {isSendingVoice ? (
+                    <span className='animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full'></span>
+                  ) : (
+                    <SendHorizonal size={14} />
+                  )}
+                  Send
+                </button>
+                {/* Discard */}
+                <button
+                  onClick={cancelRecording}
+                  className='flex items-center gap-1 text-gray-400 hover:text-red-500 px-2 py-1.5 rounded-full text-xs transition'
+                >
+                  <Trash2 size={14} />
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Main input bar ── */}
         <div className='flex items-center gap-3 pl-5 p-1.5 bg-white w-full max-w-2xl mx-auto border border-gray-200 shadow-sm rounded-full'>
           <input
             type="text"
@@ -389,6 +588,22 @@ const ChatBox = () => {
             <Video className='size-6 text-gray-400 hover:text-gray-600 transition' />
             <input type="file" id='videos' accept='video/*' hidden multiple onChange={handleVideosChange} />
           </label>
+
+          {/* Mic button */}
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={!!audioBlob}
+            className={`cursor-pointer transition p-1 rounded-full ${
+              isRecording
+                ? 'text-red-500 animate-pulse'
+                : audioBlob
+                  ? 'text-gray-300 cursor-not-allowed'
+                  : 'text-gray-400 hover:text-indigo-500'
+            }`}
+            title={isRecording ? 'Stop recording' : 'Start voice message'}
+          >
+            <Mic size={22} />
+          </button>
 
           <button
             onClick={sendMessage}
