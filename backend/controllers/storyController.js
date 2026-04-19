@@ -80,11 +80,10 @@ export const addUserStory = async (req, res) => {
 
         // Send new story notification to all followers/connections via socket
         const storyUser = await User.findById(userId)
-        // ✅ postController.js — trong addPost
         const followersFollowing = [...new Set([
-            ...(currentUser.followers || []),
-            ...(currentUser.following || []),
-            ...(currentUser.connections || [])
+            ...(storyUser.followers || []),
+            ...(storyUser.following || []),
+            ...(storyUser.connections || [])
         ])]
         const storyWithUser = {
             ...story.toObject(),

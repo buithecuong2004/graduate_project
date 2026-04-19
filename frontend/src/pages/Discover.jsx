@@ -16,21 +16,29 @@ const Discover = () => {
   const [loading, setLoading] = useState(false)
   const { getToken } = useAuth()
 
-  const handleSearch = async (e) => {
-    if(e.key === 'Enter') {
-      try {
-        setUsers([])
-        setLoading(true)
-        const { data } = await api.post('/api/user/discover', {input}, {
-          headers: {Authorization: `Bearer ${await getToken()}`}
-        })
-        data.success ? setUsers(data.users) : toast.error(data.message)
-        setLoading(false)
-        setInput('')
-      } catch (error) {
-        toast.error(error.message)
-      }
+  const [hasSearched, setHasSearched] = useState(false)
+
+  const fetchUsers = async (searchInput = '') => {
+    try {
+      setUsers([])
+      setLoading(true)
+      const { data } = await api.post('/api/user/discover', {input: searchInput}, {
+        headers: {Authorization: `Bearer ${await getToken()}`}
+      })
+      data.success ? setUsers(data.users) : toast.error(data.message)
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSearch = async (e) => {
+    if (e.key === 'Enter') {
+      if (!input.trim()) return
+      setHasSearched(true)
+      await fetchUsers(input.trim())
+      setInput('')
     }
   }
 
@@ -38,6 +46,7 @@ const Discover = () => {
     getToken().then((token)=>{
       dispatch(fetchUser(token))
     })
+    fetchUsers()
   },[])
 
   return (
@@ -65,6 +74,14 @@ const Discover = () => {
             <UserCard user={user} key={user._id}/>
           ))}
         </div>
+
+        {!loading && hasSearched && users.length === 0 && (
+          <div className='flex flex-col items-center justify-center py-16 text-slate-400'>
+            <Search className='w-12 h-12 mb-3 opacity-30'/>
+            <p className='text-lg font-medium'>No users found</p>
+            <p className='text-sm'>Try searching with a different name, username, or location</p>
+          </div>
+        )}
 
         {
           loading && (<Loading height='60vh'/>)

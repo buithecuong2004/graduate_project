@@ -44,19 +44,25 @@ const Feed = () => {
     }
   }, [hasMore, loading, page, getToken, dispatch])
 
-  return !loading ? (
+  return (
     <div ref={feedRef} onScroll={handleScroll} className='h-full overflow-y-scroll py-10 xl:pr-5 flex items-start justify-center xl:gap-8'>
        <div>
         <StoriesBar refreshTrigger={location.state?.refresh}/>
         <div className='p-4 space-y-6'>
-          {posts.map((post) => (
-            <PostCard key={post._id} post={post} onPostDeleted={handlePostDeleted}/>
-          ))}
-          {!hasMore && posts.length > 0 && (
-            <div className='text-center text-gray-500 py-8 text-sm'>
-              No more posts to load
-            </div>
-          )}
+          {loading && page === 1
+            ? <Loading height='60vh'/>
+            : <>
+                {posts.map((post) => (
+                  <PostCard key={post._id} post={post} onPostDeleted={handlePostDeleted}/>
+                ))}
+                {loading && page > 1 && <Loading height='10vh'/>}
+                {!hasMore && posts.length > 0 && (
+                  <div className='text-center text-gray-500 py-8 text-sm'>
+                    No more posts to load
+                  </div>
+                )}
+              </>
+          }
         </div>
        </div>
 
@@ -70,7 +76,7 @@ const Feed = () => {
         <RecentMessages/>
        </div>
     </div>
-  ) : <Loading/>
+  )
 }
 
 export default Feed

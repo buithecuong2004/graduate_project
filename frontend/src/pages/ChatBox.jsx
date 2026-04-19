@@ -89,7 +89,7 @@ const ChatBox = () => {
     if (messageTime.isSame(today, 'day')) {
       return messageTime.format('HH:mm')
     } else if (messageTime.isSame(yesterday, 'day')) {
-      return 'Hôm qua ' + messageTime.format('HH:mm')
+      return 'Yesterday ' + messageTime.format('HH:mm')
     } else if (messageTime.isSame(today, 'year')) {
       return messageTime.format('DD/MM HH:mm')
     } else {

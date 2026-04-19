@@ -97,16 +97,17 @@ export const discoverUsers = async (req,res) => {
         const { input } = req.body
 
         const currentUser = await User.findById(userId)
-        const allUsers = await User.find(
-            {
-                $or : [
+        const query = input
+            ? {
+                $or: [
                     {username: new RegExp(input, 'i')},
                     {email: new RegExp(input, 'i')},
                     {full_name: new RegExp(input, 'i')},
                     {location: new RegExp(input, 'i')},
                 ]
-            }
-        )
+              }
+            : {}
+        const allUsers = await User.find(query)
         const filteredUsers = allUsers.filter(user=> user._id != userId).map(user => ({
             ...user.toObject(),
             isFollowing: currentUser.following.includes(user._id),
@@ -270,6 +271,27 @@ export const acceptConnectionRequest = async (req, res) => {
         connection.status = 'accepted'
         await connection.save()
 
+        // Send acceptance notification via socket
+        const acceptingUser = await User.findById(userId)
+        const io = req.app.locals.io
+        if (io && acceptingUser) {
+            const acceptingUserData = {
+                _id: acceptingUser._id,
+                full_name: acceptingUser.full_name,
+                username: acceptingUser.username,
+                profile_picture: acceptingUser.profile_picture
+            }
+            const acceptanceNotification = {
+                type: 'connection_accepted',
+                data: {
+                    from_user: acceptingUserData,
+                    connection_id: connection._id
+                }
+            }
+            console.log('✅ Sending connection accepted notification to:', id, 'from:', acceptingUser.full_name)
+            io.to(`user-${id}`).emit('connection-accepted', acceptanceNotification)
+        }
+
         res.json({success: true, message: 'Connection accepted successfully'})
 
     } catch (error) {
@@ -310,6 +332,27 @@ export const removeConnection = async (req, res) => {
     }
 }
 
+export const declineConnectionRequest = async (req, res) => {
+    try {
+        const {userId} = req.auth()
+        const {id} = req.body
+
+        const connection = await Connection.findOne({from_user_id: id, to_user_id: userId, status: 'pending'})
+
+        if (!connection) {
+            return res.json({success: false, message: 'Connection request not found'})
+        }
+
+        await Connection.findByIdAndDelete(connection._id)
+
+        res.json({success: true, message: 'Connection request declined'})
+
+    } catch (error) {
+        console.log(error)
+        return res.json({success: false, message: error.message})
+    }
+}
+
 export const getUserProfiles = async (req, res) =>{
     try {
         const { profileId } = req.body
@@ -324,8 +367,3 @@ export const getUserProfiles = async (req, res) =>{
         res.json({success: false, message: error.message })
     }
 }
-
-
-
-
-

@@ -17,6 +17,8 @@ const NotificationModal = ({ isOpen, onClose }) => {
         switch(type) {
             case 'friend_request':
                 return '🤝'
+            case 'connection_accepted':
+                return '✅'
             case 'new_story':
                 return '📖'
             case 'new_post':
@@ -37,6 +39,8 @@ const NotificationModal = ({ isOpen, onClose }) => {
         switch(type) {
             case 'friend_request':
                 return `${data.from_user?.full_name || data.from_user?.username} sent you a friend request`
+            case 'connection_accepted':
+                return `${data.from_user?.full_name || data.from_user?.username} accepted your connection request`
             case 'new_story':
                 return `${data.user?.full_name || data.user?.username} posted a new story`
             case 'new_post':
@@ -62,7 +66,10 @@ const NotificationModal = ({ isOpen, onClose }) => {
         // Navigate based on notification type
         switch(type) {
             case 'friend_request':
-                navigate('/connections')
+                navigate('/connections', {state: { refresh: Date.now() } })
+                break
+            case 'connection_accepted':
+                navigate('/connections', {state: { refresh: Date.now() } })
                 break
             case 'new_story':
                  navigate('/feed', { state: { refresh: Date.now() } })
@@ -91,7 +98,8 @@ const NotificationModal = ({ isOpen, onClose }) => {
     const getNotificationUser = (notification) => {
         const { type, data } = notification
         switch(type) {
-            case 'friend_request':  return data?.from_user
+            case 'friend_request':      return data?.from_user
+            case 'connection_accepted': return data?.from_user
             case 'new_comment':     return data?.comment?.user
             case 'new_reply':       return data?.reply?.user
             default:                return data?.user  // new_like, new_post, new_story

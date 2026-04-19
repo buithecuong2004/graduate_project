@@ -83,6 +83,12 @@ const App = () => {
           dispatch(addNotification(notification))
         })
 
+        // Listen for connection accepted
+        socket.on('connection-accepted', (notification) => {
+          console.log('✅ Connection accepted:', notification)
+          dispatch(addNotification(notification))
+        })
+
         // Listen for new stories
         socket.on('new-story', (notification) => {
           console.log('📖 New story received:', notification)

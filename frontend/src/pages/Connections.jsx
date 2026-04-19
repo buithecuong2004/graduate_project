@@ -42,6 +42,22 @@ const Connections = () => {
     }
   }
 
+  const declineConnection = async (userId) => {
+    try {
+      const {data} = await api.post('/api/user/decline', {id: userId}, {
+        headers: {Authorization: `Bearer ${await getToken()}`}
+      })
+      if (data.success) {
+        toast.success(data.message)
+        dispatch(fetchConnections(await getToken()))
+      } else {
+        toast.error(data.message)
+      }
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
   const acceptConnection = async (userId) => {
     try {
       const {data}  = await api.post('/api/user/accept', {id: userId}, {
@@ -135,9 +151,15 @@ const Connections = () => {
                 }
                 {
                   currentTab === 'Pending' && (
-                  <button onClick={()=>acceptConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-green-100 text-green-700 hover:bg-green-200 active:scale-95 transition cursor-pointer border border-green-300'>
-                    Accept
-                  </button>
+                  <>
+                    <button onClick={()=>acceptConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-green-100 text-green-700 hover:bg-green-200 active:scale-95 transition cursor-pointer border border-green-300'>
+                      Accept
+                    </button>
+                    <button onClick={()=>declineConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 active:scale-95 transition cursor-pointer border border-red-300 flex items-center gap-2'>
+                      <X className='w-4 h-4'/>
+                      Decline
+                    </button>
+                  </>
                   )
                 }
                 {
