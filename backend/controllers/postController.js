@@ -210,6 +210,7 @@ export const getFeedPosts = async (req, res) => {
                 path: 'shared_from',
                 populate: { path: 'user' }
             })
+            .populate('reactions.user', 'full_name username profile_picture _id')
             .sort({createdAt: -1})
             .skip(skip)
             .limit(parseInt(limit))
@@ -236,7 +237,7 @@ export const getPostById = async (req, res) => {
         const post = await Post.findById(postId).populate('user').populate({
             path: 'shared_from',
             populate: { path: 'user' }
-        })
+        }).populate('reactions.user', 'full_name username profile_picture _id')
         
         if (!post) {
             return res.json({ success: false, message: 'Post not found' })
@@ -368,6 +369,7 @@ export const getComments = async (req, res) => {
             post: postId,
             parent_comment_id: { $in: [null, undefined] }
         })
+            .populate('reactions.user', 'username profile_picture full_name _id')
             .sort({createdAt: -1})
             .skip(skip)
             .limit(parseInt(limit))
@@ -461,6 +463,73 @@ export const likeComment = async (req, res) => {
             res.json({ success: true, message: 'Comment unliked' })
         }
 
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+export const reactComment = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const { commentId, reactionType } = req.body
+
+        const comment = await Comment.findById(commentId)
+        if (!comment) return res.json({ success: false, message: 'Comment not found' })
+
+        if (!comment.reactions) comment.reactions = []
+
+        const existingReactionIndex = comment.reactions.findIndex(r => r.user.toString() === userId)
+        let isNewReaction = false;
+
+        if (existingReactionIndex !== -1) {
+            if (comment.reactions[existingReactionIndex].type === reactionType) {
+                comment.reactions.splice(existingReactionIndex, 1)
+            } else {
+                comment.reactions[existingReactionIndex].type = reactionType
+                isNewReaction = true;
+            }
+        } else {
+            comment.reactions.push({ user: userId, type: reactionType })
+            isNewReaction = true;
+        }
+
+        // Migrate legacy like if exists
+        if (comment.likes_count && comment.likes_count.includes(userId)) {
+            comment.likes_count = comment.likes_count.filter(id => id !== userId);
+        }
+
+        await comment.save()
+
+        await comment.populate({
+            path: 'reactions.user',
+            select: 'full_name username profile_picture _id'
+        })
+
+        res.json({ success: true, message: 'Reaction updated', reactions: comment.reactions })
+
+        const commentAuthor = comment.user
+        if(isNewReaction && userId !== commentAuthor.toString()) {
+            const reactor = await User.findById(userId)
+            const io = req.app.locals.io
+            if(io && reactor) {
+                const reactionNotification = {
+                    type: 'new_reaction',
+                    data: {
+                        post_id: comment.post.toString(),
+                        liked_type: 'comment',
+                        reaction: reactionType,
+                        user: {
+                            _id: reactor._id,
+                            full_name: reactor.full_name,
+                            username: reactor.username,
+                            profile_picture: reactor.profile_picture
+                        }
+                    }
+                }
+                io.to(`user-${commentAuthor}`).emit('new-reaction-notification', reactionNotification)
+            }
+        }
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -588,6 +657,7 @@ export const getReplies = async (req, res) => {
         }
 
         let replies = await Comment.find({ _id: { $in: parentComment.replies } })
+            .populate('reactions.user', 'username profile_picture full_name _id')
             .sort({createdAt: 1})
 
         // Manually fetch user data
@@ -659,6 +729,81 @@ export const deleteReply = async (req, res) => {
         await Comment.findByIdAndDelete(replyId)
 
         res.json({ success: true, message: 'Reply deleted' })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// React to post
+export const reactPost = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const { postId, reactionType } = req.body
+
+        const post = await Post.findById(postId)
+        if (!post) {
+            return res.json({ success: false, message: 'Post not found' })
+        }
+
+        if (!post.reactions) post.reactions = []
+
+        const existingReactionIndex = post.reactions.findIndex(r => r.user.toString() === userId)
+        let isNewReaction = false;
+
+        if (existingReactionIndex !== -1) {
+            if (post.reactions[existingReactionIndex].type === reactionType) {
+                // Remove reaction if clicking the same one
+                post.reactions.splice(existingReactionIndex, 1)
+            } else {
+                // Update reaction type
+                post.reactions[existingReactionIndex].type = reactionType
+                isNewReaction = true;
+            }
+        } else {
+            // Add new reaction
+            post.reactions.push({ user: userId, type: reactionType })
+            isNewReaction = true;
+        }
+
+        // Migrate legacy like if exists
+        if (post.likes_count && post.likes_count.includes(userId)) {
+            post.likes_count = post.likes_count.filter(id => id !== userId);
+        }
+
+        await post.save()
+        
+        // Populate user data for frontend
+        await post.populate({
+            path: 'reactions.user',
+            select: 'full_name username profile_picture _id'
+        })
+
+        res.json({ success: true, message: 'Reaction updated', reactions: post.reactions })
+
+        // Notification
+        const postOwner = post.user.toString()
+        if (isNewReaction && userId !== postOwner) {
+            const reactor = await User.findById(userId)
+            const io = req.app.locals.io
+            if (io && reactor) {
+                const reactionNotification = {
+                    type: 'new_reaction',
+                    data: {
+                        post_id: postId,
+                        liked_type: 'post',
+                        reaction: reactionType,
+                        user: {
+                            _id: reactor._id,
+                            full_name: reactor.full_name,
+                            username: reactor.username,
+                            profile_picture: reactor.profile_picture
+                        }
+                    }
+                }
+                io.to(`user-${postOwner}`).emit('new-reaction-notification', reactionNotification)
+            }
+        }
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })

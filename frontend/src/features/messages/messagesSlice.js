@@ -45,6 +45,14 @@ const messagesSlice = createSlice({
                     : msg
             )
         },
+        updateMessageReactionsLocal: (state, action) => {
+            const { messageId, reactions } = action.payload
+            state.messages = state.messages.map(msg =>
+                msg._id === messageId
+                    ? { ...msg, reactions }
+                    : msg
+            )
+        },
     },
     extraReducers: (builder) => {
         builder.addCase(fetchMessages.fulfilled, (state, action) => {
@@ -62,6 +70,7 @@ export const {
     setNewMessageTrigger,
     deleteMessageLocal,
     editMessageLocal,
+    updateMessageReactionsLocal,
 } = messagesSlice.actions
 
 export default messagesSlice.reducer

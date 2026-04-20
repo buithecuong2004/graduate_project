@@ -14,11 +14,16 @@ const Notification = ({ t, message }) => {
 
     const sender = message.from_user_id
     const isPostLink = message.text?.includes('/post/')
-    const messageText = isPostLink
-        ? '🔗 Shared a post with you'
-        : message.text
-            ? message.text.length > 30 ? message.text.slice(0, 30) + '...' : message.text
-            : 'Media'
+    const isStoryReply = message.is_forwarded && message.forwarded_type === 'story'
+    
+    let messageText = 'Media';
+    if (isPostLink) {
+        messageText = '🔗 Shared a post with you';
+    } else if (isStoryReply) {
+        messageText = 'Replied to your story';
+    } else if (message.text) {
+        messageText = message.text.length > 30 ? message.text.slice(0, 30) + '...' : message.text;
+    }
 
     console.log('✅ Notification rendering:', sender.full_name, messageText)
 

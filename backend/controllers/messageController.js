@@ -38,6 +38,16 @@ const populateMessage = async (msgObj) => {
         }
     }
 
+    if (msgObj.reactions && msgObj.reactions.length > 0) {
+        msgObj.reactions = await Promise.all(msgObj.reactions.map(async r => {
+            if (r.user && !r.user.full_name) {
+                const reactor = await User.findById(r.user).select('full_name username profile_picture _id').lean()
+                r.user = reactor || r.user
+            }
+            return r
+        }))
+    }
+
     return msgObj
 }
 
@@ -371,6 +381,86 @@ export const editMessage = async (req, res) => {
             io.to(`user-${message.to_user_id}`).emit('message-edited', { messageId, text: message.text })
         }
     } catch (error) {
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// React to Message
+// ─────────────────────────────────────────────────────────────────
+export const reactMessage = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const { messageId, reactionType } = req.body
+
+        const message = await Message.findById(messageId)
+        if (!message) {
+            return res.json({ success: false, message: 'Message not found' })
+        }
+
+        if (!message.reactions) message.reactions = []
+
+        const existingReactionIndex = message.reactions.findIndex(r => r.user.toString() === userId)
+        let isNewReaction = false;
+
+        if (existingReactionIndex !== -1) {
+            if (message.reactions[existingReactionIndex].type === reactionType) {
+                message.reactions.splice(existingReactionIndex, 1)
+            } else {
+                message.reactions[existingReactionIndex].type = reactionType
+                isNewReaction = true;
+            }
+        } else {
+            message.reactions.push({ user: userId, type: reactionType })
+            isNewReaction = true;
+        }
+
+        await message.save()
+        
+        await message.populate({
+            path: 'reactions.user',
+            select: 'full_name username profile_picture _id'
+        })
+
+        const msgObj = message.toObject()
+        const populatedMsg = await populateMessage(msgObj)
+
+        res.json({ success: true, message: 'Reaction updated', messageData: populatedMsg })
+
+        const io = req.app.locals.io
+        if (io) {
+            const messageOwner = message.from_user_id.toString()
+            const otherUser = messageOwner === userId ? message.to_user_id.toString() : messageOwner
+            
+            io.to(`user-${otherUser}`).emit('message-reaction-updated', { messageId, reactions: populatedMsg.reactions })
+
+            if (isNewReaction && userId !== messageOwner) {
+                const latestMsgFromOther = await Message.findOne({ from_user_id: messageOwner, to_user_id: userId }).sort({ createdAt: -1 })
+                
+                if (latestMsgFromOther && latestMsgFromOther._id.toString() === messageId.toString()) {
+                    const reactor = await User.findById(userId)
+                    if (reactor) {
+                        const reactionNotification = {
+                            type: 'new_message_reaction',
+                            data: {
+                                message_id: messageId,
+                                reaction: reactionType,
+                                text: `Reacted ${reactionType} to your message`,
+                                user: {
+                                    _id: reactor._id,
+                                    full_name: reactor.full_name,
+                                    username: reactor.username,
+                                    profile_picture: reactor.profile_picture
+                                }
+                            }
+                        }
+                        io.to(`user-${messageOwner}`).emit('new-message-reaction-notification', reactionNotification)
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.log(error)
         res.json({ success: false, message: error.message })
     }
 }

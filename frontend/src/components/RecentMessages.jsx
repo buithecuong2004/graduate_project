@@ -107,7 +107,11 @@ const RecentMessages = () => {
                         content = 'Message recalled'
                     } else if (msg.is_forwarded) {
                         const ft = msg.forwarded_type
-                        content = ft === 'link' ? 'Forwarded a link' : 'Forwarded a message'
+                        if (ft === 'story') {
+                            content = isFromMe ? (messageText || 'Replied to a story') : 'Replied your story'
+                        } else {
+                            content = ft === 'link' ? 'Forwarded a link' : 'Forwarded a message'
+                        }
                     } else if (msg.reply_to) {
                         content = 'Replied a message...'
                     } else if (messageText) {
@@ -122,9 +126,18 @@ const RecentMessages = () => {
                         content = 'Media'
                     }
 
-                    const displayText = (msg.is_deleted || msg.is_forwarded || msg.reply_to)
-                        ? content
-                        : isFromMe ? `You: ${content}` : content
+                    let displayText = ''
+                    if (msg.is_deleted || msg.reply_to) {
+                        displayText = content
+                    } else if (msg.is_forwarded) {
+                        if (msg.forwarded_type === 'story') {
+                            displayText = isFromMe ? `You: ${content}` : content
+                        } else {
+                            displayText = content
+                        }
+                    } else {
+                        displayText = isFromMe ? `You: ${content}` : content
+                    }
 
                     // ✅ Nếu đang mở ChatBox của người này thì coi như đã đọc hết
                     const isActiveChat = activeChatUserId === conversation.sender._id

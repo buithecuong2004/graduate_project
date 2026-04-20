@@ -4,11 +4,15 @@ import { useDispatch, useSelector } from 'react-redux'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import api from '../api/axios'
-import { addMessages, fetchMessages, resetMessages, deleteMessageLocal, editMessageLocal } from '../features/messages/messagesSlice'
+import { addMessages, fetchMessages, resetMessages, deleteMessageLocal, editMessageLocal, updateMessageReactionsLocal } from '../features/messages/messagesSlice'
 import toast from 'react-hot-toast'
 import Loading from '../components/Loading'
 import moment from 'moment'
 import ChatMediaViewer from '../components/ChatMediaViewer'
+import { SmilePlus } from 'lucide-react'
+import ReactionPicker, { REACTION_ICONS } from '../components/ReactionPicker'
+import ReactionListModal from '../components/ReactionListModal'
+import StoryViewer from '../components/StoryViewer'
 
 const ChatBox = () => {
 
@@ -53,15 +57,34 @@ const ChatBox = () => {
   const [forwardSelected, setForwardSelected] = useState([])
   const [forwardSearch, setForwardSearch] = useState('')
 
-  // Media Viewer states
+  // Media Viewer and Reaction states
   const [mediaViewerOpen, setMediaViewerOpen] = useState(false)
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0)
+  const [reactionMenuId, setReactionMenuId] = useState(null)
+  const [showReactionListMsg, setShowReactionListMsg] = useState(null)
+  const [viewStory, setViewStory] = useState(null)
+
+  const handleStoryClick = async (storyId) => {
+    if (!storyId) return toast.error('Story is no longer available')
+    try {
+      const token = await getToken()
+      const { data } = await api.get(`/api/story/${storyId}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (data.success && data.story) {
+        setMediaViewerOpen(false)
+        setViewStory(data.story)
+      } else {
+        toast.error('Story is no longer available')
+      }
+    } catch (e) {
+      toast.error('Failed to load story')
+    }
+  }
 
   const allMedia = React.useMemo(() => {
     const mediaItems = []
     const sortedMessages = [...messages].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
     sortedMessages.forEach(msg => {
-      if (!msg.is_deleted && msg.message_type !== 'voice' && msg.media_urls && msg.media_urls.length > 0) {
+      if (!msg.is_deleted && msg.message_type !== 'voice' && msg.forwarded_type !== 'story' && msg.media_urls && msg.media_urls.length > 0) {
         msg.media_urls.forEach(url => {
           mediaItems.push({
             url,
@@ -78,6 +101,7 @@ const ChatBox = () => {
     const idx = allMedia.findIndex(m => m.url === url)
     if (idx !== -1) {
       setCurrentMediaIndex(idx)
+      setViewStory(null)
       setMediaViewerOpen(true)
     }
   }
@@ -290,6 +314,18 @@ const ChatBox = () => {
     setOpenMenuId(null)
   }
 
+  const handleReactMessage = async (messageId, reactionType) => {
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/message/react', { messageId, reactionType }, { headers: { Authorization: `Bearer ${token}` } })
+      if (data.success) {
+        dispatch(updateMessageReactionsLocal({ messageId, reactions: data.messageData.reactions }))
+      } else toast.error(data.message)
+    } catch (e) { toast.error(e.message) }
+    setReactionMenuId(null)
+    setOpenMenuId(null)
+  }
+
   const handleForwardOpen = (message) => {
     setForwardingMsg(message)
     setShowForwardModal(true)
@@ -477,6 +513,19 @@ const ChatBox = () => {
             const showTimestamp = shouldShowTimestamp(message, previousMessage)
             const isVoice = message.message_type === 'voice'
             const menuOpen = openMenuId === message._id
+            const reactionMenuOpen = reactionMenuId === message._id
+            
+            // Calculate reactions
+            const reactions = message.reactions || []
+            const reactionCounts = reactions.reduce((acc, r) => {
+                acc[r.type] = (acc[r.type] || 0) + 1;
+                return acc;
+            }, {})
+            const topReactions = Object.entries(reactionCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(entry => entry[0])
+            const currentUserReaction = reactions.find(r => (r.user?._id || r.user) === currentUser?._id)?.type;
 
             // ── Inline action buttons (no pill, no border) ──────────
             const ActionButtons = ({ side }) => !message.is_deleted && (
@@ -492,6 +541,20 @@ const ChatBox = () => {
                 >
                   <Reply size={15} />
                 </button>
+                <div className='relative'>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setReactionMenuId(reactionMenuOpen ? null : message._id); setOpenMenuId(null) }}
+                    className='p-1 text-gray-400 hover:text-indigo-500 transition-colors'
+                    title='React'
+                  >
+                    <SmilePlus size={15} />
+                  </button>
+                  {reactionMenuOpen && (
+                    <div className={`absolute ${isOwn ? 'right-0' : 'left-0'} bottom-8 z-50`} onClick={e => e.stopPropagation()}>
+                      <ReactionPicker onReact={(type) => handleReactMessage(message._id, type)} currentReaction={currentUserReaction} />
+                    </div>
+                  )}
+                </div>
                 <div className='relative'>
                   <button
                     onClick={(e) => { e.stopPropagation(); setOpenMenuId(menuOpen ? null : message._id) }}
@@ -547,14 +610,15 @@ const ChatBox = () => {
 
                 {/* ── Message row: [actions-left] [bubble] [actions-right] ── */}
                 <div
-                  className={`group flex items-end gap-1 ${isOwn ? 'justify-end' : 'justify-start'} mb-0.5`}
-                  onClick={() => setOpenMenuId(null)}
+                  className={`group flex items-end gap-1 ${isOwn ? 'justify-end' : 'justify-start'} mb-3 relative`}
+                  onClick={() => { setOpenMenuId(null); setReactionMenuId(null) }}
                 >
                   {/* Own messages: actions LEFT of bubble */}
                   {isOwn && <ActionButtons side='left' />}
-
-                  {/* ── Bubble ── */}
-                  <div className={`
+                  
+                  <div className='flex flex-col relative'>
+                    {/* ── Bubble ── */}
+                    <div className={`
                     p-3 text-sm
                     max-w-[70vw] md:max-w-lg lg:max-w-xl
                     rounded-2xl shadow-sm
@@ -566,7 +630,7 @@ const ChatBox = () => {
                     }
                   `}>
                     {/* Forward label */}
-                    {message.is_forwarded && !message.is_deleted && (
+                    {message.is_forwarded && !message.is_deleted && message.forwarded_type !== 'story' && (
                       <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
                         <CornerUpRight size={10} /> Forwarded
                       </p>
@@ -589,6 +653,34 @@ const ChatBox = () => {
 
                     {message.is_deleted ? (
                       <p>Message recalled</p>
+                    ) : message.is_forwarded && message.forwarded_type === 'story' ? (
+                      <div className='flex items-center gap-3'>
+                        <div className='w-14 h-20 bg-black/10 rounded-lg overflow-hidden shrink-0 shadow-sm cursor-pointer relative group' onClick={() => handleStoryClick(message.shared_story_id)}>
+                           {message.message_type === 'video' && mediaUrls[0] ? (
+                              <>
+                                <video src={mediaUrls[0]} className='w-full h-full object-cover' />
+                                <div className='absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/40 transition'>
+                                  <div className="w-0 h-0 border-t-[4px] border-t-transparent border-l-[6px] border-l-white border-b-[4px] border-b-transparent ml-0.5"></div>
+                                </div>
+                              </>
+                           ) : mediaUrls[0] ? (
+                              <img src={mediaUrls[0]} className='w-full h-full object-cover group-hover:brightness-90 transition' />
+                           ) : (
+                              <div className='w-full h-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center'>
+                                 <span className='text-white text-xs font-bold'>Aa</span>
+                              </div>
+                           )}
+                        </div>
+                        <div className='flex-1 flex flex-col justify-center min-w-[120px]'>
+                           <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
+                              <CornerUpRight size={10} /> Replied to story
+                           </p>
+                           {message.text && renderMessageText(message.text)}
+                           {message.is_edited && (
+                              <span className={`text-[10px] mt-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · edited</span>
+                           )}
+                        </div>
+                      </div>
                     ) : (
                       <>
                         {isVoice && mediaUrls.length > 0 && (
@@ -622,6 +714,24 @@ const ChatBox = () => {
                         )}
                       </>
                     )}
+                    
+                    {/* Reactions display half-outside bottom-right */}
+                    {!message.is_deleted && topReactions.length > 0 && (
+                      <div 
+                        className={`absolute -bottom-2.5 ${isOwn ? 'right-0' : 'right-0'} translate-x-1/4 w-fit rounded-full px-1.5 py-0.5 flex items-center cursor-pointer hover:scale-105 transition bg-white shadow-sm border border-gray-200 z-10`}
+                        onClick={(e) => { e.stopPropagation(); setShowReactionListMsg(message) }}
+                      >
+                        <div className="flex -space-x-1">
+                          {topReactions.map((type, idx) => (
+                            <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{zIndex: 3-idx}}>
+                              {REACTION_ICONS[type]}
+                            </span>
+                          ))}
+                        </div>
+                        {reactions.length > 1 && <span className={`text-[10px] font-medium ml-1 text-gray-500`}>{reactions.length}</span>}
+                      </div>
+                    )}
+                    </div>
                   </div>
 
                   {/* Others' messages: actions RIGHT of bubble */}
@@ -823,6 +933,23 @@ const ChatBox = () => {
           currentIndex={currentMediaIndex}
           onClose={() => setMediaViewerOpen(false)}
           onNavigate={setCurrentMediaIndex}
+        />
+      )}
+
+      {/* Reaction List Modal */}
+      <ReactionListModal 
+        isOpen={!!showReactionListMsg}
+        onClose={() => setShowReactionListMsg(null)}
+        reactions={showReactionListMsg?.reactions || []}
+      />
+
+      {/* Story Viewer */}
+      {viewStory && (
+        <StoryViewer 
+          viewStory={viewStory}
+          setViewStory={setViewStory}
+          currentUser={currentUser}
+          onDeleteStory={null}
         />
       )}
 

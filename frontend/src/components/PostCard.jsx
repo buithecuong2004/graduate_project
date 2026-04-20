@@ -10,16 +10,20 @@ import toast from 'react-hot-toast'
 import ConfirmDialog from './ConfirmDialog'
 import CommentModal from './CommentModal'
 import ShareModal from './ShareModal'
+import ReactionPicker, { REACTION_ICONS } from './ReactionPicker'
+import ReactionListModal from './ReactionListModal'
 
 const PostCard = ({post, onPostDeleted}) => {
 
     const postWithHashtags = post.content.replace(/(#\w+)/g, '<span class="text-indigo-600">$1</span>')
     const [likes, setLikes] = useState(Array.isArray(post.likes_count) ? post.likes_count : [])
+    const [reactions, setReactions] = useState(post.reactions || [])
     const [shares, setShares] = useState(post.shares_count || [])
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [showCommentModal, setShowCommentModal] = useState(false)
     const [showShareModal, setShowShareModal] = useState(false)
+    const [showReactionList, setShowReactionList] = useState(false)
     const commentCount = post.total_comments_count ?? post.comments?.length ?? 0
     const currentUser = useSelector((state)=>state.user.value)
     const dispatch = useDispatch()
@@ -32,14 +36,9 @@ const PostCard = ({post, onPostDeleted}) => {
         try {
             const {data} = await api.post('/api/post/like',{postId: post._id}, {headers: {Authorization: `Bearer ${await getToken()}`}})
             if (data.success) {
-                toast.success(data.message)
-                setLikes(prev=>{
-                    if(prev.includes(currentUser._id)) {
-                        return prev.filter(id=> id != currentUser._id)
-                    } else {
-                        return [...prev, currentUser._id]
-                    }
-                })
+                // If it's a simple like, we still call the backend like API for legacy, 
+                // but we also can just call reactPost with 'like'
+                handleReact('like');
             } else {
                 toast(data.message)
             }
@@ -47,6 +46,53 @@ const PostCard = ({post, onPostDeleted}) => {
             toast.error(error.message)
         }
     }
+
+    const handleReact = async (reactionType) => {
+        try {
+            const {data} = await api.post('/api/post/react', {postId: post._id, reactionType}, {headers: {Authorization: `Bearer ${await getToken()}`}})
+            if (data.success) {
+                setReactions(data.reactions)
+                setLikes(prev => prev.filter(id => id !== currentUser._id))
+            } else {
+                toast(data.message)
+            }
+        } catch (error) {
+            toast.error(error.message)
+        }
+    }
+
+    // Reaction summary calculation
+    const reactionCounts = reactions.reduce((acc, r) => {
+        acc[r.type] = (acc[r.type] || 0) + 1;
+        return acc;
+    }, {});
+    
+    // Add old likes to 'like' count if they aren't already in reactions
+    let oldLikesCount = 0;
+    if (likes && likes.length > 0) {
+        const usersInReactions = new Set(reactions.map(r => r.user?._id || r.user));
+        oldLikesCount = likes.filter(userId => !usersInReactions.has(userId)).length;
+        if (oldLikesCount > 0) {
+            reactionCounts['like'] = (reactionCounts['like'] || 0) + oldLikesCount;
+        }
+    }
+
+    // Get top 3 reactions for icons
+    const topReactions = Object.entries(reactionCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(entry => entry[0]);
+
+    const totalReactions = reactions.length + oldLikesCount;
+    
+    // Check if current user reacted (from new reactions array)
+    const currentUserReactionObj = reactions.find(r => 
+        (r.user?._id || r.user) === currentUser._id
+    );
+    // If not in reactions array, fallback to old likes array
+    const currentUserReaction = currentUserReactionObj 
+        ? currentUserReactionObj.type 
+        : (likes.includes(currentUser._id) ? 'like' : null);
 
     const handleDelete = async () => {
         try {
@@ -146,19 +192,50 @@ const PostCard = ({post, onPostDeleted}) => {
             </div>
         )}
 
-        <div className='flex items-center gap-4 text-gray-600 text-sm pt-2 border-t border-gray-300'>
-            <div className='flex items-center gap-1'>
-                <Heart className={`w-4 h-4 cursor-pointer ${likes.includes(currentUser._id) && 'text-red-500 fill-red-500'}`} onClick={handleLike}/>
-                <span>{likes.length}</span>
+        <div className='flex items-center justify-between text-gray-600 text-sm pt-2 border-t border-gray-300'>
+            <div className='flex items-center gap-4'>
+                <div className='group relative flex items-center gap-1 cursor-pointer'>
+                    {/* Hover Reaction Menu */}
+                    <div className="absolute bottom-full left-0 pb-2 hidden group-hover:block z-20">
+                        <ReactionPicker onReact={handleReact} currentReaction={currentUserReaction} />
+                    </div>
+                    {/* Like Button */}
+                    <div onClick={() => handleReact('like')} className={`flex items-center gap-1 hover:text-indigo-600 ${currentUserReaction ? 'text-indigo-600' : ''}`}>
+                        {currentUserReaction ? (
+                            <span className="text-xl leading-none">{REACTION_ICONS[currentUserReaction]}</span>
+                        ) : (
+                            <Heart className={`w-4 h-4 ${likes.includes(currentUser._id) && 'text-red-500 fill-red-500'}`} />
+                        )}
+                        <span className="capitalize">{currentUserReaction || 'Like'}</span>
+                    </div>
+                </div>
+                
+                <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowCommentModal(true)}>
+                    <MessageCircle className='w-4 h-4'/>
+                    <span>{commentCount}</span>
+                </div>
+                <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowShareModal(true)}>
+                    <Share2 className='w-4 h-4'/>
+                    <span>{shares.length}</span>
+                </div>
             </div>
-            <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowCommentModal(true)}>
-                <MessageCircle className='w-4 h-4'/>
-                <span>{commentCount}</span>
-            </div>
-            <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowShareModal(true)}>
-                <Share2 className='w-4 h-4'/>
-                <span>{shares.length}</span>
-            </div>
+
+            {/* Reaction Summary */}
+            {totalReactions > 0 && (
+                <div 
+                    className="flex items-center gap-1 cursor-pointer hover:underline"
+                    onClick={() => setShowReactionList(true)}
+                >
+                    <div className="flex -space-x-1">
+                        {topReactions.map((type, idx) => (
+                            <span key={type} className="text-sm bg-white rounded-full z-10" style={{zIndex: 3-idx}}>
+                                {REACTION_ICONS[type]}
+                            </span>
+                        ))}
+                    </div>
+                    <span>{totalReactions}</span>
+                </div>
+            )}
         </div>
 
         <ConfirmDialog
@@ -186,6 +263,12 @@ const PostCard = ({post, onPostDeleted}) => {
             onClose={() => setShowShareModal(false)}
             post={post}
             onShareAdded={() => setShares([...shares, currentUser._id])}
+        />
+
+        <ReactionListModal 
+            isOpen={showReactionList}
+            onClose={() => setShowReactionList(false)}
+            reactions={reactions}
         />
     </div>
   )

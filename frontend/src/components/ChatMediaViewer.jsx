@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 
 const ChatMediaViewer = ({ mediaList, currentIndex, onClose, onNavigate }) => {
@@ -26,8 +27,9 @@ const ChatMediaViewer = ({ mediaList, currentIndex, onClose, onNavigate }) => {
 
   const isVideo = activeMedia.type === 'video';
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center backdrop-blur-sm">
+      {/* ... (rest of component content) */}
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-end items-center z-10 bg-gradient-to-b from-black/50 to-transparent">
         <a href={activeMedia.url} target="_blank" rel="noreferrer" download className="p-2 text-white/70 hover:text-white transition rounded-full hover:bg-white/10 mr-2">
@@ -102,7 +104,8 @@ const ChatMediaViewer = ({ mediaList, currentIndex, onClose, onNavigate }) => {
           })}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

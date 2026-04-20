@@ -18,7 +18,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { fetchUser } from './features/user/userSlice'
 import { fetchConnections } from './features/connections/connectionsSlice'
 import { useRef } from 'react'
-import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal } from './features/messages/messagesSlice'
+import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal, updateMessageReactionsLocal } from './features/messages/messagesSlice'
 import { addNotification } from './features/notifications/notificationsSlice'
 import toast from 'react-hot-toast'
 import { Navigate } from 'react-router-dom'
@@ -86,6 +86,10 @@ const App = () => {
          dispatch(deleteMessageLocal(messageId))
        })
 
+       socket.on('message-reaction-updated', ({ messageId, reactions }) => {
+         dispatch(updateMessageReactionsLocal({ messageId, reactions }))
+       })
+
         // Listen for friend requests
         socket.on('friend-request', (notification) => {
           console.log('🤝 Friend request received:', notification)
@@ -125,6 +129,22 @@ const App = () => {
         // Listen for likes
         socket.on('new-like-notification', (notification) => {
           console.log('👍 New like notification:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        // Listen for reactions
+        socket.on('new-reaction-notification', (notification) => {
+          console.log('😮 New reaction notification:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        socket.on('new-message-reaction-notification', (notification) => {
+          console.log('😮 New message reaction notification:', notification)
+          dispatch(addNotification(notification))
+        })
+
+        socket.on('new-story-reaction-notification', (notification) => {
+          console.log('😮 New story reaction notification:', notification)
           dispatch(addNotification(notification))
         })
 

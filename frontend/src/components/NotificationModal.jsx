@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { markAsRead, removeNotification, markAllAsRead } from '../features/notifications/notificationsSlice'
 import { X, Trash2, CheckCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { REACTION_ICONS } from './ReactionPicker'
 
 const NotificationModal = ({ isOpen, onClose }) => {
     if (!isOpen) return null
@@ -29,6 +30,10 @@ const NotificationModal = ({ isOpen, onClose }) => {
                 return '💬'
             case 'new_like':
                 return '👍'
+            case 'new_reaction':
+            case 'new_message_reaction':
+            case 'new_story_reaction':
+                return '😮'
             default:
                 return '🔔'
         }
@@ -51,6 +56,12 @@ const NotificationModal = ({ isOpen, onClose }) => {
                 return `${data.reply?.user?.full_name || data.reply?.user?.username} replied to your comment`
             case 'new_like':
                 return `${data.user?.full_name || data.user?.username} liked your ${data.liked_type === 'post' ? 'post' : 'comment'}`
+            case 'new_reaction':
+                return <span>{data.user?.full_name || data.user?.username} reacted <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> to your post</span>
+            case 'new_message_reaction':
+                return <span>{data.user?.full_name || data.user?.username} reacted <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> to your message</span>
+            case 'new_story_reaction':
+                return <span>{data.user?.full_name || data.user?.username} reacted <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> to your story</span>
             default:
                 return notification.message || 'New notification'
         }
@@ -89,6 +100,15 @@ const NotificationModal = ({ isOpen, onClose }) => {
                 } else if (data.post_id) {
                     navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
                 }
+                break
+            case 'new_reaction':
+                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
+                break
+            case 'new_message_reaction':
+                navigate(`/messages/${data.user?._id}`)
+                break
+            case 'new_story_reaction':
+                navigate(`/feed`, { state: { refresh: Date.now() } })
                 break
         }
         onClose()
@@ -175,9 +195,9 @@ const NotificationModal = ({ isOpen, onClose }) => {
 
                                     {/* Content */}
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-xs sm:text-sm font-medium text-gray-900 line-clamp-2 break-words">
+                                        <div className="text-xs sm:text-sm font-medium text-gray-900 line-clamp-2 break-words">
                                             {getNotificationText(notification)}
-                                        </p>
+                                        </div>
                                         <p className="text-xs text-gray-500 mt-1">
                                             {new Date(notification.createdAt).toLocaleString()}
                                         </p>

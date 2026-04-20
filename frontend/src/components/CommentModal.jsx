@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Heart, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Heart, ChevronDown, ChevronUp, SmilePlus } from 'lucide-react'
 import moment from 'moment'
 import { useSelector } from 'react-redux'
 import { useAuth } from '@clerk/clerk-react'
@@ -7,6 +7,8 @@ import { useNavigate } from 'react-router-dom'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 import ConfirmDialog from './ConfirmDialog'
+import ReactionPicker, { REACTION_ICONS } from './ReactionPicker'
+import ReactionListModal from './ReactionListModal'
 
 const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onTotalCount, onCountChange }) => {
     const [comments, setComments] = useState([])
@@ -25,6 +27,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     const currentUser = useSelector((state) => state.user.value)
     const { getToken } = useAuth()
     const navigate = useNavigate()
+    const [showReactionListMsg, setShowReactionListMsg] = useState(null)
 
     useEffect(() => {
         if (isOpen && post?._id) {
@@ -217,6 +220,28 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         }
     }
 
+    const handleReactComment = async (commentId, type) => {
+        try {
+            const token = await getToken()
+            const { data } = await api.post(
+                '/api/post/comment/react',
+                { commentId, reactionType: type },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+            if (data.success) {
+                setComments(prev =>
+                    prev.map(c => c._id === commentId ? { 
+                        ...c, 
+                        reactions: data.reactions,
+                        likes_count: c.likes_count?.filter(id => id !== currentUser._id) || []
+                    } : c)
+                )
+            }
+        } catch (error) {
+            toast.error('Failed to react')
+        }
+    }
+
     const handleLikeReply = async (replyId, commentId) => {
         const alreadyLiked = replies[commentId]?.find(r => r._id === replyId)?.likes_count?.includes(currentUser._id)
 
@@ -259,6 +284,29 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 )
             }))
             toast.error('Failed to like reply')
+        }
+    }
+
+    const handleReactReply = async (replyId, commentId, type) => {
+        try {
+            const token = await getToken()
+            const { data } = await api.post(
+                '/api/post/comment/react',
+                { commentId: replyId, reactionType: type },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+            if (data.success) {
+                setReplies(prev => ({
+                    ...prev,
+                    [commentId]: (prev[commentId] || []).map(r => r._id === replyId ? { 
+                        ...r, 
+                        reactions: data.reactions,
+                        likes_count: r.likes_count?.filter(id => id !== currentUser._id) || []
+                    } : r)
+                }))
+            }
+        } catch (error) {
+            toast.error('Failed to react')
         }
     }
 
@@ -351,26 +399,51 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                     <p className='text-gray-800 text-sm mt-2'>{comment.content}</p>
                     <div className='flex items-center gap-4 mt-2 text-xs text-gray-500'>
                         <span>{moment(comment.createdAt).fromNow()}</span>
-                        <button
-                            onClick={() => isReply ? handleLikeReply(comment._id, comment.parent_comment_id) : handleLikeComment(comment._id)}
-                            className='flex items-center gap-1 hover:text-indigo-600'
-                        >
-                            <Heart
-                                className={`w-4 h-4 ${
-                                    comment.likes_count?.includes(currentUser._id)
-                                        ? 'text-red-500 fill-red-500'
-                                        : ''
-                                }`}
-                            />
-                            <span>{comment.likes_count?.length || 0}</span>
-                        </button>
+                        
+                        <div className='relative group/reaction pb-2 mb-[-8px] pt-2 mt-[-8px]'>
+                            <button
+                                className='flex items-center gap-1 hover:text-indigo-600 text-gray-400'
+                            >
+                                <SmilePlus className={`w-4 h-4 ${comment.reactions?.some(r => (r.user?._id || r.user) === currentUser?._id) ? 'text-indigo-600' : ''}`} />
+                            </button>
+                            {/* Hover Reaction Picker */}
+                            <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 invisible group-hover/reaction:opacity-100 group-hover/reaction:visible transition-all duration-200 z-50'>
+                                <ReactionPicker 
+                                    onReact={(type) => isReply ? handleReactReply(comment._id, comment.parent_comment_id, type) : handleReactComment(comment._id, type)} 
+                                    currentReaction={comment.reactions?.find(r => (r.user?._id || r.user) === currentUser?._id)?.type}
+                                />
+                            </div>
+                        </div>
+
                         {!isReply && (
                             <button
                                 onClick={() => setReplyCommentId(comment._id)}
-                                className='hover:text-indigo-600'
+                                className='hover:text-indigo-600 font-medium'
                             >
                                 Reply
                             </button>
+                        )}
+                        
+                        {/* Reaction Display */}
+                        {comment.reactions && comment.reactions.length > 0 && (
+                            <div 
+                                className='flex items-center cursor-pointer hover:underline text-gray-500'
+                                onClick={() => setShowReactionListMsg(comment)}
+                            >
+                                <div className="flex -space-x-1 mr-1">
+                                    {Object.entries(
+                                        comment.reactions.reduce((acc, r) => {
+                                            acc[r.type] = (acc[r.type] || 0) + 1;
+                                            return acc;
+                                        }, {})
+                                    ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([type], idx) => (
+                                        <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{zIndex: 3-idx}}>
+                                            {REACTION_ICONS[type]}
+                                        </span>
+                                    ))}
+                                </div>
+                                <span>{comment.reactions.length}</span>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -570,6 +643,12 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 isLoading={isLoading}
                 onConfirm={handleConfirmDelete}
                 onCancel={() => setDeleteTarget(null)}
+            />
+
+            <ReactionListModal 
+                isOpen={!!showReactionListMsg}
+                onClose={() => setShowReactionListMsg(null)}
+                reactions={showReactionListMsg?.reactions || []}
             />
         </div>
     )
