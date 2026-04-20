@@ -52,13 +52,18 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
         )
     }
 
+    // ID của post gốc thực sự (nếu post hiện tại là repost thì lấy shared_from._id, nếu không thì dùng post._id)
+    const originalPostId = post.shared_from?._id || post._id
+    // Post preview để hiển thị trong modal
+    const previewPost = post.shared_from || post
+
     const handleRepost = async () => {
         try {
             setIsLoading(true)
             const token = await getToken()
             
-            // First, increment share count on original post
-            const shareResponse = await api.post('/api/post/share', { postId: post._id }, {
+            // Increment share count trên post gốc
+            const shareResponse = await api.post('/api/post/share', { postId: originalPostId }, {
                 headers: { Authorization: `Bearer ${token}` }
             })
             
@@ -68,18 +73,17 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                 return
             }
 
-            // Then post the new shared post
+            // Tạo post mới share từ post gốc
             const formData = new FormData()
             formData.append('content', captionText)
             formData.append('post_type', 'text')
-            formData.append('shared_from', post._id)
+            formData.append('shared_from', originalPostId)
 
             const { data } = await api.post('/api/post/add', formData, {
                 headers: { Authorization: `Bearer ${token}` }
             })
 
             if (data.success) {
-                // Add new post to Redux store immediately
                 if (data.post) {
                     dispatch(addPost(data.post))
                 }
@@ -109,13 +113,14 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
             setIsLoading(true)
             const token = await getToken()
             
+            // Link trỏ về đúng post._id (repost hoặc post gốc tuỳ context)
             const shareLink = `${window.location.origin}/post/${post._id}`
             const fullMessage = messageText 
                 ? `${messageText}\n\n${shareLink}`
                 : shareLink
 
-            // Increment share count
-            await api.post('/api/post/share', { postId: post._id }, {
+            // Increment share count trên post gốc
+            await api.post('/api/post/share', { postId: originalPostId }, {
                 headers: { Authorization: `Bearer ${token}` }
             })
 
@@ -205,8 +210,8 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
 
                         <div className='bg-gray-50 p-3 rounded-lg text-sm text-gray-700 border border-gray-200'>
                             <p className='font-semibold mb-2'>Original Post Preview</p>
-                            <p className='text-xs text-gray-600 mb-2'>By <span className='font-semibold'>{post.user.full_name}</span></p>
-                            <p className='line-clamp-3 text-gray-800'>{post.content}</p>
+                            <p className='text-xs text-gray-600 mb-2'>By <span className='font-semibold'>{previewPost.user?.full_name}</span></p>
+                            <p className='line-clamp-3 text-gray-800'>{previewPost.content}</p>
                         </div>
 
                         <div className='space-y-2'>
@@ -293,6 +298,9 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                         <div className='bg-gray-50 p-3 rounded-lg text-sm'>
                             <p className='font-semibold text-gray-700 mb-2'>Post Link:</p>
                             <p className='text-indigo-600 break-all text-xs'>{window.location.origin}/post/{post._id}</p>
+                            {post.shared_from && (
+                                <p className='text-xs text-gray-500 mt-1'>(Link trỏ về repost này, bao gồm bài gốc bên trong)</p>
+                            )}
                         </div>
 
                         {/* Actions */}

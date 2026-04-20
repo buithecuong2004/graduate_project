@@ -3,23 +3,54 @@ import imagekit from "../configs/imageKit.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
 
-//Send Message
+// ─────────────────────────────────────────────────────────────────
+// Helper: populate a single message object with user & reply_to data
+// ─────────────────────────────────────────────────────────────────
+const populateMessage = async (msgObj) => {
+    const senderUser = await User.findById(msgObj.from_user_id)
+    msgObj.from_user_id = senderUser
+
+    if (msgObj.media_url && (!msgObj.media_urls || msgObj.media_urls.length === 0)) {
+        msgObj.media_urls = [msgObj.media_url]
+        msgObj.message_type = 'images'
+    }
+
+    if (msgObj.reply_to) {
+        const replyMsg = await Message.findById(msgObj.reply_to).lean()
+        if (replyMsg) {
+            const replySender = await User.findById(replyMsg.from_user_id)
+            replyMsg.from_user_id = replySender
+            msgObj.reply_to = replyMsg
+        }
+    }
+
+    return msgObj
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Send Message
+// ─────────────────────────────────────────────────────────────────
 export const sendMessage = async (req, res) => {
     try {
         const { userId } = req.auth()
-        const { to_user_id, shared_post_id } = req.body
+        const { to_user_id, shared_post_id, reply_to, is_forwarded, forwarded_type } = req.body
         let { text } = req.body
 
-        // Get images, videos and voice from req.files
         const images = req.files?.images || []
         const videos = req.files?.videos || []
         const voiceFiles = req.files?.voice || []
 
-        // Trim text
+        // ✅ Pre-existing media URLs passed from the frontend when forwarding media messages.
+        // FormData serialises arrays as either 'media_urls[]' or 'media_urls' depending on the client.
+        const rawBodyUrls = req.body['media_urls[]'] ?? req.body.media_urls
+        const bodyMediaUrls = rawBodyUrls
+            ? (Array.isArray(rawBodyUrls) ? rawBodyUrls : [rawBodyUrls])
+            : []
+
         text = (text || '').trim()
 
-        // Validate inputs
-        if (!text && images.length === 0 && videos.length === 0 && voiceFiles.length === 0) {
+        // Allow an empty text when media URLs are being forwarded
+        if (!text && images.length === 0 && videos.length === 0 && voiceFiles.length === 0 && bodyMediaUrls.length === 0) {
             return res.json({ success: false, message: 'Message cannot be empty' })
         }
 
@@ -27,17 +58,14 @@ export const sendMessage = async (req, res) => {
         let message_type = 'text'
 
         try {
-            // Validate image count
             if (images.length > 5) {
                 return res.json({ success: false, message: 'Maximum 5 images per message' })
             }
-
-            // Validate video count
             if (videos.length > 3) {
                 return res.json({ success: false, message: 'Maximum 3 videos per message' })
             }
 
-            // Upload voice message
+            // Upload voice
             if (voiceFiles.length > 0) {
                 message_type = 'voice'
                 const voiceFile = voiceFiles[0]
@@ -62,7 +90,6 @@ export const sendMessage = async (req, res) => {
             // Upload images
             if (images.length > 0) {
                 message_type = images.length === 1 && videos.length === 0 ? 'image' : 'images'
-
                 const imageUrls = await Promise.all(
                     images.map(async (image) => {
                         try {
@@ -92,7 +119,6 @@ export const sendMessage = async (req, res) => {
             // Upload videos
             if (videos.length > 0) {
                 message_type = videos.length === 1 && images.length === 0 ? 'video' : 'videos'
-
                 const videoUrls = await Promise.all(
                     videos.map(async (video) => {
                         try {
@@ -102,9 +128,7 @@ export const sendMessage = async (req, res) => {
                                 fileName: video.originalname,
                                 folder: 'messages/videos'
                             })
-                            return response.url || imagekit.url({
-                                path: response.filePath
-                            })
+                            return response.url || imagekit.url({ path: response.filePath })
                         } catch (uploadError) {
                             console.error('ImageKit video upload error:', uploadError)
                             throw uploadError
@@ -114,20 +138,27 @@ export const sendMessage = async (req, res) => {
                 media_urls.push(...videoUrls)
             }
 
-            // If we have both images and videos, update message_type
             if (images.length > 0 && videos.length > 0) {
                 message_type = 'images'
             }
 
-            // Cleanup uploaded files
             const allFiles = [...images, ...videos]
             allFiles.forEach(file => {
                 fs.unlink(file.path, (err) => {
                     if (err) console.log('File cleanup error:', err)
                 })
             })
+
+            // ✅ No new files uploaded → use pre-existing URLs (forwarded media)
+            if (media_urls.length === 0 && bodyMediaUrls.length > 0) {
+                media_urls = bodyMediaUrls
+                // Honour the message_type sent by the client (voice / image / images / video / videos)
+                if (req.body.message_type && req.body.message_type !== 'text') {
+                    message_type = req.body.message_type
+                }
+            }
+
         } catch (uploadError) {
-            // Cleanup all files on error
             const allFiles = [...images, ...videos, ...voiceFiles]
             allFiles.forEach(file => {
                 fs.unlink(file.path, (err) => {
@@ -143,23 +174,20 @@ export const sendMessage = async (req, res) => {
             text: text || '',
             message_type,
             media_urls,
-            shared_post_id: shared_post_id || null
+            shared_post_id: shared_post_id || null,
+            reply_to: reply_to || null,
+            is_forwarded: is_forwarded === true || is_forwarded === 'true',
+            forwarded_type: forwarded_type || null,
         })
 
-        // Manually fetch user data since we're using String IDs, not ObjectId
-        const senderUser = await User.findById(userId)
-        const messageWithUserData = {
-            ...message.toObject(),
-            from_user_id: senderUser
-        }
+        const msgObj = message.toObject()
+        const populatedMsg = await populateMessage(msgObj)
 
-        res.json({ success: true, message: messageWithUserData })
+        res.json({ success: true, message: populatedMsg })
 
-        // Send message via socket to recipient
-        const io = req.app.locals.io;
+        const io = req.app.locals.io
         if (io) {
-            console.log('💬 Sending message via socket to:', to_user_id)
-            io.to(`user-${to_user_id}`).emit('new-message', messageWithUserData)
+            io.to(`user-${to_user_id}`).emit('new-message', populatedMsg)
         }
     } catch (error) {
         console.error('❌ Error in sendMessage:', error)
@@ -167,6 +195,9 @@ export const sendMessage = async (req, res) => {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Get Chat Messages (with reply_to populated)
+// ─────────────────────────────────────────────────────────────────
 export const getChatMessages = async (req, res) => {
     try {
         const { userId } = req.auth()
@@ -177,25 +208,15 @@ export const getChatMessages = async (req, res) => {
                 { from_user_id: userId, to_user_id },
                 { from_user_id: to_user_id, to_user_id: userId }
             ]
-        }).sort({ createdAt: 1 })
+        }).sort({ createdAt: 1 }).lean()
 
-        // Manually populate user data since we're using String IDs, not ObjectId
-        messages = await Promise.all(
-            messages.map(async (msg) => {
-                const msgObj = msg.toObject ? msg.toObject() : msg
-                // Fetch sender user data
-                const senderUser = await User.findById(msgObj.from_user_id)
-                msgObj.from_user_id = senderUser
+        messages = await Promise.all(messages.map(populateMessage))
 
-                if (msgObj.media_url && (!msgObj.media_urls || msgObj.media_urls.length === 0)) {
-                    msgObj.media_urls = [msgObj.media_url]
-                    msgObj.message_type = 'images'
-                }
-                return msgObj
-            })
+        await Message.updateMany(
+            { from_user_id: to_user_id, to_user_id: userId },
+            { isRead: true }
         )
 
-        await Message.updateMany({ from_user_id: to_user_id, to_user_id: userId }, { isRead: true })
         res.json({ success: true, messages })
     } catch (error) {
         console.log(error)
@@ -203,22 +224,22 @@ export const getChatMessages = async (req, res) => {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Get Recent Messages
+// ─────────────────────────────────────────────────────────────────
 export const getUserRecentMessages = async (req, res) => {
     try {
         const { userId } = req.auth()
 
-        // Get all messages where user is sender or receiver
         let messages = await Message.find({
             $or: [
                 { from_user_id: userId },
                 { to_user_id: userId }
             ]
-        }).sort({ createdAt: -1 })
+        }).sort({ createdAt: -1 }).lean()
 
-        // Manually populate user data since we're using String IDs, not ObjectId
         messages = await Promise.all(
-            messages.map(async (msg) => {
-                const msgObj = msg.toObject ? msg.toObject() : msg
+            messages.map(async (msgObj) => {
                 const senderUser = await User.findById(msgObj.from_user_id)
                 const recipientUser = await User.findById(msgObj.to_user_id)
                 msgObj.from_user_id = senderUser
@@ -234,7 +255,9 @@ export const getUserRecentMessages = async (req, res) => {
     }
 }
 
-// Mark messages from a specific user as read
+// ─────────────────────────────────────────────────────────────────
+// Mark Messages As Read
+// ─────────────────────────────────────────────────────────────────
 export const markMessagesAsRead = async (req, res) => {
     try {
         const { userId } = req.auth()
@@ -246,6 +269,74 @@ export const markMessagesAsRead = async (req, res) => {
         )
 
         res.json({ success: true, message: 'Messages marked as read' })
+    } catch (error) {
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Delete (Recall) Message — set is_deleted = true, clear text/media
+// ─────────────────────────────────────────────────────────────────
+export const deleteMessage = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const { messageId } = req.body
+
+        const message = await Message.findById(messageId)
+        if (!message) return res.json({ success: false, message: 'Message not found' })
+        if (message.from_user_id !== userId) {
+            return res.json({ success: false, message: 'Unauthorized: not your message' })
+        }
+
+        message.is_deleted = true
+        message.text = ''
+        message.media_urls = []
+        await message.save()
+
+        res.json({ success: true, messageId })
+
+        const io = req.app.locals.io
+        if (io) {
+            io.to(`user-${message.to_user_id}`).emit('message-deleted', { messageId })
+        }
+    } catch (error) {
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Edit Message — only within 30 minutes
+// ─────────────────────────────────────────────────────────────────
+export const editMessage = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const { messageId, text } = req.body
+
+        if (!text || !text.trim()) {
+            return res.json({ success: false, message: 'Text cannot be empty' })
+        }
+
+        const message = await Message.findById(messageId)
+        if (!message) return res.json({ success: false, message: 'Message not found' })
+        if (message.from_user_id !== userId) {
+            return res.json({ success: false, message: 'Unauthorized: not your message' })
+        }
+
+        const minutesSinceSent = (Date.now() - new Date(message.createdAt).getTime()) / (1000 * 60)
+        if (minutesSinceSent > 30) {
+            return res.json({ success: false, message: 'Cannot edit message older than 30 minutes' })
+        }
+
+        message.text = text.trim()
+        message.is_edited = true
+        await message.save()
+
+        res.json({ success: true, messageId, text: message.text })
+
+        const io = req.app.locals.io
+        if (io) {
+            io.to(`user-${message.to_user_id}`).emit('message-edited', { messageId, text: message.text })
+        }
     } catch (error) {
         res.json({ success: false, message: error.message })
     }

@@ -17,7 +17,7 @@ const Notification = ({ t, message }) => {
     const messageText = isPostLink
         ? '🔗 Shared a post with you'
         : message.text
-            ? message.text.slice(0, 30) + '...'
+            ? message.text.length > 30 ? message.text.slice(0, 30) + '...' : message.text
             : 'Media'
 
     console.log('✅ Notification rendering:', sender.full_name, messageText)

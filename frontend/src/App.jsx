@@ -18,7 +18,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { fetchUser } from './features/user/userSlice'
 import { fetchConnections } from './features/connections/connectionsSlice'
 import { useRef } from 'react'
-import { addMessages, setNewMessageTrigger } from './features/messages/messagesSlice'
+import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal } from './features/messages/messagesSlice'
 import { addNotification } from './features/notifications/notificationsSlice'
 import toast from 'react-hot-toast'
 import { Navigate } from 'react-router-dom'
@@ -74,8 +74,17 @@ const App = () => {
         } else {
             toast.custom((t) => <Notification t={t} message={message}/>, {position: "bottom-right"})
         }
-        dispatch(setNewMessageTrigger(Date.now())) // ← thêm dòng này
-    })
+        dispatch(setNewMessageTrigger(Date.now()))
+       })
+
+       // Listen for message updates
+       socket.on('message-edited', ({ messageId, text }) => {
+         dispatch(editMessageLocal({ messageId, text }))
+       })
+
+       socket.on('message-deleted', ({ messageId }) => {
+         dispatch(deleteMessageLocal(messageId))
+       })
 
         // Listen for friend requests
         socket.on('friend-request', (notification) => {

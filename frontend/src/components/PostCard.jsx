@@ -184,7 +184,7 @@ const PostCard = ({post, onPostDeleted}) => {
         <ShareModal
             isOpen={showShareModal}
             onClose={() => setShowShareModal(false)}
-            post={post.shared_from || post}
+            post={post}
             onShareAdded={() => setShares([...shares, currentUser._id])}
         />
     </div>

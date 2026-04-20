@@ -1,5 +1,12 @@
 import express from 'express'
-import { getChatMessages, sendMessage, getUserRecentMessages, markMessagesAsRead } from '../controllers/messageController.js'
+import {
+    getChatMessages,
+    sendMessage,
+    getUserRecentMessages,
+    markMessagesAsRead,
+    deleteMessage,
+    editMessage
+} from '../controllers/messageController.js'
 import { upload } from '../configs/multer.js'
 import { protect } from '../middlewares/auth.js'
 
@@ -13,5 +20,7 @@ messageRouter.post('/send', upload.fields([
 messageRouter.post('/get', protect, getChatMessages)
 messageRouter.post('/get-recent', protect, getUserRecentMessages)
 messageRouter.post('/mark-as-read', protect, markMessagesAsRead)
+messageRouter.post('/delete', protect, deleteMessage)
+messageRouter.post('/edit', protect, editMessage)
 
 export default messageRouter

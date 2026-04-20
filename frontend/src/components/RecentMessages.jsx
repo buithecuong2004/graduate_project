@@ -96,26 +96,35 @@ const RecentMessages = () => {
         <div className='flex flex-col max-h-56 overflow-y-scroll no-scrollbar'>
             {
                 conversations.map((conversation, index)=>{
-                    const isFromMe = conversation.lastMessage.from_user_id._id === currentUser._id // ✅
-                    const messageText = conversation.lastMessage.text
-                    const mediaUrls = conversation.lastMessage.media_urls || []
-                    const type = conversation.lastMessage.message_type
+                    const isFromMe = conversation.lastMessage.from_user_id._id === currentUser._id
+                    const msg = conversation.lastMessage
+                    const messageText = msg.text
+                    const mediaUrls = msg.media_urls || []
+                    const type = msg.message_type
 
                     let content = ''
-                    if(messageText) {
+                    if (msg.is_deleted) {
+                        content = 'Message recalled'
+                    } else if (msg.is_forwarded) {
+                        const ft = msg.forwarded_type
+                        content = ft === 'link' ? 'Forwarded a link' : 'Forwarded a message'
+                    } else if (msg.reply_to) {
+                        content = 'Replied a message...'
+                    } else if (messageText) {
                         content = messageText.length > 30 ? messageText.slice(0, 30) + '...' : messageText
-                    } else if(type === 'voice') {
+                    } else if (type === 'voice') {
                         content = '🎤 Sent a voice message'
-                    } else if(type?.includes('image')) {
+                    } else if (type?.includes('image')) {
                         content = `Sent ${mediaUrls.length} image${mediaUrls.length > 1 ? 's' : ''}`
-                    } else if(type?.includes('video')) {
+                    } else if (type?.includes('video')) {
                         content = `Sent ${mediaUrls.length} video${mediaUrls.length > 1 ? 's' : ''}`
                     } else {
                         content = 'Media'
                     }
 
-                    // ✅ "You: ..." nếu mình gửi, giữ nguyên nội dung nếu họ gửi
-                    const displayText = isFromMe ? `You: ${content}` : content
+                    const displayText = (msg.is_deleted || msg.is_forwarded || msg.reply_to)
+                        ? content
+                        : isFromMe ? `You: ${content}` : content
 
                     // ✅ Nếu đang mở ChatBox của người này thì coi như đã đọc hết
                     const isActiveChat = activeChatUserId === conversation.sender._id
