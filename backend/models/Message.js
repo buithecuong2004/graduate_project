@@ -6,6 +6,7 @@ const messageSchema = new mongoose.Schema({
     text: { type: String, trim: true},
     message_type: {type: String, enum: ['text','image','images','video','videos','voice']},
     media_urls: [{type: String}],
+    media_ids: [{type: String}],
     shared_post_id: {type: String, ref: 'Post'},
     isRead: {type: Boolean, default: false},
 

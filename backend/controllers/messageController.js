@@ -3,6 +3,20 @@ import imagekit from "../configs/imageKit.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
 
+// Helper to delete file from ImageKit using file ID
+const deleteImageKitFile = async (fileId) => {
+    try {
+        if(!fileId) return true
+
+        // Use ImageKit SDK to delete file by ID
+        await imagekit.deleteFile(fileId)
+        return true
+    } catch (error) {
+        console.log('ImageKit delete error:', error.message)
+        return false
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Helper: populate a single message object with user & reply_to data
 // ─────────────────────────────────────────────────────────────────
@@ -55,6 +69,7 @@ export const sendMessage = async (req, res) => {
         }
 
         let media_urls = []
+        let media_ids = []
         let message_type = 'text'
 
         try {
@@ -77,6 +92,7 @@ export const sendMessage = async (req, res) => {
                         folder: 'messages/voice'
                     })
                     media_urls.push(response.url)
+                    media_ids.push(response.fileId)
                 } catch (uploadError) {
                     console.error('ImageKit voice upload error:', uploadError)
                     throw uploadError
@@ -90,7 +106,7 @@ export const sendMessage = async (req, res) => {
             // Upload images
             if (images.length > 0) {
                 message_type = images.length === 1 && videos.length === 0 ? 'image' : 'images'
-                const imageUrls = await Promise.all(
+                const uploadedImages = await Promise.all(
                     images.map(async (image) => {
                         try {
                             const fileBuffer = fs.readFileSync(image.path)
@@ -99,27 +115,31 @@ export const sendMessage = async (req, res) => {
                                 fileName: image.originalname,
                                 folder: 'messages/images'
                             })
-                            return response.url || imagekit.url({
-                                path: response.filePath,
-                                transformation: [
-                                    { quality: 'auto' },
-                                    { format: 'webp' },
-                                    { width: '800' }
-                                ]
-                            })
+                            return {
+                                url: response.url || imagekit.url({
+                                    path: response.filePath,
+                                    transformation: [
+                                        { quality: 'auto' },
+                                        { format: 'webp' },
+                                        { width: '800' }
+                                    ]
+                                }),
+                                id: response.fileId
+                            }
                         } catch (uploadError) {
                             console.error('ImageKit upload error:', uploadError)
                             throw uploadError
                         }
                     })
                 )
-                media_urls.push(...imageUrls)
+                media_urls.push(...uploadedImages.map(img => img.url))
+                media_ids.push(...uploadedImages.map(img => img.id))
             }
 
             // Upload videos
             if (videos.length > 0) {
                 message_type = videos.length === 1 && images.length === 0 ? 'video' : 'videos'
-                const videoUrls = await Promise.all(
+                const uploadedVideos = await Promise.all(
                     videos.map(async (video) => {
                         try {
                             const fileBuffer = fs.readFileSync(video.path)
@@ -128,14 +148,18 @@ export const sendMessage = async (req, res) => {
                                 fileName: video.originalname,
                                 folder: 'messages/videos'
                             })
-                            return response.url || imagekit.url({ path: response.filePath })
+                            return {
+                                url: response.url || imagekit.url({ path: response.filePath }),
+                                id: response.fileId
+                            }
                         } catch (uploadError) {
                             console.error('ImageKit video upload error:', uploadError)
                             throw uploadError
                         }
                     })
                 )
-                media_urls.push(...videoUrls)
+                media_urls.push(...uploadedVideos.map(vid => vid.url))
+                media_ids.push(...uploadedVideos.map(vid => vid.id))
             }
 
             if (images.length > 0 && videos.length > 0) {
@@ -174,6 +198,7 @@ export const sendMessage = async (req, res) => {
             text: text || '',
             message_type,
             media_urls,
+            media_ids,
             shared_post_id: shared_post_id || null,
             reply_to: reply_to || null,
             is_forwarded: is_forwarded === true || is_forwarded === 'true',
@@ -288,9 +313,17 @@ export const deleteMessage = async (req, res) => {
             return res.json({ success: false, message: 'Unauthorized: not your message' })
         }
 
+        // Delete files from ImageKit
+        if (message.media_ids && message.media_ids.length > 0) {
+            for (let fileId of message.media_ids) {
+                await deleteImageKitFile(fileId)
+            }
+        }
+
         message.is_deleted = true
         message.text = ''
         message.media_urls = []
+        message.media_ids = []
         await message.save()
 
         res.json({ success: true, messageId })

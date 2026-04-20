@@ -8,6 +8,7 @@ import { addMessages, fetchMessages, resetMessages, deleteMessageLocal, editMess
 import toast from 'react-hot-toast'
 import Loading from '../components/Loading'
 import moment from 'moment'
+import ChatMediaViewer from '../components/ChatMediaViewer'
 
 const ChatBox = () => {
 
@@ -51,6 +52,35 @@ const ChatBox = () => {
   const [connections, setConnections] = useState([])
   const [forwardSelected, setForwardSelected] = useState([])
   const [forwardSearch, setForwardSearch] = useState('')
+
+  // Media Viewer states
+  const [mediaViewerOpen, setMediaViewerOpen] = useState(false)
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0)
+
+  const allMedia = React.useMemo(() => {
+    const mediaItems = []
+    const sortedMessages = [...messages].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    sortedMessages.forEach(msg => {
+      if (!msg.is_deleted && msg.message_type !== 'voice' && msg.media_urls && msg.media_urls.length > 0) {
+        msg.media_urls.forEach(url => {
+          mediaItems.push({
+            url,
+            messageId: msg._id,
+            type: msg.message_type?.includes('video') || url.match(/\.(mp4|webm|mov|ogg)$/i) ? 'video' : 'image'
+          })
+        })
+      }
+    })
+    return mediaItems
+  }, [messages])
+
+  const openMediaViewer = (url) => {
+    const idx = allMedia.findIndex(m => m.url === url)
+    if (idx !== -1) {
+      setCurrentMediaIndex(idx)
+      setMediaViewerOpen(true)
+    }
+  }
 
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0')
@@ -570,10 +600,19 @@ const ChatBox = () => {
                         {!isVoice && mediaUrls.length > 0 && (
                           <div className='flex flex-wrap gap-2 mb-2'>
                             {mediaUrls.map((url, idx) => {
-                              const isVideo = url.includes('.mp4') || url.includes('.webm') || url.includes('.mov')
+                              const isVideo = url.match(/\.(mp4|webm|mov|ogg)$/i) || message.message_type?.includes('video')
                               return isVideo
-                                ? <video key={idx} src={url} controls className='w-full max-w-sm rounded-lg' />
-                                : <img key={idx} src={url} alt='sent-image' className='w-full max-w-sm rounded-lg' />
+                                ? (
+                                  <div key={idx} onClick={() => openMediaViewer(url)} className="relative group cursor-pointer w-full max-w-sm rounded-lg overflow-hidden border border-gray-100">
+                                    <video src={url} className='w-full' />
+                                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition">
+                                      <div className="bg-white/80 p-3 rounded-full backdrop-blur-sm shadow-sm group-hover:scale-110 transition-transform">
+                                        <div className="w-0 h-0 border-t-[6px] border-t-transparent border-l-[10px] border-l-gray-800 border-b-[6px] border-b-transparent ml-1"></div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                                : <img key={idx} src={url} alt='sent-image' onClick={() => openMediaViewer(url)} className='cursor-pointer w-full max-w-sm rounded-lg hover:brightness-95 transition border border-gray-100' />
                             })}
                           </div>
                         )}
@@ -777,6 +816,16 @@ const ChatBox = () => {
           </div>
         </div>
       )}
+      {/* ── Media Viewer Modal ── */}
+      {mediaViewerOpen && (
+        <ChatMediaViewer 
+          mediaList={allMedia}
+          currentIndex={currentMediaIndex}
+          onClose={() => setMediaViewerOpen(false)}
+          onNavigate={setCurrentMediaIndex}
+        />
+      )}
+
       {/* scroll-to highlight keyframe */}
       <style>{`
         .msg-highlight { animation: msgFlash 1.4s ease-out; }
