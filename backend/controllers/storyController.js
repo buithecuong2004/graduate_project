@@ -247,10 +247,16 @@ export const reactStory = async (req, res) => {
             if (isNewReaction && userId !== storyOwner) {
                 const reactor = await User.findById(userId)
                 if (reactor) {
+                    // Populate story for the notification payload
+                    const populatedStory = await Story.findById(storyId)
+                        .populate('user', 'full_name username profile_picture')
+                        .populate('reactions.user', 'full_name username profile_picture');
+
                     const reactionNotification = {
                         type: 'new_story_reaction',
                         data: {
                             story_id: storyId,
+                            story: populatedStory,
                             reaction: reactionType,
                             text: `Reacted ${reactionType} to your story`,
                             user: {

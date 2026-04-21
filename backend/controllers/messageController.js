@@ -3,6 +3,15 @@ import imagekit from "../configs/imageKit.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
 
+const REACTION_ICONS = {
+    like: '👍',
+    love: '❤️',
+    haha: '😂',
+    wow: '😮',
+    sad: '😢',
+    angry: '😡'
+};
+
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
     try {
@@ -406,9 +415,25 @@ export const reactMessage = async (req, res) => {
         if (existingReactionIndex !== -1) {
             if (message.reactions[existingReactionIndex].type === reactionType) {
                 message.reactions.splice(existingReactionIndex, 1)
+                
+                // Remove the automated reaction message
+                await Message.deleteMany({
+                    from_user_id: userId,
+                    to_user_id: message.from_user_id.toString(),
+                    message_type: 'reaction',
+                    $or: [ { reply_to: messageId }, { reply_to: null } ]
+                })
             } else {
                 message.reactions[existingReactionIndex].type = reactionType
                 isNewReaction = true;
+                
+                // If changing reaction, also delete old automated message so we can recreate
+                await Message.deleteMany({
+                    from_user_id: userId,
+                    to_user_id: message.from_user_id.toString(),
+                    message_type: 'reaction',
+                    $or: [ { reply_to: messageId }, { reply_to: null } ]
+                })
             }
         } else {
             message.reactions.push({ user: userId, type: reactionType })
@@ -435,27 +460,22 @@ export const reactMessage = async (req, res) => {
             io.to(`user-${otherUser}`).emit('message-reaction-updated', { messageId, reactions: populatedMsg.reactions })
 
             if (isNewReaction && userId !== messageOwner) {
-                const latestMsgFromOther = await Message.findOne({ from_user_id: messageOwner, to_user_id: userId }).sort({ createdAt: -1 })
-                
-                if (latestMsgFromOther && latestMsgFromOther._id.toString() === messageId.toString()) {
-                    const reactor = await User.findById(userId)
-                    if (reactor) {
-                        const reactionNotification = {
-                            type: 'new_message_reaction',
-                            data: {
-                                message_id: messageId,
-                                reaction: reactionType,
-                                text: `Reacted ${reactionType} to your message`,
-                                user: {
-                                    _id: reactor._id,
-                                    full_name: reactor.full_name,
-                                    username: reactor.username,
-                                    profile_picture: reactor.profile_picture
-                                }
-                            }
-                        }
-                        io.to(`user-${messageOwner}`).emit('new-message-reaction-notification', reactionNotification)
-                    }
+                const reactor = await User.findById(userId)
+                if (reactor) {
+                    const reactionIcon = REACTION_ICONS[reactionType] || reactionType
+                    const automatedMessage = await Message.create({
+                        from_user_id: userId,
+                        to_user_id: messageOwner,
+                        text: `Reacted ${reactionIcon} to your message`,
+                        message_type: 'reaction',
+                        isRead: false,
+                        reply_to: messageId
+                    })
+
+                    const msgObjAuto = automatedMessage.toObject()
+                    const populatedMsgAuto = await populateMessage(msgObjAuto)
+                    
+                    io.to(`user-${messageOwner}`).emit('new-message', populatedMsgAuto)
                 }
             }
         }

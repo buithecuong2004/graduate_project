@@ -517,6 +517,7 @@ export const reactComment = async (req, res) => {
                     type: 'new_reaction',
                     data: {
                         post_id: comment.post.toString(),
+                        comment_id: commentId, // Added this
                         liked_type: 'comment',
                         reaction: reactionType,
                         user: {

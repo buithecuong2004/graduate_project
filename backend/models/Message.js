@@ -4,7 +4,7 @@ const messageSchema = new mongoose.Schema({
     from_user_id: { type: String, ref: 'User', required: true },
     to_user_id: { type: String, ref: 'User', required: true },
     text: { type: String, trim: true},
-    message_type: {type: String, enum: ['text','image','images','video','videos','voice']},
+    message_type: {type: String, enum: ['text','image','images','video','videos','voice','reaction']},
     media_urls: [{type: String}],
     media_ids: [{type: String}],
     shared_post_id: {type: String, ref: 'Post'},

@@ -1,5 +1,6 @@
 import { BadgeCheck, X, Trash2, SendHorizonal, SmilePlus } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
+import moment from 'moment'
 import { createPortal } from 'react-dom'
 import ConfirmDialog from './ConfirmDialog'
 import { useAuth } from '@clerk/clerk-react'
@@ -15,7 +16,8 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
     const [progress, setProgress] = useState(0)
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-    const isOwner = viewStory?.user?._id === currentUser?._id
+    const storyOwnerId = viewStory?.user?._id || viewStory?.user;
+    const isOwner = storyOwnerId === currentUser?._id;
     
     const { getToken } = useAuth()
     const dispatch = useDispatch()
@@ -64,13 +66,22 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
 
     const handleReact = async (type) => {
         try {
+            const storyId = viewStory?._id;
+            if (!storyId) {
+                return toast.error('Story ID not found');
+            }
             const token = await getToken()
-            const { data } = await api.post('/api/story/react', { storyId: viewStory._id, reactionType: type }, { headers: { Authorization: `Bearer ${token}` } })
+            const { data } = await api.post('/api/story/react', { storyId, reactionType: type }, { headers: { Authorization: `Bearer ${token}` } })
             if(data.success) {
                 setReactions(data.reactions)
                 setShowReactionMenu(false)
-            } else toast.error(data.message)
-        } catch(e) { toast.error(e.message) }
+            } else {
+                toast.error(data.message || 'Failed to react')
+            }
+        } catch(e) { 
+            console.error('React error:', e);
+            toast.error('Something went wrong') 
+        }
     }
 
     const handleReply = async () => {
@@ -142,19 +153,26 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
     style={{backgroundColor: viewStory.media_type === 'text' ? viewStory.background_color : '#000000'}}
     onClick={() => setShowReactionMenu(false)}
     >
-        <div className='absolute top-0 left-0 w-full h-1 bg-gray-700'>
+        <div className='absolute top-0 left-0 w-full h-1 bg-gray-700 z-50'>
             <div className='h-full bg-white transition-all duration-100 ease-linear' style={{width: `${progress * 100}%`}}>
 
             </div>
         </div>
-        <div className='absolute top-4 left-4 flex items-center space-x-3 p-2 px-2 sm:p-4 sm:px-5 backdrop-blur-2xl rounded bg-black/50 z-10'>
-            <img src={viewStory.user?.profile_picture} alt="" className='size-7 sm:size-8 rounded-full object-cover border border-white'/>
-            <div className='text-white font-medium flex items-center gap-1.5'>
-                <span>{viewStory.user?.full_name}</span>
-                <BadgeCheck size={18}/>
+        <div className='absolute top-6 left-6 flex items-center space-x-3 z-50'>
+            <img src={isOwner ? currentUser?.profile_picture : (viewStory.user?.profile_picture)} alt="" className='size-10 rounded-full object-cover border-2 border-indigo-500 shadow-md'/>
+            <div className='flex flex-col'>
+                <div className='text-white font-bold flex items-center gap-1.5 text-sm sm:text-base drop-shadow-md'>
+                    <span>{isOwner ? 'Your Story' : (viewStory.user?.full_name || 'User')}</span>
+                    <BadgeCheck size={16} className='text-blue-400 fill-white'/>
+                </div>
+                <div className='text-white/90 text-[10px] sm:text-xs flex items-center gap-1 font-medium drop-shadow-md'>
+                    <span>{moment(viewStory.createdAt).fromNow()}</span>
+                    <span>•</span>
+                    <span className='opacity-80'>{viewStory.media_type === 'text' ? 'Tin dạng văn bản' : 'Tin'}</span>
+                </div>
             </div>
         </div>
-        <div className='absolute top-4 right-4 flex items-center gap-2 z-10'>
+        <div className='absolute top-4 right-4 flex items-center gap-2 z-50'>
             {isOwner && (
                 <button
                     onClick={handleDeleteClick}
@@ -170,7 +188,7 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
             </button>
         </div>
 
-        <div className='max-w-[100vw] max-h-[100vh] flex items-center justify-center relative' onClick={e => e.stopPropagation()}>
+        <div className='max-w-[100vw] max-h-[100vh] flex items-center justify-center relative z-10' onClick={e => e.stopPropagation()}>
             {renderContent()}
         </div>
 
@@ -193,7 +211,7 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
 
         {/* Story Bottom Actions (Reply & React) */}
         {!isOwner && (
-            <div className='absolute bottom-6 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 flex gap-3 items-center z-10' onClick={e => e.stopPropagation()}>
+            <div className='absolute bottom-6 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 flex gap-3 items-center z-50' onClick={e => e.stopPropagation()}>
                 <div className='flex-1 relative'>
                     <input 
                         type="text" 

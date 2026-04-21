@@ -28,10 +28,20 @@ const RecentMessages = () => {
                 const groupedConversations = {}
                 
                 data.messages.forEach(message => {
-                    const isFromMe = message.from_user_id._id === currentUser._id // ✅ so sánh đúng
-                    const otherPerson = isFromMe ? message.to_user_id : message.from_user_id
-                    const otherPersonId = otherPerson._id
+                    const messageFromId = (message.from_user_id?._id || message.from_user_id)?.toString()
+                    const messageToId = (message.to_user_id?._id || message.to_user_id)?.toString()
+                    const currentUserId = currentUser?._id?.toString()
                     
+                    const isFromMe = messageFromId === currentUserId
+                    
+                    // Nếu là tin nhắn reaction và tôi là người gửi, không tính làm "last message" cho tôi
+                    if (message.message_type === 'reaction' && isFromMe) return
+
+                    const otherPerson = isFromMe ? message.to_user_id : message.from_user_id
+                    const otherPersonId = otherPerson?._id?.toString() || otherPerson
+                    
+                    if (!otherPersonId) return;
+
                     if (!groupedConversations[otherPersonId]) {
                         groupedConversations[otherPersonId] = {
                             unreadCount: 0,
@@ -44,7 +54,7 @@ const RecentMessages = () => {
                         groupedConversations[otherPersonId].lastMessage = message
                     }
                     
-                    if (!message.isRead && message.to_user_id._id === currentUser._id) {
+                    if (!message.isRead && messageToId === currentUserId) {
                         groupedConversations[otherPersonId].unreadCount++
                     }
                 })
@@ -96,14 +106,16 @@ const RecentMessages = () => {
         <div className='flex flex-col max-h-56 overflow-y-scroll no-scrollbar'>
             {
                 conversations.map((conversation, index)=>{
-                    const isFromMe = conversation.lastMessage.from_user_id._id === currentUser._id
+                    const isFromMe = (conversation.lastMessage.from_user_id?._id || conversation.lastMessage.from_user_id)?.toString() === currentUser?._id?.toString()
                     const msg = conversation.lastMessage
                     const messageText = msg.text
                     const mediaUrls = msg.media_urls || []
                     const type = msg.message_type
 
                     let content = ''
-                    if (msg.is_deleted) {
+                    if (type === 'reaction') {
+                        content = messageText
+                    } else if (msg.is_deleted) {
                         content = 'Message recalled'
                     } else if (msg.is_forwarded) {
                         const ft = msg.forwarded_type
@@ -157,7 +169,7 @@ const RecentMessages = () => {
                                     <p className='text-[10px] text-slate-400'>{moment(conversation.lastMessage.createdAt).fromNow()}</p>
                                 </div>
                                 <div className='flex justify-between items-center'>
-                                    <p className={effectiveUnreadCount > 0 ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
+                                    <p className={effectiveUnreadCount > 0 ? 'text-gray-900 font-bold' : 'text-gray-500'}>
                                         {displayText}
                                     </p>
                                     {effectiveUnreadCount > 0 && (

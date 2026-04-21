@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import { ChevronLeft } from 'lucide-react'
 import api from '../api/axios'
@@ -11,8 +11,13 @@ const PostDetail = () => {
     const { postId } = useParams()
     const { getToken } = useAuth()
     const navigate = useNavigate()
+    const location = useLocation()
     const [post, setPost] = useState(null)
     const [loading, setLoading] = useState(true)
+
+    // Deep link from notification
+    const autoOpenComments = location.state?.autoOpenComments
+    const targetCommentId = location.state?.commentId
 
     useEffect(() => {
         fetchPost()
@@ -69,7 +74,12 @@ const PostDetail = () => {
                 </button>
 
                 <div className='space-y-4'>
-                    <PostCard post={post} onPostDeleted={() => navigate(-1)} />
+                    <PostCard 
+                        post={post} 
+                        onPostDeleted={() => navigate(-1)} 
+                        autoOpenComments={autoOpenComments}
+                        targetCommentId={targetCommentId}
+                    />
 
                     {post.shared_from && (
                         <div className='bg-blue-50 border-l-4 border-blue-500 p-4 rounded'>

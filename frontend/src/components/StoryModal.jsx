@@ -4,7 +4,11 @@ import React, { useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../api/axios'
 
-const StoryModal = ({setShowModal, fetchStories}) => {
+import { createStoryAction } from '../features/stories/storiesSlice'
+import { useDispatch } from 'react-redux'
+
+const StoryModal = ({setShowModal}) => {
+    const dispatch = useDispatch()
 
     const bgColors = ["#3A86FF", "#FF006E", "#8338EC", "#FB5607", "#06D6A0", "#FFD166"]
 
@@ -14,6 +18,7 @@ const StoryModal = ({setShowModal, fetchStories}) => {
     const [media, setMedia] = useState(null)
     const [previewUrl, setPreviewUrl] = useState(null)
 
+    const [isSaving, setIsSaving] = useState(false)
     const {getToken} = useAuth()
 
     const MAX_VIDEO_DURATION = 60
@@ -72,20 +77,15 @@ const StoryModal = ({setShowModal, fetchStories}) => {
         }
 
         const token = await getToken()
+        setIsSaving(true)
         try {
-            const {data} = await api.post('/api/story/create', formData, {
-                headers: {Authorization: `Bearer ${token}`}
-            })
-
-            if(data.success) {
-                setShowModal(false)
-                toast.success("Story created successfully")
-                fetchStories()
-            } else {
-                toast.error(data.message)
-            }
+            await dispatch(createStoryAction({ formData, token })).unwrap()
+            setShowModal(false)
         } catch (error) {
-            toast.error(error.message)
+            console.error('Create story error:', error)
+            throw error; // Re-throw for toast.promise
+        } finally {
+            setIsSaving(false)
         }
     }
 
@@ -131,10 +131,16 @@ const StoryModal = ({setShowModal, fetchStories}) => {
                     <Upload size={18}/> Photo/Video
                 </label>
             </div>
-            <button onClick={()=>toast.promise(handleCreateStory(), {
-                loading: 'Saving...',
-            })} className='flex items-center justify-center gap-2 text-white py-3 mt-4 w-full rounded bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-700 active:scale-95 transition cursor-pointer'>
-                <Sparkle size={18}/> Create Story
+            <button 
+                onClick={()=>toast.promise(handleCreateStory(), {
+                    loading: 'Saving...',
+                    success: 'Story created!',
+                    error: 'Failed to create story'
+                })} 
+                disabled={isSaving}
+                className={`flex items-center justify-center gap-2 text-white py-3 mt-4 w-full rounded bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-700 active:scale-95 transition cursor-pointer ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+                <Sparkle size={18}/> {isSaving ? 'Creating...' : 'Create Story'}
             </button>
         </div>
     </div>

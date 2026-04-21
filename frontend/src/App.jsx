@@ -72,7 +72,10 @@ const App = () => {
         if(pathnameRef.current === (`/messages/${message.from_user_id?._id}`)) {
             dispatch(addMessages(message))
         } else {
-            toast.custom((t) => <Notification t={t} message={message}/>, {position: "bottom-right"})
+            // Don't show toast for reaction-only messages
+            if (message.message_type !== 'reaction') {
+                toast.custom((t) => <Notification t={t} message={message}/>, {position: "bottom-right"})
+            }
         }
         dispatch(setNewMessageTrigger(Date.now()))
        })
@@ -88,6 +91,7 @@ const App = () => {
 
        socket.on('message-reaction-updated', ({ messageId, reactions }) => {
          dispatch(updateMessageReactionsLocal({ messageId, reactions }))
+         dispatch(setNewMessageTrigger(Date.now()))
        })
 
         // Listen for friend requests

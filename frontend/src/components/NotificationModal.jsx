@@ -1,7 +1,9 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { markAsRead, removeNotification, markAllAsRead } from '../features/notifications/notificationsSlice'
+import { setViewStory } from '../features/stories/storiesSlice'
 import { X, Trash2, CheckCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { REACTION_ICONS } from './ReactionPicker'
@@ -89,32 +91,39 @@ const NotificationModal = ({ isOpen, onClose }) => {
                 navigate('/feed', { state: { refresh: Date.now() } })
                 break
             case 'new_comment':
-                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
+                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now(), autoOpenComments: true } })
                 break
             case 'new_reply':
-                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
+                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now(), autoOpenComments: true, commentId: data.comment_id } })
                 break
             case 'new_like':
                 if (data.liked_type === 'post') {
                     navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
-                } else if (data.post_id) {
-                    navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
+                } else if (data.liked_type === 'comment') {
+                    navigate(`/post/${data.post_id}`, { state: { refresh: Date.now(), autoOpenComments: true } })
                 }
                 break
             case 'new_reaction':
-                navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
+                if (data.liked_type === 'post') {
+                    navigate(`/post/${data.post_id}`, { state: { refresh: Date.now() } })
+                } else if (data.liked_type === 'comment') {
+                    navigate(`/post/${data.post_id}`, { state: { refresh: Date.now(), autoOpenComments: true, commentId: data.comment_id } })
+                }
                 break
             case 'new_message_reaction':
                 navigate(`/messages/${data.user?._id}`)
                 break
             case 'new_story_reaction':
-                navigate(`/feed`, { state: { refresh: Date.now() } })
+                if (data.story) {
+                    dispatch(setViewStory(data.story))
+                } else {
+                    navigate('/feed', { state: { refresh: Date.now() } })
+                }
                 break
         }
         onClose()
     }
 
-    // Thêm helper này vào trong component, trước phần return
     const getNotificationUser = (notification) => {
         const { type, data } = notification
         switch (type) {
@@ -126,8 +135,8 @@ const NotificationModal = ({ isOpen, onClose }) => {
         }
     }
 
-    return (
-        <div className="fixed inset-0 bg-black/50 z-40 flex items-end sm:items-center justify-center">
+    return createPortal(
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-end sm:items-center justify-center">
             <div className="bg-white w-full sm:w-96 sm:rounded-lg rounded-t-2xl shadow-xl max-h-[80vh] overflow-hidden flex flex-col">
                 {/* Header */}
                 <div className="border-b border-gray-200 p-4 flex items-center justify-between sticky top-0 bg-white">
@@ -174,7 +183,6 @@ const NotificationModal = ({ isOpen, onClose }) => {
                                 onClick={() => handleNotificationClick(notification)}
                             >
                                 <div className="flex gap-2 sm:gap-3 items-start">
-                                    {/* Avatar & Icon */}
                                     {/* Avatar & Icon */}
                                     <div className="flex-shrink-0 relative">
                                         {(() => {
@@ -224,7 +232,8 @@ const NotificationModal = ({ isOpen, onClose }) => {
                     )}
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     )
 }
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
+import { setViewStory } from '../features/stories/storiesSlice'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import api from '../api/axios'
@@ -12,7 +13,6 @@ import ChatMediaViewer from '../components/ChatMediaViewer'
 import { SmilePlus } from 'lucide-react'
 import ReactionPicker, { REACTION_ICONS } from '../components/ReactionPicker'
 import ReactionListModal from '../components/ReactionListModal'
-import StoryViewer from '../components/StoryViewer'
 
 const ChatBox = () => {
 
@@ -62,7 +62,6 @@ const ChatBox = () => {
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0)
   const [reactionMenuId, setReactionMenuId] = useState(null)
   const [showReactionListMsg, setShowReactionListMsg] = useState(null)
-  const [viewStory, setViewStory] = useState(null)
 
   const handleStoryClick = async (storyId) => {
     if (!storyId) return toast.error('Story is no longer available')
@@ -71,7 +70,7 @@ const ChatBox = () => {
       const { data } = await api.get(`/api/story/${storyId}`, { headers: { Authorization: `Bearer ${token}` } })
       if (data.success && data.story) {
         setMediaViewerOpen(false)
-        setViewStory(data.story)
+        dispatch(setViewStory(data.story))
       } else {
         toast.error('Story is no longer available')
       }
@@ -101,7 +100,6 @@ const ChatBox = () => {
     const idx = allMedia.findIndex(m => m.url === url)
     if (idx !== -1) {
       setCurrentMediaIndex(idx)
-      setViewStory(null)
       setMediaViewerOpen(true)
     }
   }
@@ -358,10 +356,14 @@ const ChatBox = () => {
           formData.append('forwarded_type', isLink ? 'link' : 'message')
 
           // ✅ Pass pre-existing media URLs so the backend can attach them
-          const urls = forwardingMsg?.media_urls || []
+          // DO NOT pass media if it's a story reply, as that media belongs to the story, not the reply message itself.
+          const isStoryReply = forwardingMsg?.forwarded_type === 'story'
+          const urls = isStoryReply ? [] : (forwardingMsg?.media_urls || [])
           if (urls.length > 0) {
             urls.forEach(url => formData.append('media_urls[]', url))
             formData.append('message_type', forwardingMsg?.message_type || 'images')
+          } else if (isStoryReply) {
+             formData.append('message_type', 'text')
           }
 
           const res = await api.post('/api/message/send', formData, {
@@ -402,6 +404,7 @@ const ChatBox = () => {
     if (message.is_deleted) return false
     if (message.is_forwarded) return false
     if (message.message_type === 'voice') return false
+    if (message.media_urls && message.media_urls.length > 0) return false
     if (!message.createdAt) return false
     const msgTime = new Date(message.createdAt).getTime()
     if (isNaN(msgTime)) return false
@@ -506,7 +509,8 @@ const ChatBox = () => {
       >
         <div className='space-y-2 py-4' onClick={() => setOpenMenuId(null)}>
           {messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).map((message, index) => {
-            const isOwn = message.from_user_id?._id === currentUser._id
+            if (message.message_type === 'reaction') return null;
+            const isOwn = (message.from_user_id?._id || message.from_user_id)?.toString() === currentUser?._id?.toString()
             const mediaUrls = message.media_urls || (message.media_url ? [message.media_url] : [])
             const sorted = messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
             const previousMessage = index > 0 ? sorted[index - 1] : null
@@ -943,15 +947,7 @@ const ChatBox = () => {
         reactions={showReactionListMsg?.reactions || []}
       />
 
-      {/* Story Viewer */}
-      {viewStory && (
-        <StoryViewer 
-          viewStory={viewStory}
-          setViewStory={setViewStory}
-          currentUser={currentUser}
-          onDeleteStory={null}
-        />
-      )}
+
 
       {/* scroll-to highlight keyframe */}
       <style>{`

@@ -46,9 +46,9 @@ const Feed = () => {
 
   return (
     <div ref={feedRef} onScroll={handleScroll} className='h-full overflow-y-scroll py-10 xl:pr-5 flex items-start justify-center xl:gap-8'>
-       <div>
+       <div className='w-full max-w-2xl'>
         <StoriesBar refreshTrigger={location.state?.refresh}/>
-        <div className='p-4 space-y-6'>
+        <div className='space-y-6 pt-4'>
           {loading && page === 1
             ? <Loading height='60vh'/>
             : <>

@@ -10,7 +10,7 @@ import ConfirmDialog from './ConfirmDialog'
 import ReactionPicker, { REACTION_ICONS } from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
 
-const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onTotalCount, onCountChange }) => {
+const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onTotalCount, onCountChange, targetCommentId }) => {
     const [comments, setComments] = useState([])
     const [newComment, setNewComment] = useState('')
     const [isLoading, setIsLoading] = useState(false)
@@ -363,93 +363,95 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         }
     }
 
-    const CommentItem = ({ comment, isReply = false }) => (
-        <div className='border border-gray-200 rounded-lg p-4'>
-            <div className='flex gap-3'>
-                <img
-                    src={comment.user?.profile_picture}
-                    alt=""
-                    className='w-10 h-10 rounded-full cursor-pointer hover:opacity-80 flex-shrink-0'
-                    onClick={() => {
-                        navigate(`/profile/${comment.user?._id}`)
-                        onClose()
-                    }}
-                />
-                <div className='flex-1'>
-                    <div className='flex items-center justify-between'>
-                        <div
-                            className='cursor-pointer hover:text-indigo-600'
-                            onClick={() => {
-                                navigate(`/profile/${comment.user?._id}`)
-                                onClose()
-                            }}
-                        >
-                            <h4 className='font-semibold text-sm'>{comment.user?.full_name}</h4>
-                            <p className='text-xs text-gray-500'>@{comment.user?.username}</p>
-                        </div>
-                        {comment.user?._id === currentUser._id && (
-                            <button
-                                onClick={() => isReply ? handleDeleteReply(comment._id, comment.parent_comment_id) : handleDeleteComment(comment._id)}
-                                className='text-xs text-red-500 hover:text-red-600'
+    const CommentItem = ({ comment, isReply = false }) => {
+        return (
+            <div className={`border rounded-lg p-4 transition-all duration-1000 border-gray-200`}>
+                <div className='flex gap-3'>
+                    <img
+                        src={comment.user?.profile_picture}
+                        alt=""
+                        className='w-10 h-10 rounded-full cursor-pointer hover:opacity-80 flex-shrink-0'
+                        onClick={() => {
+                            navigate(`/profile/${comment.user?._id}`)
+                            onClose()
+                        }}
+                    />
+                    <div className='flex-1'>
+                        <div className='flex items-center justify-between'>
+                            <div
+                                className='cursor-pointer hover:text-indigo-600'
+                                onClick={() => {
+                                    navigate(`/profile/${comment.user?._id}`)
+                                    onClose()
+                                }}
                             >
-                                Delete
-                            </button>
-                        )}
-                    </div>
-                    <p className='text-gray-800 text-sm mt-2'>{comment.content}</p>
-                    <div className='flex items-center gap-4 mt-2 text-xs text-gray-500'>
-                        <span>{moment(comment.createdAt).fromNow()}</span>
-                        
-                        <div className='relative group/reaction pb-2 mb-[-8px] pt-2 mt-[-8px]'>
-                            <button
-                                className='flex items-center gap-1 hover:text-indigo-600 text-gray-400'
-                            >
-                                <SmilePlus className={`w-4 h-4 ${comment.reactions?.some(r => (r.user?._id || r.user) === currentUser?._id) ? 'text-indigo-600' : ''}`} />
-                            </button>
-                            {/* Hover Reaction Picker */}
-                            <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 invisible group-hover/reaction:opacity-100 group-hover/reaction:visible transition-all duration-200 z-50'>
-                                <ReactionPicker 
-                                    onReact={(type) => isReply ? handleReactReply(comment._id, comment.parent_comment_id, type) : handleReactComment(comment._id, type)} 
-                                    currentReaction={comment.reactions?.find(r => (r.user?._id || r.user) === currentUser?._id)?.type}
-                                />
+                                <h4 className='font-semibold text-sm'>{comment.user?.full_name}</h4>
+                                <p className='text-xs text-gray-500'>@{comment.user?.username}</p>
                             </div>
+                            {comment.user?._id === currentUser._id && (
+                                <button
+                                    onClick={() => isReply ? handleDeleteReply(comment._id, comment.parent_comment_id) : handleDeleteComment(comment._id)}
+                                    className='text-xs text-red-500 hover:text-red-600'
+                                >
+                                    Delete
+                                </button>
+                            )}
                         </div>
-
-                        {!isReply && (
-                            <button
-                                onClick={() => setReplyCommentId(comment._id)}
-                                className='hover:text-indigo-600 font-medium'
-                            >
-                                Reply
-                            </button>
-                        )}
-                        
-                        {/* Reaction Display */}
-                        {comment.reactions && comment.reactions.length > 0 && (
-                            <div 
-                                className='flex items-center cursor-pointer hover:underline text-gray-500'
-                                onClick={() => setShowReactionListMsg(comment)}
-                            >
-                                <div className="flex -space-x-1 mr-1">
-                                    {Object.entries(
-                                        comment.reactions.reduce((acc, r) => {
-                                            acc[r.type] = (acc[r.type] || 0) + 1;
-                                            return acc;
-                                        }, {})
-                                    ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([type], idx) => (
-                                        <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{zIndex: 3-idx}}>
-                                            {REACTION_ICONS[type]}
-                                        </span>
-                                    ))}
+                        <p className='text-gray-800 text-sm mt-2'>{comment.content}</p>
+                        <div className='flex items-center gap-4 mt-2 text-xs text-gray-500'>
+                            <span>{moment(comment.createdAt).fromNow()}</span>
+                            
+                            <div className='relative group/reaction pb-2 mb-[-8px] pt-2 mt-[-8px]'>
+                                <button
+                                    className='flex items-center gap-1 hover:text-indigo-600 text-gray-400'
+                                >
+                                    <SmilePlus className={`w-4 h-4 ${comment.reactions?.some(r => (r.user?._id || r.user) === currentUser?._id) ? 'text-indigo-600' : ''}`} />
+                                </button>
+                                {/* Hover Reaction Picker */}
+                                <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 invisible group-hover/reaction:opacity-100 group-hover/reaction:visible transition-all duration-200 z-50'>
+                                    <ReactionPicker 
+                                        onReact={(type) => isReply ? handleReactReply(comment._id, comment.parent_comment_id, type) : handleReactComment(comment._id, type)} 
+                                        currentReaction={comment.reactions?.find(r => (r.user?._id || r.user) === currentUser?._id)?.type}
+                                    />
                                 </div>
-                                <span>{comment.reactions.length}</span>
                             </div>
-                        )}
+
+                            {!isReply && (
+                                <button
+                                    onClick={() => setReplyCommentId(comment._id)}
+                                    className='hover:text-indigo-600 font-medium'
+                                >
+                                    Reply
+                                </button>
+                            )}
+                            
+                            {/* Reaction Display */}
+                            {comment.reactions && comment.reactions.length > 0 && (
+                                <div 
+                                    className='flex items-center cursor-pointer hover:underline text-gray-500'
+                                    onClick={() => setShowReactionListMsg(comment)}
+                                >
+                                    <div className="flex -space-x-1 mr-1">
+                                        {Object.entries(
+                                            comment.reactions.reduce((acc, r) => {
+                                                acc[r.type] = (acc[r.type] || 0) + 1;
+                                                return acc;
+                                            }, {})
+                                        ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([type], idx) => (
+                                            <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{zIndex: 3-idx}}>
+                                                {REACTION_ICONS[type]}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <span>{comment.reactions.length}</span>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    )
+        )
+    }
 
     if (!isOpen || !post) return null
 
