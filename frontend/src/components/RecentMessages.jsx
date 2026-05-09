@@ -115,6 +115,17 @@ const RecentMessages = () => {
                     let content = ''
                     if (type === 'reaction') {
                         content = messageText
+                    } else if (type === 'call') {
+                        // Call history
+                        const { call_type, call_status, call_duration } = msg
+                        const isVideo = call_type === 'video'
+                        const durSecs = call_duration || 0
+                        const durStr = durSecs > 0
+                            ? ` · ${Math.floor(durSecs/60).toString().padStart(2,'0')}:${(durSecs%60).toString().padStart(2,'0')}`
+                            : ''
+                        if (call_status === 'missed')    content = isVideo ? '📵 Cuộc gọi video nhỡ' : '📵 Cuộc gọi thoại nhỡ'
+                        else if (call_status === 'rejected') content = isVideo ? '❌ Cuộc gọi video bị từ chối' : '❌ Cuộc gọi thoại bị từ chối'
+                        else content = (isVideo ? '📹 Cuộc gọi video' : '📞 Cuộc gọi thoại') + durStr
                     } else if (msg.is_deleted) {
                         content = 'Message recalled'
                     } else if (msg.is_forwarded) {

@@ -4,7 +4,11 @@ const messageSchema = new mongoose.Schema({
     from_user_id: { type: String, ref: 'User', required: true },
     to_user_id: { type: String, ref: 'User', required: true },
     text: { type: String, trim: true},
-    message_type: {type: String, enum: ['text','image','images','video','videos','voice','reaction']},
+    message_type: {type: String, enum: ['text','image','images','video','videos','voice','reaction','call']},
+    // Call history fields
+    call_type:     { type: String, enum: ['voice', 'video'] },
+    call_status:   { type: String, enum: ['missed', 'rejected', 'completed'] },
+    call_duration: { type: Number, default: 0 }, // seconds
     media_urls: [{type: String}],
     media_ids: [{type: String}],
     shared_post_id: {type: String, ref: 'Post'},

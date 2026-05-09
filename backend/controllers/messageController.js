@@ -15,7 +15,7 @@ const REACTION_ICONS = {
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
     try {
-        if(!fileId) return true
+        if (!fileId) return true
 
         // Use ImageKit SDK to delete file by ID
         await imagekit.deleteFile(fileId)
@@ -415,24 +415,24 @@ export const reactMessage = async (req, res) => {
         if (existingReactionIndex !== -1) {
             if (message.reactions[existingReactionIndex].type === reactionType) {
                 message.reactions.splice(existingReactionIndex, 1)
-                
+
                 // Remove the automated reaction message
                 await Message.deleteMany({
                     from_user_id: userId,
                     to_user_id: message.from_user_id.toString(),
                     message_type: 'reaction',
-                    $or: [ { reply_to: messageId }, { reply_to: null } ]
+                    $or: [{ reply_to: messageId }, { reply_to: null }]
                 })
             } else {
                 message.reactions[existingReactionIndex].type = reactionType
                 isNewReaction = true;
-                
+
                 // If changing reaction, also delete old automated message so we can recreate
                 await Message.deleteMany({
                     from_user_id: userId,
                     to_user_id: message.from_user_id.toString(),
                     message_type: 'reaction',
-                    $or: [ { reply_to: messageId }, { reply_to: null } ]
+                    $or: [{ reply_to: messageId }, { reply_to: null }]
                 })
             }
         } else {
@@ -441,7 +441,7 @@ export const reactMessage = async (req, res) => {
         }
 
         await message.save()
-        
+
         await message.populate({
             path: 'reactions.user',
             select: 'full_name username profile_picture _id'
@@ -456,7 +456,7 @@ export const reactMessage = async (req, res) => {
         if (io) {
             const messageOwner = message.from_user_id.toString()
             const otherUser = messageOwner === userId ? message.to_user_id.toString() : messageOwner
-            
+
             io.to(`user-${otherUser}`).emit('message-reaction-updated', { messageId, reactions: populatedMsg.reactions })
 
             if (isNewReaction && userId !== messageOwner) {
@@ -474,7 +474,7 @@ export const reactMessage = async (req, res) => {
 
                     const msgObjAuto = automatedMessage.toObject()
                     const populatedMsgAuto = await populateMessage(msgObjAuto)
-                    
+
                     io.to(`user-${messageOwner}`).emit('new-message', populatedMsgAuto)
                 }
             }
@@ -484,3 +484,50 @@ export const reactMessage = async (req, res) => {
         res.json({ success: false, message: error.message })
     }
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Save Call Record
+// ─────────────────────────────────────────────────────────────────
+export const saveCall = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const { to_user_id, call_type, call_status, call_duration } = req.body
+
+        if (!to_user_id || !call_type || !call_status) {
+            return res.json({ success: false, message: 'Missing required call fields' })
+        }
+
+        const callTexts = {
+            missed: call_type === 'video' ? '📵 Missed video call' : '📵 Missed voice call',
+            rejected: call_type === 'video' ? '❌ Rejected video call' : '❌ Rejected voice call',
+            completed: call_type === 'video' ? '📹 Video call' : '📞 Voice call',
+        }
+
+        const message = await Message.create({
+            from_user_id: userId,
+            to_user_id,
+            text: callTexts[call_status] || '📞 Cuộc gọi',
+            message_type: 'call',
+            call_type,
+            call_status,
+            call_duration: call_duration || 0,
+            isRead: false,
+        })
+
+        const msgObj = message.toObject()
+        const populatedMsg = await populateMessage(msgObj)
+
+        res.json({ success: true, message: populatedMsg })
+
+        // Emit to both parties so their ChatBox + RecentMessages update live
+        const io = req.app.locals.io
+        if (io) {
+            io.to(`user-${to_user_id}`).emit('new-message', populatedMsg)
+            io.to(`user-${userId}`).emit('new-message', populatedMsg)
+        }
+    } catch (error) {
+        console.error('❌ Error in saveCall:', error)
+        res.json({ success: false, message: error.message })
+    }
+}
+

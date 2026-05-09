@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useCallback } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import Login from './pages/Login'
 import Feed from './pages/Feed'
@@ -12,8 +12,8 @@ import PostDetail from './pages/PostDetail'
 import Notification from './components/Notification'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import Layout from './pages/Layout'
-import {Toaster} from 'react-hot-toast'
-import { useEffect } from 'react'
+import { Toaster } from 'react-hot-toast'
+import { useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { fetchUser } from './features/user/userSlice'
 import { fetchConnections } from './features/connections/connectionsSlice'
@@ -22,37 +22,44 @@ import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal
 import { addNotification } from './features/notifications/notificationsSlice'
 import toast from 'react-hot-toast'
 import { Navigate } from 'react-router-dom'
-
 import { io } from 'socket.io-client'
+import { SocketProvider, useSocket } from './context/SocketContext'
+import CallModal from './components/CallModal'
 
-const App = () => {
-  const {user: clerkUser} = useUser()
-  const {getToken} = useAuth()
-  const {pathname} = useLocation()
+// ─── Inner App (needs SocketProvider to be parent) ───────────────────────────
+const AppInner = () => {
+  const { user: clerkUser } = useUser()
+  const { getToken } = useAuth()
+  const { pathname } = useLocation()
   const pathnameRef = useRef(pathname)
-  const socketRef = useRef(null)
-  const currentUser = useSelector((state)=>state.user.value)
+
+  // callAcceptedSignal đã được loại bỏ — CallModal tự lắng nghe socket trực tiếp
+  const { socketRef, incomingCall, setIncomingCall } = useSocket()
+
+  const [activeCall, setActiveCall] = useState(null)
+  const activeCallRef = useRef(null)
+  const currentUser = useSelector((state) => state.user.value)
   const dispatch = useDispatch()
 
-  useEffect(()=>{
+  useEffect(() => {
     const fetchData = async () => {
-      if(clerkUser) {
+      if (clerkUser) {
         const token = await getToken()
         dispatch(fetchUser(token))
         dispatch(fetchConnections(token))
       }
     }
     fetchData()
-  },[clerkUser, getToken, dispatch])
+  }, [clerkUser, getToken, dispatch])
 
-  useEffect(()=>{
+  useEffect(() => {
     pathnameRef.current = pathname
-  },[pathname])
+  }, [pathname])
 
   // Initialize Socket.IO connection
-  useEffect(()=>{
-    if(currentUser?._id) {
-      if(!socketRef.current) {
+  useEffect(() => {
+    if (currentUser?._id) {
+      if (!socketRef.current) {
         const socket = io(import.meta.env.VITE_BASEURL, {
           reconnection: true,
           reconnectionDelay: 1000,
@@ -68,31 +75,39 @@ const App = () => {
         })
 
         // Listen for new messages
-       socket.on('new-message', (message) => {
-        if(pathnameRef.current === (`/messages/${message.from_user_id?._id}`)) {
+        socket.on('new-message', (message) => {
+          if (pathnameRef.current === (`/messages/${message.from_user_id?._id}`)) {
             dispatch(addMessages(message))
-        } else {
-            // Don't show toast for reaction-only messages
-            if (message.message_type !== 'reaction') {
-                toast.custom((t) => <Notification t={t} message={message}/>, {position: "bottom-right"})
+          } else {
+            if (message.message_type !== 'reaction' && message.message_type !== 'call') {
+              toast.custom((t) => <Notification t={t} message={message} />, { position: "bottom-right" })
             }
-        }
-        dispatch(setNewMessageTrigger(Date.now()))
-       })
+          }
+          dispatch(setNewMessageTrigger(Date.now()))
+        })
 
-       // Listen for message updates
-       socket.on('message-edited', ({ messageId, text }) => {
-         dispatch(editMessageLocal({ messageId, text }))
-       })
+        socket.on('message-edited', ({ messageId, text }) => {
+          dispatch(editMessageLocal({ messageId, text }))
+        })
 
-       socket.on('message-deleted', ({ messageId }) => {
-         dispatch(deleteMessageLocal(messageId))
-       })
+        socket.on('message-deleted', ({ messageId }) => {
+          dispatch(deleteMessageLocal(messageId))
+        })
 
-       socket.on('message-reaction-updated', ({ messageId, reactions }) => {
-         dispatch(updateMessageReactionsLocal({ messageId, reactions }))
-         dispatch(setNewMessageTrigger(Date.now()))
-       })
+        socket.on('message-reaction-updated', ({ messageId, reactions }) => {
+          dispatch(updateMessageReactionsLocal({ messageId, reactions }))
+          dispatch(setNewMessageTrigger(Date.now()))
+        })
+
+        // ── Incoming Call ─────────────────────────────────────────────
+        socket.on('incoming-call', (data) => {
+          console.log('📞 Incoming call:', data)
+          if (activeCallRef.current) return
+          setIncomingCall(data)
+        })
+
+        // NOTE: 'call-accepted' KHÔNG được xử lý ở App level nữa.
+        // CallModal của caller tự đăng ký listener trực tiếp trên socket.
 
         // Listen for friend requests
         socket.on('friend-request', (notification) => {
@@ -100,43 +115,36 @@ const App = () => {
           dispatch(addNotification(notification))
         })
 
-        // Listen for connection accepted
         socket.on('connection-accepted', (notification) => {
           console.log('✅ Connection accepted:', notification)
           dispatch(addNotification(notification))
         })
 
-        // Listen for new stories
         socket.on('new-story', (notification) => {
           console.log('📖 New story received:', notification)
           dispatch(addNotification(notification))
         })
 
-        // Listen for new posts
         socket.on('new-post-notification', (notification) => {
           console.log('📝 New post notification:', notification)
           dispatch(addNotification(notification))
         })
 
-        // Listen for new comments
         socket.on('new-comment-notification', (notification) => {
           console.log('💬 New comment notification:', notification)
           dispatch(addNotification(notification))
         })
 
-        // Listen for new replies
         socket.on('new-reply-notification', (notification) => {
           console.log('💬 New reply notification:', notification)
           dispatch(addNotification(notification))
         })
 
-        // Listen for likes
         socket.on('new-like-notification', (notification) => {
           console.log('👍 New like notification:', notification)
           dispatch(addNotification(notification))
         })
 
-        // Listen for reactions
         socket.on('new-reaction-notification', (notification) => {
           console.log('😮 New reaction notification:', notification)
           dispatch(addNotification(notification))
@@ -163,32 +171,68 @@ const App = () => {
     }
 
     return () => {
-      if(socketRef.current) {
+      if (socketRef.current) {
         socketRef.current.disconnect()
         socketRef.current = null
       }
     }
-  },[currentUser?._id, dispatch])
+  }, [currentUser?._id, dispatch])
+
+  // When incomingCall arrives, open it if no active call
+  useEffect(() => {
+    if (incomingCall && !activeCallRef.current) {
+      const call = { ...incomingCall, isIncoming: true }
+      activeCallRef.current = call
+      setActiveCall(call)
+      setIncomingCall(null)
+    }
+  }, [incomingCall, setIncomingCall])
+
+  const handleStartCall = useCallback((callData) => {
+    activeCallRef.current = callData
+    setActiveCall(callData)
+  }, [])
+
+  const handleCloseCall = useCallback(() => {
+    activeCallRef.current = null
+    setActiveCall(null)
+  }, [])
 
   return (
     <>
-    <Toaster/>
+      <Toaster />
       <Routes>
-        <Route path='/' element={ clerkUser ? <Layout/> : <Login/>}>
-          <Route index element={<Navigate to="/feed" replace />}/>
-          <Route path='feed' element={<Feed/>}/>
-          <Route path='messages' element={<Message/>}/>
-          <Route path='messages/:userId' element={<ChatBox/>}/>
-          <Route path='connections' element={<Connections/>}/>
-          <Route path='discover' element={<Discover/>}/>
-          <Route path='profile' element={<Profile/>}/>
-          <Route path='profile/:profileId' element={<Profile/>}/>
-          <Route path='create-post' element={<CreatePost/>}/>
-          <Route path='post/:postId' element={<PostDetail/>}/>
+        <Route path='/' element={clerkUser ? <Layout onStartCall={handleStartCall} /> : <Login />}>
+          <Route index element={<Navigate to="/feed" replace />} />
+          <Route path='feed' element={<Feed />} />
+          <Route path='messages' element={<Message />} />
+          <Route path='messages/:userId' element={<ChatBox onStartCall={handleStartCall} />} />
+          <Route path='connections' element={<Connections />} />
+          <Route path='discover' element={<Discover />} />
+          <Route path='profile' element={<Profile />} />
+          <Route path='profile/:profileId' element={<Profile />} />
+          <Route path='create-post' element={<CreatePost />} />
+          <Route path='post/:postId' element={<PostDetail />} />
         </Route>
       </Routes>
+
+      {/* Global Call Modal — renders over everything */}
+      {activeCall && currentUser && (
+        <CallModal
+          callInfo={activeCall}
+          isIncoming={!!activeCall.isIncoming}
+          onClose={handleCloseCall}
+        />
+      )}
     </>
   )
 }
+
+// ─── Root App with SocketProvider ─────────────────────────────────────────────
+const App = () => (
+  <SocketProvider>
+    <AppInner />
+  </SocketProvider>
+)
 
 export default App

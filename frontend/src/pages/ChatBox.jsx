@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil } from 'lucide-react'
+import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, PhoneCall, PhoneOff, PhoneMissed, PhoneIncoming, VideoIcon } from 'lucide-react'
+import { useSocket } from '../context/SocketContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { setViewStory } from '../features/stories/storiesSlice'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -14,7 +15,7 @@ import { SmilePlus } from 'lucide-react'
 import ReactionPicker, { REACTION_ICONS } from '../components/ReactionPicker'
 import ReactionListModal from '../components/ReactionListModal'
 
-const ChatBox = () => {
+const ChatBox = ({ onStartCall }) => {
 
   const { messages } = useSelector((state) => state.messages)
   const currentUser = useSelector((state) => state.user.value)
@@ -363,7 +364,7 @@ const ChatBox = () => {
             urls.forEach(url => formData.append('media_urls[]', url))
             formData.append('message_type', forwardingMsg?.message_type || 'images')
           } else if (isStoryReply) {
-             formData.append('message_type', 'text')
+            formData.append('message_type', 'text')
           }
 
           const res = await api.post('/api/message/send', formData, {
@@ -485,14 +486,61 @@ const ChatBox = () => {
 
   if (loading) return <Loading height='100vh' />
 
+  // ── Call helpers ─────────────────────────────────────────────────────────
+  const { socketRef } = useSocket()
+
+  const startCall = (callType) => {
+    if (!onStartCall || !socketRef.current || !user) return
+    const callData = {
+      to: userId,
+      from: currentUser._id,
+      callType,
+      callerName: currentUser.full_name,
+      callerAvatar: currentUser.profile_picture,
+    }
+    // Notify receiver immediately (no WebRTC offer yet — that comes after receiver accepts)
+    socketRef.current.emit('call-user', callData)
+    onStartCall({ ...callData, isIncoming: false })
+  }
+
+  // ── Call back from history ────────────────────────────────────────────────
+  const callBack = (callType) => startCall(callType)
+
+  // ── Format call duration ─────────────────────────────────────────────────
+  const formatCallDuration = (secs) => {
+    if (!secs || secs === 0) return ''
+    const m = Math.floor(secs / 60).toString().padStart(2, '0')
+    const s = (secs % 60).toString().padStart(2, '0')
+    return ` · ${m}:${s}`
+  }
+
   return user && (
     <div className='flex flex-col h-screen'>
       {/* ── Header ── */}
-      <div className='flex items-center pl-8 pt-2 pb-2 bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 shadow-sm'>
+      <div className='flex items-center pl-8 pr-4 pt-2 pb-2 bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 shadow-sm'>
         <img src={user.profile_picture} alt="" className='size-10 rounded-full shadow-sm' />
-        <div className='ml-4'>
+        <div className='ml-4 flex-1'>
           <p className='font-semibold text-slate-800'>{user.full_name}</p>
           <p className='text-sm text-gray-500'>@{user.username}</p>
+        </div>
+        {/* Call buttons */}
+        <div className='flex items-center gap-1'>
+          <button
+            id='voice-call-btn'
+            onClick={() => startCall('voice')}
+            title='Voice call'
+            className='p-2 rounded-full hover:bg-indigo-100 text-indigo-500 transition-colors'
+          >
+            <Phone size={20} />
+          </button>
+          <button
+            id='video-call-btn'
+            onClick={() => startCall('video')}
+            title='Video Call'
+            className='p-2 rounded-full hover:bg-indigo-100 text-indigo-500 transition-colors'
+          >
+            <VideoIcon size={20} />
+          </button>
         </div>
       </div>
 
@@ -510,6 +558,66 @@ const ChatBox = () => {
         <div className='space-y-2 py-4' onClick={() => setOpenMenuId(null)}>
           {messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).map((message, index) => {
             if (message.message_type === 'reaction') return null;
+
+            // ── Call history bubble ───────────────────────────────────────────
+            if (message.message_type === 'call') {
+              const isOwn = (message.from_user_id?._id || message.from_user_id)?.toString() === currentUser?._id?.toString()
+              const sorted = messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+              const previousMessage = index > 0 ? sorted[index - 1] : null
+              const showTimestamp = shouldShowTimestamp(message, previousMessage)
+              const { call_type, call_status, call_duration } = message
+              const isVideo = call_type === 'video'
+              const isMissed = call_status === 'missed'
+              const isRejected = call_status === 'rejected'
+              const isCompleted = call_status === 'completed'
+              const callIcon = isMissed ? '📵' : isRejected ? '❌' : isVideo ? '📹' : '📞'
+              const statusLabel = isMissed
+                ? (isOwn ? 'Missed call' : 'Missed your call')
+                : isRejected
+                  ? (isOwn ? 'Rejected call' : 'Declined the call')
+                  : (isVideo ? 'Video call' : 'Voice call') + formatCallDuration(call_duration)
+              return (
+                <div key={message._id || index}
+                  ref={el => { if (message._id) messageRefs.current[message._id] = el }}
+                >
+                  {showTimestamp && (
+                    <div className='flex justify-center my-3'>
+                      <p className='text-xs text-gray-500 bg-gray-200 px-3 py-1 rounded-full'>
+                        {formatMessageTime(message.createdAt)}
+                      </p>
+                    </div>
+                  )}
+                  <div className={`flex items-center gap-2 my-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm max-w-xs
+                      ${isMissed || isRejected
+                        ? 'bg-red-50 text-red-600 border border-red-100'
+                        : 'bg-green-50 text-green-700 border border-green-100'
+                      }`}>
+                      <span className='text-base'>{callIcon}</span>
+                      <div className='flex flex-col'>
+                        <span className='font-medium text-xs leading-tight'>
+                          {isVideo ? 'Video call' : 'Voice call'}
+                        </span>
+                        <span className='text-[11px] opacity-75'>{statusLabel}</span>
+                      </div>
+                      <button
+                        onClick={() => callBack(call_type)}
+                        title='Gọi lại'
+                        className={`ml-1 p-1.5 rounded-full transition-colors
+                          ${isMissed || isRejected
+                            ? 'bg-red-100 hover:bg-red-200 text-red-600'
+                            : 'bg-green-100 hover:bg-green-200 text-green-700'
+                          }`}
+                      >
+                        {isVideo ? <VideoIcon size={13} /> : <Phone size={13} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            }
+            // ─────────────────────────────────────────────────────────────────
+
             const isOwn = (message.from_user_id?._id || message.from_user_id)?.toString() === currentUser?._id?.toString()
             const mediaUrls = message.media_urls || (message.media_url ? [message.media_url] : [])
             const sorted = messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
@@ -518,17 +626,17 @@ const ChatBox = () => {
             const isVoice = message.message_type === 'voice'
             const menuOpen = openMenuId === message._id
             const reactionMenuOpen = reactionMenuId === message._id
-            
+
             // Calculate reactions
             const reactions = message.reactions || []
             const reactionCounts = reactions.reduce((acc, r) => {
-                acc[r.type] = (acc[r.type] || 0) + 1;
-                return acc;
+              acc[r.type] = (acc[r.type] || 0) + 1;
+              return acc;
             }, {})
             const topReactions = Object.entries(reactionCounts)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 3)
-                .map(entry => entry[0])
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 3)
+              .map(entry => entry[0])
             const currentUserReaction = reactions.find(r => (r.user?._id || r.user) === currentUser?._id)?.type;
 
             // ── Inline action buttons (no pill, no border) ──────────
@@ -619,7 +727,7 @@ const ChatBox = () => {
                 >
                   {/* Own messages: actions LEFT of bubble */}
                   {isOwn && <ActionButtons side='left' />}
-                  
+
                   <div className='flex flex-col relative'>
                     {/* ── Bubble ── */}
                     <div className={`
@@ -627,114 +735,114 @@ const ChatBox = () => {
                     max-w-[70vw] md:max-w-lg lg:max-w-xl
                     rounded-2xl shadow-sm
                     ${message.is_deleted
-                      ? 'bg-gray-100 text-gray-400 italic border border-dashed border-gray-300 rounded-br-none'
-                      : isOwn
-                        ? 'bg-indigo-500 text-white rounded-br-none'
-                        : 'bg-white text-slate-800 rounded-bl-none border border-gray-200'
-                    }
+                        ? 'bg-gray-100 text-gray-400 italic border border-dashed border-gray-300 rounded-br-none'
+                        : isOwn
+                          ? 'bg-indigo-500 text-white rounded-br-none'
+                          : 'bg-white text-slate-800 rounded-bl-none border border-gray-200'
+                      }
                   `}>
-                    {/* Forward label */}
-                    {message.is_forwarded && !message.is_deleted && message.forwarded_type !== 'story' && (
-                      <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
-                        <CornerUpRight size={10} /> Forwarded
-                      </p>
-                    )}
-
-                    {/* ── Reply quote — click scrolls to original ── */}
-                    {message.reply_to && !message.is_deleted && (
-                      <div
-                        className={`text-xs mb-2 px-2 py-1 rounded-lg border-l-2 cursor-pointer transition-opacity hover:opacity-80 ${isOwn ? 'bg-indigo-400/40 border-indigo-200 text-indigo-100' : 'bg-gray-100 border-indigo-400 text-gray-600'}`}
-                        onClick={(e) => { e.stopPropagation(); scrollToMessage(message.reply_to._id) }}
-                      >
-                        <p className='font-semibold text-[10px] mb-0.5'>
-                          {message.reply_to.from_user_id?._id === currentUser._id ? 'You' : message.reply_to.from_user_id?.full_name}
+                      {/* Forward label */}
+                      {message.is_forwarded && !message.is_deleted && message.forwarded_type !== 'story' && (
+                        <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
+                          <CornerUpRight size={10} /> Forwarded
                         </p>
-                        <p className='line-clamp-1 text-[11px]'>
-                          {getReplyLabel(message.reply_to)}
-                        </p>
-                      </div>
-                    )}
+                      )}
 
-                    {message.is_deleted ? (
-                      <p>Message recalled</p>
-                    ) : message.is_forwarded && message.forwarded_type === 'story' ? (
-                      <div className='flex items-center gap-3'>
-                        <div className='w-14 h-20 bg-black/10 rounded-lg overflow-hidden shrink-0 shadow-sm cursor-pointer relative group' onClick={() => handleStoryClick(message.shared_story_id)}>
-                           {message.message_type === 'video' && mediaUrls[0] ? (
+                      {/* ── Reply quote — click scrolls to original ── */}
+                      {message.reply_to && !message.is_deleted && (
+                        <div
+                          className={`text-xs mb-2 px-2 py-1 rounded-lg border-l-2 cursor-pointer transition-opacity hover:opacity-80 ${isOwn ? 'bg-indigo-400/40 border-indigo-200 text-indigo-100' : 'bg-gray-100 border-indigo-400 text-gray-600'}`}
+                          onClick={(e) => { e.stopPropagation(); scrollToMessage(message.reply_to._id) }}
+                        >
+                          <p className='font-semibold text-[10px] mb-0.5'>
+                            {message.reply_to.from_user_id?._id === currentUser._id ? 'You' : message.reply_to.from_user_id?.full_name}
+                          </p>
+                          <p className='line-clamp-1 text-[11px]'>
+                            {getReplyLabel(message.reply_to)}
+                          </p>
+                        </div>
+                      )}
+
+                      {message.is_deleted ? (
+                        <p>Message recalled</p>
+                      ) : message.is_forwarded && message.forwarded_type === 'story' ? (
+                        <div className='flex items-center gap-3'>
+                          <div className='w-14 h-20 bg-black/10 rounded-lg overflow-hidden shrink-0 shadow-sm cursor-pointer relative group' onClick={() => handleStoryClick(message.shared_story_id)}>
+                            {message.message_type === 'video' && mediaUrls[0] ? (
                               <>
                                 <video src={mediaUrls[0]} className='w-full h-full object-cover' />
                                 <div className='absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/40 transition'>
                                   <div className="w-0 h-0 border-t-[4px] border-t-transparent border-l-[6px] border-l-white border-b-[4px] border-b-transparent ml-0.5"></div>
                                 </div>
                               </>
-                           ) : mediaUrls[0] ? (
+                            ) : mediaUrls[0] ? (
                               <img src={mediaUrls[0]} className='w-full h-full object-cover group-hover:brightness-90 transition' />
-                           ) : (
+                            ) : (
                               <div className='w-full h-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center'>
-                                 <span className='text-white text-xs font-bold'>Aa</span>
+                                <span className='text-white text-xs font-bold'>Aa</span>
                               </div>
-                           )}
-                        </div>
-                        <div className='flex-1 flex flex-col justify-center min-w-[120px]'>
-                           <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
-                              <CornerUpRight size={10} /> Replied to story
-                           </p>
-                           {message.text && renderMessageText(message.text)}
-                           {message.is_edited && (
-                              <span className={`text-[10px] mt-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · edited</span>
-                           )}
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        {isVoice && mediaUrls.length > 0 && (
-                          <div className='flex items-center gap-2 min-w-[200px]'>
-                            <span className='text-lg'>🎤</span>
-                            <audio controls src={mediaUrls[0]} className='h-8 w-full max-w-[220px]' style={{ accentColor: isOwn ? '#fff' : '#6366f1' }} />
+                            )}
                           </div>
-                        )}
-                        {!isVoice && mediaUrls.length > 0 && (
-                          <div className='flex flex-wrap gap-2 mb-2'>
-                            {mediaUrls.map((url, idx) => {
-                              const isVideo = url.match(/\.(mp4|webm|mov|ogg)$/i) || message.message_type?.includes('video')
-                              return isVideo
-                                ? (
-                                  <div key={idx} onClick={() => openMediaViewer(url)} className="relative group cursor-pointer w-full max-w-sm rounded-lg overflow-hidden border border-gray-100">
-                                    <video src={url} className='w-full' />
-                                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition">
-                                      <div className="bg-white/80 p-3 rounded-full backdrop-blur-sm shadow-sm group-hover:scale-110 transition-transform">
-                                        <div className="w-0 h-0 border-t-[6px] border-t-transparent border-l-[10px] border-l-gray-800 border-b-[6px] border-b-transparent ml-1"></div>
+                          <div className='flex-1 flex flex-col justify-center min-w-[120px]'>
+                            <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
+                              <CornerUpRight size={10} /> Replied to story
+                            </p>
+                            {message.text && renderMessageText(message.text)}
+                            {message.is_edited && (
+                              <span className={`text-[10px] mt-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · edited</span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {isVoice && mediaUrls.length > 0 && (
+                            <div className='flex items-center gap-2 min-w-[200px]'>
+                              <span className='text-lg'>🎤</span>
+                              <audio controls src={mediaUrls[0]} className='h-8 w-full max-w-[220px]' style={{ accentColor: isOwn ? '#fff' : '#6366f1' }} />
+                            </div>
+                          )}
+                          {!isVoice && mediaUrls.length > 0 && (
+                            <div className='flex flex-wrap gap-2 mb-2'>
+                              {mediaUrls.map((url, idx) => {
+                                const isVideo = url.match(/\.(mp4|webm|mov|ogg)$/i) || message.message_type?.includes('video')
+                                return isVideo
+                                  ? (
+                                    <div key={idx} onClick={() => openMediaViewer(url)} className="relative group cursor-pointer w-full max-w-sm rounded-lg overflow-hidden border border-gray-100">
+                                      <video src={url} className='w-full' />
+                                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition">
+                                        <div className="bg-white/80 p-3 rounded-full backdrop-blur-sm shadow-sm group-hover:scale-110 transition-transform">
+                                          <div className="w-0 h-0 border-t-[6px] border-t-transparent border-l-[10px] border-l-gray-800 border-b-[6px] border-b-transparent ml-1"></div>
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                )
-                                : <img key={idx} src={url} alt='sent-image' onClick={() => openMediaViewer(url)} className='cursor-pointer w-full max-w-sm rounded-lg hover:brightness-95 transition border border-gray-100' />
-                            })}
+                                  )
+                                  : <img key={idx} src={url} alt='sent-image' onClick={() => openMediaViewer(url)} className='cursor-pointer w-full max-w-sm rounded-lg hover:brightness-95 transition border border-gray-100' />
+                              })}
+                            </div>
+                          )}
+                          {message.text && renderMessageText(message.text)}
+                          {message.is_edited && (
+                            <span className={`text-[10px] ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · edited</span>
+                          )}
+                        </>
+                      )}
+
+                      {/* Reactions display half-outside bottom-right */}
+                      {!message.is_deleted && topReactions.length > 0 && (
+                        <div
+                          className={`absolute -bottom-2.5 ${isOwn ? 'right-0' : 'right-0'} translate-x-1/4 w-fit rounded-full px-1.5 py-0.5 flex items-center cursor-pointer hover:scale-105 transition bg-white shadow-sm border border-gray-200 z-10`}
+                          onClick={(e) => { e.stopPropagation(); setShowReactionListMsg(message) }}
+                        >
+                          <div className="flex -space-x-1">
+                            {topReactions.map((type, idx) => (
+                              <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{ zIndex: 3 - idx }}>
+                                {REACTION_ICONS[type]}
+                              </span>
+                            ))}
                           </div>
-                        )}
-                        {message.text && renderMessageText(message.text)}
-                        {message.is_edited && (
-                          <span className={`text-[10px] ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · edited</span>
-                        )}
-                      </>
-                    )}
-                    
-                    {/* Reactions display half-outside bottom-right */}
-                    {!message.is_deleted && topReactions.length > 0 && (
-                      <div 
-                        className={`absolute -bottom-2.5 ${isOwn ? 'right-0' : 'right-0'} translate-x-1/4 w-fit rounded-full px-1.5 py-0.5 flex items-center cursor-pointer hover:scale-105 transition bg-white shadow-sm border border-gray-200 z-10`}
-                        onClick={(e) => { e.stopPropagation(); setShowReactionListMsg(message) }}
-                      >
-                        <div className="flex -space-x-1">
-                          {topReactions.map((type, idx) => (
-                            <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{zIndex: 3-idx}}>
-                              {REACTION_ICONS[type]}
-                            </span>
-                          ))}
+                          {reactions.length > 1 && <span className={`text-[10px] font-medium ml-1 text-gray-500`}>{reactions.length}</span>}
                         </div>
-                        {reactions.length > 1 && <span className={`text-[10px] font-medium ml-1 text-gray-500`}>{reactions.length}</span>}
-                      </div>
-                    )}
+                      )}
                     </div>
                   </div>
 
@@ -932,7 +1040,7 @@ const ChatBox = () => {
       )}
       {/* ── Media Viewer Modal ── */}
       {mediaViewerOpen && (
-        <ChatMediaViewer 
+        <ChatMediaViewer
           mediaList={allMedia}
           currentIndex={currentMediaIndex}
           onClose={() => setMediaViewerOpen(false)}
@@ -941,7 +1049,7 @@ const ChatBox = () => {
       )}
 
       {/* Reaction List Modal */}
-      <ReactionListModal 
+      <ReactionListModal
         isOpen={!!showReactionListMsg}
         onClose={() => setShowReactionListMsg(null)}
         reactions={showReactionListMsg?.reactions || []}

@@ -6,7 +6,8 @@ import {
     markMessagesAsRead,
     deleteMessage,
     editMessage,
-    reactMessage
+    reactMessage,
+    saveCall
 } from '../controllers/messageController.js'
 import { upload } from '../configs/multer.js'
 import { protect } from '../middlewares/auth.js'
@@ -24,5 +25,6 @@ messageRouter.post('/mark-as-read', protect, markMessagesAsRead)
 messageRouter.post('/delete', protect, deleteMessage)
 messageRouter.post('/edit', protect, editMessage)
 messageRouter.post('/react', protect, reactMessage)
+messageRouter.post('/save-call', protect, saveCall)
 
 export default messageRouter
