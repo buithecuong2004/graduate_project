@@ -18,9 +18,9 @@ const Notification = ({ t, message }) => {
     
     let messageText = 'Media';
     if (isPostLink) {
-        messageText = '🔗 Shared a post with you';
+        messageText = '🔗 Đã chia sẻ một bài đăng với bạn';
     } else if (isStoryReply) {
-        messageText = 'Replied to your story';
+        messageText = 'Đã trả lời tin của bạn';
     } else if (message.text) {
         messageText = message.text.length > 30 ? message.text.slice(0, 30) + '...' : message.text;
     }
@@ -54,7 +54,7 @@ const Notification = ({ t, message }) => {
                 }}
                     className='p-4 text-indigo-600 font-semibold hover:bg-indigo-50 transition'
                 >
-                    Reply
+                    Trả lời
                 </button>
             </div>
         </div>

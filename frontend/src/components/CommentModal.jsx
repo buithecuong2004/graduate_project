@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { X, Heart, ChevronDown, ChevronUp, SmilePlus } from 'lucide-react'
-import moment from 'moment'
+import moment from '../utils/moment'
 import { useSelector } from 'react-redux'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
@@ -42,13 +42,13 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         try {
             if (pageNum === 1) setIsLoadingComments(true)
             else setIsLoadingMore(true)
-            
+
             const token = await getToken()
             const { data } = await api.get(`/api/post/comment/${post._id}`, {
                 headers: { Authorization: `Bearer ${token}` },
                 params: { page: pageNum, limit: 10 }
             })
-            
+
             if (data.success) {
                 if (pageNum === 1) {
                     setComments(data.comments)
@@ -108,7 +108,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     const handleAddComment = async (e) => {
         e.preventDefault()
         if (!newComment.trim()) {
-            toast.error('Comment cannot be empty')
+            toast.error('Bình luận không thể để trống')
             return
         }
 
@@ -123,12 +123,12 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             if (data.success) {
                 setComments([data.comment, ...comments])
                 setNewComment('')
-                toast.success('Comment added')
-                if(onCommentAdded) onCommentAdded()
+                toast.success('Bình luận đã được thêm')
+                if (onCommentAdded) onCommentAdded()
             }
         } catch (error) {
             console.log('Error adding comment:', error)
-            toast.error('Failed to add comment')
+            toast.error('Không thể thêm bình luận')
         } finally {
             setIsLoading(false)
         }
@@ -137,7 +137,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     const handleAddReply = async (e, commentId) => {
         e.preventDefault()
         if (!replyText.trim()) {
-            toast.error('Reply cannot be empty')
+            toast.error('Trả lời không thể để trống')
             return
         }
 
@@ -154,7 +154,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                     ...prev,
                     [commentId]: [data.reply, ...(prev[commentId] || [])]
                 }))
-                
+
                 setComments(prev =>
                     prev.map(c =>
                         c._id === commentId
@@ -162,16 +162,16 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                             : c
                     )
                 )
-                
+
                 setReplyCommentId(null)
                 setReplyText('')
-                toast.success('Reply added')
-                if(onReplyAdded) onReplyAdded()
-                if(onCountChange) onCountChange(1)
+                toast.success('Trả lời đã được thêm')
+                if (onReplyAdded) onReplyAdded()
+                if (onCountChange) onCountChange(1)
             }
         } catch (error) {
             console.log('Error adding reply:', error)
-            toast.error('Failed to add reply')
+            toast.error('Không thể thêm trả lời')
         } finally {
             setIsLoading(false)
         }
@@ -189,7 +189,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                         likes_count: alreadyLiked
                             ? c.likes_count.filter(id => id !== currentUser._id)
                             : [...(c.likes_count || []), currentUser._id]
-                      }
+                    }
                     : c
             )
         )
@@ -212,7 +212,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                             likes_count: alreadyLiked
                                 ? [...(c.likes_count || []), currentUser._id]
                                 : c.likes_count.filter(id => id !== currentUser._id)
-                          }
+                        }
                         : c
                 )
             )
@@ -230,8 +230,8 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             )
             if (data.success) {
                 setComments(prev =>
-                    prev.map(c => c._id === commentId ? { 
-                        ...c, 
+                    prev.map(c => c._id === commentId ? {
+                        ...c,
                         reactions: data.reactions,
                         likes_count: c.likes_count?.filter(id => id !== currentUser._id) || []
                     } : c)
@@ -255,7 +255,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                         likes_count: alreadyLiked
                             ? r.likes_count.filter(id => id !== currentUser._id)
                             : [...(r.likes_count || []), currentUser._id]
-                      }
+                    }
                     : r
             )
         }))
@@ -279,7 +279,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                             likes_count: alreadyLiked
                                 ? [...(r.likes_count || []), currentUser._id]
                                 : r.likes_count.filter(id => id !== currentUser._id)
-                          }
+                        }
                         : r
                 )
             }))
@@ -298,8 +298,8 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             if (data.success) {
                 setReplies(prev => ({
                     ...prev,
-                    [commentId]: (prev[commentId] || []).map(r => r._id === replyId ? { 
-                        ...r, 
+                    [commentId]: (prev[commentId] || []).map(r => r._id === replyId ? {
+                        ...r,
                         reactions: data.reactions,
                         likes_count: r.likes_count?.filter(id => id !== currentUser._id) || []
                     } : r)
@@ -393,14 +393,14 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                     onClick={() => isReply ? handleDeleteReply(comment._id, comment.parent_comment_id) : handleDeleteComment(comment._id)}
                                     className='text-xs text-red-500 hover:text-red-600'
                                 >
-                                    Delete
+                                    Xoá
                                 </button>
                             )}
                         </div>
                         <p className='text-gray-800 text-sm mt-2'>{comment.content}</p>
                         <div className='flex items-center gap-4 mt-2 text-xs text-gray-500'>
                             <span>{moment(comment.createdAt).fromNow()}</span>
-                            
+
                             <div className='relative group/reaction pb-2 mb-[-8px] pt-2 mt-[-8px]'>
                                 <button
                                     className='flex items-center gap-1 hover:text-indigo-600 text-gray-400'
@@ -409,8 +409,8 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                 </button>
                                 {/* Hover Reaction Picker */}
                                 <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 invisible group-hover/reaction:opacity-100 group-hover/reaction:visible transition-all duration-200 z-50'>
-                                    <ReactionPicker 
-                                        onReact={(type) => isReply ? handleReactReply(comment._id, comment.parent_comment_id, type) : handleReactComment(comment._id, type)} 
+                                    <ReactionPicker
+                                        onReact={(type) => isReply ? handleReactReply(comment._id, comment.parent_comment_id, type) : handleReactComment(comment._id, type)}
                                         currentReaction={comment.reactions?.find(r => (r.user?._id || r.user) === currentUser?._id)?.type}
                                     />
                                 </div>
@@ -421,13 +421,13 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                     onClick={() => setReplyCommentId(comment._id)}
                                     className='hover:text-indigo-600 font-medium'
                                 >
-                                    Reply
+                                    Phản hồi
                                 </button>
                             )}
-                            
+
                             {/* Reaction Display */}
                             {comment.reactions && comment.reactions.length > 0 && (
-                                <div 
+                                <div
                                     className='flex items-center cursor-pointer hover:underline text-gray-500'
                                     onClick={() => setShowReactionListMsg(comment)}
                                 >
@@ -438,7 +438,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                                 return acc;
                                             }, {})
                                         ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([type], idx) => (
-                                            <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{zIndex: 3-idx}}>
+                                            <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{ zIndex: 3 - idx }}>
                                                 {REACTION_ICONS[type]}
                                             </span>
                                         ))}
@@ -522,7 +522,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                     {comments.map((comment) => (
                                         <div key={comment._id}>
                                             <CommentItem comment={comment} />
-                                            
+
                                             {/* Reply Input */}
                                             {replyCommentId === comment._id && (
                                                 <form onSubmit={(e) => handleAddReply(e, comment._id)} className='mt-3 ml-6 border-l-2 border-indigo-200 pl-4'>
@@ -532,7 +532,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                                             <textarea
                                                                 value={replyText}
                                                                 onChange={(e) => setReplyText(e.target.value)}
-                                                                placeholder='Write a reply...'
+                                                                placeholder='Viết phản hồi...'
                                                                 className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none text-sm'
                                                                 rows="2"
                                                                 disabled={isLoading}
@@ -546,14 +546,14 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                                                     }}
                                                                     className='px-3 py-1 text-gray-600 rounded hover:bg-gray-100 text-xs'
                                                                 >
-                                                                    Cancel
+                                                                    Huỷ bỏ
                                                                 </button>
                                                                 <button
                                                                     type='submit'
                                                                     disabled={isLoading || !replyText.trim()}
                                                                     className='px-3 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50'
                                                                 >
-                                                                    {isLoading ? 'Replying...' : 'Reply'}
+                                                                    {isLoading ? 'Đang phản hồi...' : 'Phản hồi'}
                                                                 </button>
                                                             </div>
                                                         </div>
@@ -571,12 +571,12 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                                         {expandedReplies[comment._id] ? (
                                                             <>
                                                                 <ChevronUp className='w-4 h-4' />
-                                                                Hide replies ({comment.replies.length})
+                                                                Ẩn phản hồi ({comment.replies.length})
                                                             </>
                                                         ) : (
                                                             <>
                                                                 <ChevronDown className='w-4 h-4' />
-                                                                Show replies ({comment.replies.length})
+                                                                Hiện phản hồi ({comment.replies.length})
                                                             </>
                                                         )}
                                                     </button>
@@ -625,7 +625,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                             disabled={isLoading || !newComment.trim()}
                                             className='px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium'
                                         >
-                                            {isLoading ? 'Posting...' : 'Post'}
+                                            {isLoading ? 'Đang gửi...' : 'Gửi'}
                                         </button>
                                     </div>
                                 </div>
@@ -637,17 +637,17 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
 
             <ConfirmDialog
                 isOpen={!!deleteTarget}
-                title={deleteTarget?.type === 'reply' ? 'Delete Reply' : 'Delete Comment'}
+                title={deleteTarget?.type === 'reply' ? 'Xoá phản hồi' : 'Xoá bình luận'}
                 message={deleteTarget?.type === 'reply'
-                    ? 'Are you sure you want to delete this reply? This action cannot be undone.'
-                    : 'Are you sure you want to delete this comment? This action cannot be undone.'}
+                    ? 'Bạn có chắc chắn muốn xóa phản hồi này? Hành động này không thể hoàn tác.'
+                    : 'Bạn có chắc chắn muốn xóa bình luận này? Hành động này không thể hoàn tác.'}
                 isDangerous={true}
                 isLoading={isLoading}
                 onConfirm={handleConfirmDelete}
                 onCancel={() => setDeleteTarget(null)}
             />
 
-            <ReactionListModal 
+            <ReactionListModal
                 isOpen={!!showReactionListMsg}
                 onClose={() => setShowReactionListMsg(null)}
                 reactions={showReactionListMsg?.reactions || []}

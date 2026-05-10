@@ -1,5 +1,5 @@
 import { Calendar, MapPin, PenBox, Verified } from 'lucide-react'
-import moment from 'moment'
+import moment from '../utils/moment'
 import React from 'react'
 
 const UserProfileInfo = ({ user, posts, profileId, setShowEdit }) => {
@@ -17,12 +17,12 @@ const UserProfileInfo = ({ user, posts, profileId, setShowEdit }) => {
                                 <h1>{user.full_name}</h1>
                                 <Verified className='w-6 h-6 text-blue-500' />
                             </div>
-                            <p className='text-gray-600'>{user.username ? `@${user.username}` : 'Add a username'}</p>
+                            <p className='text-gray-600'>{user.username ? `@${user.username}` : 'Thêm tên người dùng'}</p>
                         </div>
                         {!profileId &&
                             <button onClick={() => setShowEdit(true)} className='cursor-pointer flex items-center gap-2 border border-gray-300 hover:bg-gray-50 px-4 py-2 rounded-lg font-medium transition-colors mt-4 md:mt-0'>
                                 <PenBox className='w-4 h-4' />
-                                Edit
+                                Chỉnh sửa
                             </button>}
                     </div>
                     <p className='text-gray-700 text-sm max-w-md mt-4'>{user.bio}</p>
@@ -30,26 +30,26 @@ const UserProfileInfo = ({ user, posts, profileId, setShowEdit }) => {
                     <div className='flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-500 mt-4'>
                         <span className='flex items-center gap-1.5'>
                             <MapPin className='w-4 h-4' />
-                            {user.location ? user.location : 'Add location'}
+                            {user.location ? user.location : 'Thêm vị trí'}
                         </span>
                         <span className='flex items-center gap-1.5'>
                             <Calendar className='w-4 h-4' />
-                            Joined <span className='font-medium'>{moment(user.createdAt).fromNow()}</span>
+                            Đã tham gia <span className='font-medium'>{moment(user.createdAt).fromNow()}</span>
                         </span>
                     </div>
 
                     <div className='flex items-center gap-6 mt-6 border-t border-gray-200 pt-4'>
                         <div>
                             <span className='sm:text-xl font-bold text-gray-900'>{posts.length}</span>
-                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Posts</span>
+                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Bài viết</span>
                         </div>
                         <div>
                             <span className='sm:text-xl font-bold text-gray-900'>{user.followers.length}</span>
-                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Follwers</span>
+                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Người theo dõi</span>
                         </div>
                         <div>
                             <span className='sm:text-xl font-bold text-gray-900'>{user.following.length}</span>
-                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Following</span>
+                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Đang theo dõi</span>
                         </div>
                     </div>
                 </div>

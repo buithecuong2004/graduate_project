@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import { ChevronLeft } from 'lucide-react'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
+import localizeMessage from '../utils/localization'
 import PostCard from '../components/PostCard'
 import Loading from '../components/Loading'
 
@@ -33,10 +34,10 @@ const PostDetail = () => {
             if (data.success) {
                 setPost(data.post)
             } else {
-                toast.error(data.message || 'Failed to load post')
+                toast.error(localizeMessage(data.message) || 'Không thể tải bài viết')
             }
         } catch (error) {
-            toast.error(error.message || 'Failed to load post')
+            toast.error(localizeMessage(error.message) || 'Không thể tải bài viết')
         } finally {
             setLoading(false)
         }
@@ -50,12 +51,12 @@ const PostDetail = () => {
         return (
             <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
                 <div className='text-center'>
-                    <h1 className='text-2xl font-bold text-gray-900 mb-4'>Post Not Found</h1>
+                    <h1 className='text-2xl font-bold text-gray-900 mb-4'>Không tìm thấy Bài Viết</h1>
                     <button
                         onClick={() => navigate('/')}
                         className='text-indigo-600 hover:text-indigo-700'
                     >
-                        Go back to Feed
+                        Quay lại trang chủ
                     </button>
                 </div>
             </div>
@@ -70,7 +71,7 @@ const PostDetail = () => {
                     className='flex items-center gap-2 text-indigo-600 hover:text-indigo-700 mb-4'
                 >
                     <ChevronLeft className='w-5 h-5' />
-                    Back
+                    Quay lại
                 </button>
 
                 <div className='space-y-4'>
@@ -83,7 +84,7 @@ const PostDetail = () => {
 
                     {post.shared_from && (
                         <div className='bg-blue-50 border-l-4 border-blue-500 p-4 rounded'>
-                            <p className='text-xs text-blue-600 font-semibold mb-2'>SHARED FROM</p>
+                            <p className='text-xs text-blue-600 font-semibold mb-2'>ĐÃ CHIA SẺ TỪ</p>
                             <PostCard post={post.shared_from} />
                         </div>
                     )}

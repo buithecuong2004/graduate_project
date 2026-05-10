@@ -5,14 +5,15 @@ import { useNavigate, useLocation } from 'react-router-dom'
 
 
 import { useDispatch, useSelector } from 'react-redux'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import { fetchConnections } from '../features/connections/connectionsSlice'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
+import localizeMessage from '../utils/localization'
 
 const Connections = () => {
 
-  const [currentTab, setCurrentTab] = useState('Followers')
+  const [currentTab, setCurrentTab] = useState('Người theo dõi')
   const location = useLocation()
 
   const navigate = useNavigate()
@@ -22,10 +23,10 @@ const Connections = () => {
   const { connections, pendingConnections, followers, following } = useSelector((state) => state.connections)
 
   const dataArray = [
-    { label: 'Followers', value: followers, icon: Users },
-    { label: 'Following', value: following, icon: UserCheck },
-    { label: 'Pending', value: pendingConnections, icon: UserRoundPen },
-    { label: 'Connections', value: connections, icon: UserPlus }
+    { label: 'Người theo dõi', value: followers, icon: Users },
+    { label: 'Đang theo dõi', value: following, icon: UserCheck },
+    { label: 'Đang chờ xử lý', value: pendingConnections, icon: UserRoundPen },
+    { label: 'Bạn bè', value: connections, icon: UserPlus }
   ]
 
   const handleUnFollow = async (userId) => {
@@ -34,13 +35,13 @@ const Connections = () => {
         headers: { Authorization: `Bearer ${await getToken()}` }
       })
       if (data.success) {
-        toast.success(data.message)
+        toast.success(localizeMessage(data.message))
         dispatch(fetchConnections(await getToken()))
       } else {
-        toast(data.message)
+        toast(localizeMessage(data.message))
       }
     } catch (error) {
-      toast.error(error.message)
+      toast.error(localizeMessage(error.message))
     }
   }
 
@@ -50,13 +51,13 @@ const Connections = () => {
         headers: { Authorization: `Bearer ${await getToken()}` }
       })
       if (data.success) {
-        toast.success(data.message)
+        toast.success(localizeMessage(data.message))
         dispatch(fetchConnections(await getToken()))
       } else {
-        toast.error(data.message)
+        toast.error(localizeMessage(data.message))
       }
     } catch (error) {
-      toast.error(error.message)
+      toast.error(localizeMessage(error.message))
     }
   }
 
@@ -66,13 +67,13 @@ const Connections = () => {
         headers: { Authorization: `Bearer ${await getToken()}` }
       })
       if (data.success) {
-        toast.success(data.message)
+        toast.success(localizeMessage(data.message))
         dispatch(fetchConnections(await getToken()))
       } else {
-        toast(data.message)
+        toast(localizeMessage(data.message))
       }
     } catch (error) {
-      toast.error(error.message)
+      toast.error(localizeMessage(error.message))
     }
   }
 
@@ -82,13 +83,13 @@ const Connections = () => {
         headers: { Authorization: `Bearer ${await getToken()}` }
       })
       if (data.success) {
-        toast.success(data.message)
+        toast.success(localizeMessage(data.message))
         dispatch(fetchConnections(await getToken()))
       } else {
-        toast.error(data.message)
+        toast.error(localizeMessage(data.message))
       }
     } catch (error) {
-      toast.error(error.message)
+      toast.error(localizeMessage(error.message))
     }
   }
 
@@ -103,8 +104,8 @@ const Connections = () => {
       <div className='max-w-6xl mx-auto p-6'>
 
         <div className='mb-8'>
-          <h1 className='text-3xl font-bold text-slate-900 mb-2'>Connections</h1>
-          <p className='text-slate-600'>Manage your network and discover new connections</p>
+          <h1 className='text-3xl font-bold text-slate-900 mb-2'>Bạn bè</h1>
+          <p className='text-slate-600'>Quản lý mạng lưới của bạn và khám phá những người bạn mới</p>
         </div>
 
         <div className='mb-8 flex flex-wrap gap-6'>
@@ -142,38 +143,38 @@ const Connections = () => {
                 <p className='text-sm text-gray-600 mt-2'>{user.bio.slice(0, 50)}...</p>
                 <div className='flex flex-wrap gap-2 mt-4'>
                   <button onClick={() => navigate(`/profile/${user._id}`)} className='px-4 py-2 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 active:scale-95 transition cursor-pointer border border-indigo-300'>
-                    View Profile
+                    Xem Hồ sơ
                   </button>
                   {
-                    currentTab === 'Following' && (
+                    currentTab === 'Đang theo dõi' && (
                       <button onClick={() => handleUnFollow(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 active:scale-95 transition cursor-pointer border border-orange-300'>
-                        Unfollow
+                        Bỏ theo dõi
                       </button>
                     )
                   }
                   {
-                    currentTab === 'Pending' && (
+                    currentTab === 'Đang chờ xử lý' && (
                       <>
                         <button onClick={() => acceptConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-green-100 text-green-700 hover:bg-green-200 active:scale-95 transition cursor-pointer border border-green-300'>
-                          Accept
+                          Chấp nhận
                         </button>
                         <button onClick={() => declineConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 active:scale-95 transition cursor-pointer border border-red-300 flex items-center gap-2'>
                           <X className='w-4 h-4' />
-                          Decline
+                          Từ chối
                         </button>
                       </>
                     )
                   }
                   {
-                    currentTab === 'Connections' && (
+                    currentTab === 'Bạn bè' && (
                       <>
                         <button onClick={() => navigate(`/messages/${user._id}`)} className='px-4 py-2 text-sm font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 transition cursor-pointer border border-slate-300 flex items-center gap-2'>
                           <MessageSquare className='w-4 h-4' />
-                          Message
+                          Tin nhắn
                         </button>
                         <button onClick={() => removeConnection(user._id)} className='px-4 py-2 text-sm font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 active:scale-95 transition cursor-pointer border border-red-300 flex items-center gap-2'>
                           <X className='w-4 h-4' />
-                          Disconnect
+                          Huỷ kết bạn
                         </button>
                       </>
                     )

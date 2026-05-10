@@ -22,7 +22,7 @@ const deleteImageKitFile = async (fileId) => {
 
 export const addUserStory = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const {content, media_type, background_color} = req.body
         const media = req.file
         let media_url = ''
@@ -132,7 +132,7 @@ export const addUserStory = async (req, res) => {
 
 export const getStories = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const user = await User.findById(userId)
 
         // If user not yet in DB, return empty stories (race condition on first login)
@@ -174,7 +174,7 @@ export const getStoryById = async (req, res) => {
 
 export const deleteStory = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { storyId } = req.body
 
         const story = await Story.findById(storyId)
@@ -207,7 +207,7 @@ export const deleteStory = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const reactStory = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { storyId, reactionType } = req.body
 
         const story = await Story.findById(storyId)
@@ -258,7 +258,7 @@ export const reactStory = async (req, res) => {
                             story_id: storyId,
                             story: populatedStory,
                             reaction: reactionType,
-                            text: `Reacted ${reactionType} to your story`,
+                            text: `Bày tỏ cảm xúc ${reactionType} về tin của bạn`,
                             user: {
                                 _id: reactor._id,
                                 full_name: reactor.full_name,
@@ -282,7 +282,7 @@ export const reactStory = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const replyStory = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { storyId, text } = req.body
 
         if (!text || !text.trim()) {

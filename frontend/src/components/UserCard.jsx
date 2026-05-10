@@ -3,7 +3,7 @@ import { MapPin, MessageCircle, Plus, UserPlus, X } from 'lucide-react'
 import { useSelector, useDispatch } from 'react-redux'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import { fetchUser } from '../features/user/userSlice'
 import { useNavigate } from 'react-router-dom'
 
@@ -112,25 +112,25 @@ const UserCard = ({user}) => {
                 <MapPin className='w-4 h-4'/> {user.location}
             </div>
             <div className='flex items-center gap-1 border border-gray-300 rounded-full px-3 py-1'>
-                <span>{user.followers.length}</span> Followers
+                <span>{user.followers.length}</span> Người theo dõi
             </div>
         </div>
 
         <div className='flex flex-col mt-4 gap-3'>
             <button onClick={isFollowing ? handleUnfollow : handleFollow} disabled={loading} className='w-full py-2.5 rounded-lg flex justify-center items-center gap-2 bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-95 transition text-white font-medium cursor-pointer disabled:opacity-50 shadow-sm'>
-                <UserPlus className='w-4 h-4'/> {isFollowing ? 'Following' : 'Follow'}
+                <UserPlus className='w-4 h-4'/> {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
             </button>
             {!isConnected ? (
                 <button onClick={handleConnectionRequest} disabled={loading} className='w-full py-2.5 flex items-center justify-center gap-2 border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg font-medium cursor-pointer active:scale-95 transition disabled:opacity-50'>
-                    <Plus className='w-4 h-4'/> Connect
+                    <Plus className='w-4 h-4'/> Kết bạn
                 </button>
             ) : (
                 <div className='flex gap-2'>
                     <button onClick={() => navigate('/messages/'+user._id)} disabled={loading} className='flex-1 py-2.5 flex items-center justify-center gap-2 border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 rounded-lg font-medium cursor-pointer active:scale-95 transition disabled:opacity-50'>
-                        <MessageCircle className='w-4 h-4'/> Message
+                        <MessageCircle className='w-4 h-4'/> Tin nhắn
                     </button>
                     <button onClick={handleUnconnect} disabled={loading} className='flex-1 py-2.5 flex items-center justify-center gap-2 border border-red-300 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg font-medium cursor-pointer active:scale-95 transition disabled:opacity-50'>
-                        <X className='w-4 h-4'/> Disconnect
+                        <X className='w-4 h-4'/> Huỷ kết bạn
                     </button>
                 </div>
             )}

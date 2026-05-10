@@ -4,41 +4,14 @@ import Connection from "../models/Connection.js"
 import Post from "../models/Post.js"
 import User from "../models/User.js"
 import fs  from 'fs'
-import { createClerkClient } from '@clerk/express'
-
-const clerkClient = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
 
 export const getUserData = async (req,res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         let user = await User.findById(userId)
 
         if(!user) {
-            // User exists in Clerk but not yet in MongoDB (e.g. Inngest webhook delay after re-registration)
-            // Auto-create from Clerk data to prevent infinite loading
-            try {
-                const clerkUser = await clerkClient.users.getUser(userId)
-                const email = clerkUser.emailAddresses[0]?.emailAddress || ''
-                const fullName = `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim()
-
-                // Generate a unique username
-                let username = email.split('@')[0]
-                const existingUser = await User.findOne({ username })
-                if(existingUser) {
-                    username = username + Math.floor(Math.random() * 10000)
-                }
-
-                user = await User.create({
-                    _id: userId,
-                    email,
-                    full_name: fullName || email,
-                    profile_picture: clerkUser.imageUrl || '',
-                    username
-                })
-            } catch(clerkError) {
-                console.error('Failed to auto-create user from Clerk:', clerkError.message)
-                return res.json({success: false, message: "User not found"})
-            }
+            return res.json({success: false, message: "User not found"})
         }
 
         // Clean up dangling references: remove IDs of deleted users from this user's arrays
@@ -74,7 +47,7 @@ export const getUserData = async (req,res) => {
 
 export const updateUserData = async (req,res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         let {username, bio, location, full_name} = req.body;
 
         const tempUser = await User.findById(userId)
@@ -146,7 +119,7 @@ export const updateUserData = async (req,res) => {
 
 export const discoverUsers = async (req,res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { input } = req.body
 
         const currentUser = await User.findById(userId)
@@ -161,10 +134,10 @@ export const discoverUsers = async (req,res) => {
               }
             : {}
         const allUsers = await User.find(query)
-        const filteredUsers = allUsers.filter(user=> user._id != userId).map(user => ({
+        const filteredUsers = allUsers.filter(user=> user._id.toString() !== userId).map(user => ({
             ...user.toObject(),
-            isFollowing: currentUser.following.includes(user._id),
-            isConnected: currentUser.connections.includes(user._id)
+            isFollowing: currentUser.following.map(id => id.toString()).includes(user._id.toString()),
+            isConnected: currentUser.connections.map(id => id.toString()).includes(user._id.toString())
         }))
         return res.json({success: true, users: filteredUsers})
 
@@ -176,12 +149,12 @@ export const discoverUsers = async (req,res) => {
 
 export const followUser = async (req,res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { id } = req.body
 
        const user = await User.findById(userId)
 
-       if(user.following.includes(id)){
+       if(user.following.map(fid => fid.toString()).includes(id)){
             return res.json({success: false, message: 'You are already following this user'})
        }
 
@@ -202,15 +175,15 @@ export const followUser = async (req,res) => {
 
 export const unfollowUser = async (req,res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { id } = req.body
 
        const user = await User.findById(userId)
-       user.following = user.following.filter(user=> user !== id)
+       user.following = user.following.filter(fid => fid.toString() !== id)
        await user.save()
 
        const toUser = await User.findById(id)
-       toUser.followers = toUser.followers.filter(user=> user !== userId)
+       toUser.followers = toUser.followers.filter(fid => fid.toString() !== userId)
        await toUser.save()
        
        res.json({success: true, message: 'Now you are no longer follow this user'})
@@ -223,7 +196,7 @@ export const unfollowUser = async (req,res) => {
 
 export const sendConnectionRequest = async (req, res) => {
     try {
-        const {userId} = req.auth()
+        const userId = req.userId
         const {id} = req.body
 
         const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000)
@@ -285,7 +258,7 @@ export const sendConnectionRequest = async (req, res) => {
 
 export const getUserConnections = async (req, res) => {
     try {
-        const {userId} = req.auth()
+        const userId = req.userId
         const user = await User.findById(userId).populate('connections followers following')
 
         // If user not yet in DB (race condition on first login), return empty
@@ -310,7 +283,7 @@ export const getUserConnections = async (req, res) => {
 
 export const acceptConnectionRequest = async (req, res) => {
     try {
-        const {userId} = req.auth()
+        const userId = req.userId
         const {id} = req.body
         
         const connection = await Connection.findOne({from_user_id: id, to_user_id: userId})
@@ -361,7 +334,7 @@ export const acceptConnectionRequest = async (req, res) => {
 
 export const removeConnection = async (req, res) => {
     try {
-        const {userId} = req.auth()
+        const userId = req.userId
         const {id} = req.body
         
         const user = await User.findById(userId)
@@ -393,7 +366,7 @@ export const removeConnection = async (req, res) => {
 
 export const declineConnectionRequest = async (req, res) => {
     try {
-        const {userId} = req.auth()
+        const userId = req.userId
         const {id} = req.body
 
         const connection = await Connection.findOne({from_user_id: id, to_user_id: userId, status: 'pending'})

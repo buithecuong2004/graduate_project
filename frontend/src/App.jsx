@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import Login from './pages/Login'
+import AuthCallback from './pages/AuthCallback'
 import Feed from './pages/Feed'
 import Message from './pages/Message'
 import ChatBox from './pages/ChatBox'
@@ -10,7 +11,7 @@ import Profile from './pages/Profile'
 import CreatePost from './pages/CreatePost'
 import PostDetail from './pages/PostDetail'
 import Notification from './components/Notification'
-import { useUser, useAuth } from '@clerk/clerk-react'
+import { useAuth } from './context/AuthContext'
 import Layout from './pages/Layout'
 import { Toaster } from 'react-hot-toast'
 import { useEffect, useState } from 'react'
@@ -28,8 +29,7 @@ import CallModal from './components/CallModal'
 
 // ─── Inner App (needs SocketProvider to be parent) ───────────────────────────
 const AppInner = () => {
-  const { user: clerkUser } = useUser()
-  const { getToken } = useAuth()
+  const { isAuthenticated, getToken, loading } = useAuth()
   const { pathname } = useLocation()
   const pathnameRef = useRef(pathname)
 
@@ -43,14 +43,14 @@ const AppInner = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (clerkUser) {
+      if (isAuthenticated) {
         const token = await getToken()
         dispatch(fetchUser(token))
         dispatch(fetchConnections(token))
       }
     }
     fetchData()
-  }, [clerkUser, getToken, dispatch])
+  }, [isAuthenticated, getToken, dispatch])
 
   useEffect(() => {
     pathnameRef.current = pathname
@@ -198,11 +198,21 @@ const AppInner = () => {
     setActiveCall(null)
   }, [])
 
+  // Show loading while verifying auth
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
   return (
     <>
       <Toaster />
       <Routes>
-        <Route path='/' element={clerkUser ? <Layout onStartCall={handleStartCall} /> : <Login />}>
+        <Route path='/auth/callback' element={<AuthCallback />} />
+        <Route path='/' element={isAuthenticated ? <Layout onStartCall={handleStartCall} /> : <Login />}>
           <Route index element={<Navigate to="/feed" replace />} />
           <Route path='feed' element={<Feed />} />
           <Route path='messages' element={<Message />} />

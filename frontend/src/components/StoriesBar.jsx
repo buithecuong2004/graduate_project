@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import StoryModal from './StoryModal'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { fetchStories, setViewStory } from '../features/stories/storiesSlice'
-import moment from 'moment'
+import moment from '../utils/moment'
 
 const StoriesBar = ({ refreshTrigger }) => {
     const [showModal, setShowModal] = useState(false)
@@ -75,7 +75,7 @@ const StoriesBar = ({ refreshTrigger }) => {
                     <div className='size-14 rounded-full bg-indigo-600 flex items-center justify-center text-white mb-4 group-hover/add:scale-110 group-hover/add:bg-indigo-700 transition-all duration-300 shadow-md'>
                         <Plus size={32} strokeWidth={2.5}/>
                     </div>
-                    <span className='text-sm font-bold text-indigo-900 group-hover/add:text-indigo-700 transition-colors'>Create story</span>
+                    <span className='text-sm font-bold text-indigo-900 group-hover/add:text-indigo-700 transition-colors'>Tạo tin</span>
                 </div>
 
                 {/* Stories List */}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import moment from 'moment'
-import { useAuth } from '@clerk/clerk-react'
+import moment from '../utils/moment'
+import { useAuth } from '../context/AuthContext'
 import { useSelector } from 'react-redux'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
@@ -102,7 +102,7 @@ const RecentMessages = () => {
 
   return (
     <div className='bg-white max-w-xs mt-4 p-4 min-h-20 rounded-md shadow text-xs text-slate-800'>
-        <h3 className='font-semibold text-slate-8 mb-4'>Recent Messages</h3>
+        <h3 className='font-semibold text-slate-8 mb-4'>Tin nhắn gần đây</h3>
         <div className='flex flex-col max-h-56 overflow-y-scroll no-scrollbar'>
             {
                 conversations.map((conversation, index)=>{
@@ -131,22 +131,22 @@ const RecentMessages = () => {
                     } else if (msg.is_forwarded) {
                         const ft = msg.forwarded_type
                         if (ft === 'story') {
-                            content = isFromMe ? (messageText || 'Replied to a story') : 'Replied your story'
+                            content = isFromMe ? (messageText || 'Đã trả lời tin') : 'Đã trả lời tin của bạn'
                         } else {
-                            content = ft === 'link' ? 'Forwarded a link' : 'Forwarded a message'
+                            content = ft === 'link' ? 'Đã chuyển tiếp 1 liên kết' : 'Đã chuyển tiếp 1 tin nhăn'
                         }
                     } else if (msg.reply_to) {
-                        content = 'Replied a message...'
+                        content = 'Đã trả lời 1 tin nhắn...'
                     } else if (messageText) {
                         content = messageText.length > 30 ? messageText.slice(0, 30) + '...' : messageText
                     } else if (type === 'voice') {
-                        content = '🎤 Sent a voice message'
+                        content = '🎤 Đã gửi 1 file âm thanh'
                     } else if (type?.includes('image')) {
-                        content = `Sent ${mediaUrls.length} image${mediaUrls.length > 1 ? 's' : ''}`
+                        content = `Đã gửi ${mediaUrls.length} hình ảnh`
                     } else if (type?.includes('video')) {
-                        content = `Sent ${mediaUrls.length} video${mediaUrls.length > 1 ? 's' : ''}`
+                        content = `Đã gửi ${mediaUrls.length} video`
                     } else {
-                        content = 'Media'
+                        content = 'File phương tiện'
                     }
 
                     let displayText = ''
@@ -154,12 +154,12 @@ const RecentMessages = () => {
                         displayText = content
                     } else if (msg.is_forwarded) {
                         if (msg.forwarded_type === 'story') {
-                            displayText = isFromMe ? `You: ${content}` : content
+                            displayText = isFromMe ? `Bạn: ${content}` : content
                         } else {
                             displayText = content
                         }
                     } else {
-                        displayText = isFromMe ? `You: ${content}` : content
+                        displayText = isFromMe ? `Bạn: ${content}` : content
                     }
 
                     // ✅ Nếu đang mở ChatBox của người này thì coi như đã đọc hết

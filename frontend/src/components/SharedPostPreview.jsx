@@ -1,6 +1,6 @@
 import React from 'react'
 import { BadgeCheck } from 'lucide-react'
-import moment from 'moment'
+import moment from '../utils/moment'
 import { useNavigate } from 'react-router-dom'
 
 const SharedPostPreview = ({ post }) => {

@@ -13,7 +13,7 @@ const ReactionListModal = ({ isOpen, onClose, reactions = [] }) => {
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={onClose}>
       <div className="bg-white rounded-xl w-full max-w-md shadow-xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-xl font-bold">Reactions</h2>
+          <h2 className="text-xl font-bold">Cảm xúc</h2>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full transition">
             <X className="w-6 h-6" />
           </button>
@@ -21,7 +21,7 @@ const ReactionListModal = ({ isOpen, onClose, reactions = [] }) => {
         
         <div className="overflow-y-auto flex-1 p-4">
           {reactions.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">No reactions yet.</div>
+            <div className="text-center text-gray-500 py-8">Chưa có cảm xúc nào.</div>
           ) : (
             <div className="space-y-4">
               {reactions.map((reaction, index) => (

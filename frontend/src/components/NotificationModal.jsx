@@ -45,27 +45,27 @@ const NotificationModal = ({ isOpen, onClose }) => {
         const { type, data } = notification
         switch (type) {
             case 'friend_request':
-                return `${data.from_user?.full_name || data.from_user?.username} sent you a friend request`
+                return `${data.from_user?.full_name || data.from_user?.username} đã gửi cho bạn lời mời kết bạn`
             case 'connection_accepted':
-                return `${data.from_user?.full_name || data.from_user?.username} accepted your connection request`
+                return `${data.from_user?.full_name || data.from_user?.username} đã chấp nhận lời mời kết bạn của bạn`
             case 'new_story':
-                return `${data.user?.full_name || data.user?.username} posted a new story`
+                return `${data.user?.full_name || data.user?.username} đã đăng một tin mới`
             case 'new_post':
-                return `${data.user?.full_name || data.user?.username} posted something new`
+                return `${data.user?.full_name || data.user?.username} đã đăng cái gì đó mới`
             case 'new_comment':
-                return `${data.comment?.user?.full_name || data.comment?.user?.username} commented on your post`
+                return `${data.comment?.user?.full_name || data.comment?.user?.username} đã bình luận về bài viết của bạn`
             case 'new_reply':
-                return `${data.reply?.user?.full_name || data.reply?.user?.username} replied to your comment`
+                return `${data.reply?.user?.full_name || data.reply?.user?.username} đã trả lời bình luận của bạn`
             case 'new_like':
-                return `${data.user?.full_name || data.user?.username} liked your ${data.liked_type === 'post' ? 'post' : 'comment'}`
+                return `${data.user?.full_name || data.user?.username} thích ${data.liked_type === 'post' ? 'bài viết' : 'bình luận'} của bạn`
             case 'new_reaction':
-                return <span>{data.user?.full_name || data.user?.username} reacted <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> to your post</span>
+                return <span>{data.user?.full_name || data.user?.username} đã bày tỏ cảm xúc <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> với {data.liked_type === 'post' ? 'bài viết' : 'bình luận'} của bạn</span>
             case 'new_message_reaction':
-                return <span>{data.user?.full_name || data.user?.username} reacted <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> to your message</span>
+                return <span>{data.user?.full_name || data.user?.username} đã bày tỏ cảm xúc <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> với tin nhắn của bạn</span>
             case 'new_story_reaction':
-                return <span>{data.user?.full_name || data.user?.username} reacted <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> to your story</span>
+                return <span>{data.user?.full_name || data.user?.username} đã bày tỏ cảm xúc <span className="inline-block align-middle text-lg leading-none mx-0.5">{REACTION_ICONS[data.reaction] || data.reaction}</span> với tin của bạn</span>
             default:
-                return notification.message || 'New notification'
+                return notification.message || 'Thông báo mới'
         }
     }
 
@@ -141,9 +141,9 @@ const NotificationModal = ({ isOpen, onClose }) => {
                 {/* Header */}
                 <div className="border-b border-gray-200 p-4 flex items-center justify-between sticky top-0 bg-white">
                     <div>
-                        <h2 className="text-lg font-bold">Notifications</h2>
+                        <h2 className="text-lg font-bold">Thông báo</h2>
                         {unreadCount > 0 && (
-                            <p className="text-sm text-gray-500">{unreadCount} new</p>
+                            <p className="text-sm text-gray-500">{unreadCount} cái mới</p>
                         )}
                     </div>
                     <button
@@ -162,7 +162,7 @@ const NotificationModal = ({ isOpen, onClose }) => {
                             className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition text-sm font-medium"
                         >
                             <CheckCheck className="w-4 h-4" />
-                            Mark all as read
+                            Đánh dấu tất cả là đã đọc
                         </button>
                     </div>
                 )}
@@ -172,7 +172,7 @@ const NotificationModal = ({ isOpen, onClose }) => {
                     {notifications.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-gray-500">
                             <div className="text-4xl mb-2">🔔</div>
-                            <p>No notifications yet</p>
+                            <p>Chưa có thông báo nào</p>
                         </div>
                     ) : (
                         notifications.map(notification => (

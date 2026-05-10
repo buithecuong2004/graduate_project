@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { X, Send } from 'lucide-react'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 import { addPost } from '../features/posts/postSlice'
@@ -17,7 +17,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
     const [captionText, setCaptionText] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
-    
+
     const { getToken } = useAuth()
     const dispatch = useDispatch()
     const currentUser = useSelector((state) => state.user.value)
@@ -61,12 +61,12 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
         try {
             setIsLoading(true)
             const token = await getToken()
-            
+
             // Increment share count trên post gốc
             const shareResponse = await api.post('/api/post/share', { postId: originalPostId }, {
                 headers: { Authorization: `Bearer ${token}` }
             })
-            
+
             if (!shareResponse.data.success) {
                 toast.error('Failed to increment share count')
                 setIsLoading(false)
@@ -87,13 +87,13 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                 if (data.post) {
                     dispatch(addPost(data.post))
                 }
-                
-                toast.success('Post shared successfully!')
+
+                toast.success('Bài viết đã được chia sẻ thành công!')
                 onShareAdded && onShareAdded()
                 onClose()
                 setCaptionText('')
             } else {
-                toast.error('Failed to create shared post')
+                toast.error('Không thể tạo bài viết được chia sẻ')
             }
         } catch (error) {
             console.error('Share error:', error)
@@ -105,17 +105,17 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
 
     const handleShareMessage = async () => {
         if (selectedUsers.length === 0) {
-            toast.error('Please select at least one person')
+            toast.error('Vui lòng chọn ít nhất một người')
             return
         }
 
         try {
             setIsLoading(true)
             const token = await getToken()
-            
+
             // Link trỏ về đúng post._id (repost hoặc post gốc tuỳ context)
             const shareLink = `${window.location.origin}/post/${post._id}`
-            const fullMessage = messageText 
+            const fullMessage = messageText
                 ? `${messageText}\n\n${shareLink}`
                 : shareLink
 
@@ -141,13 +141,13 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
 
             dispatch(setNewMessageTrigger(Date.now()))
 
-            toast.success('Shared to selected users')
+            toast.success('Chia sẻ cho các người dùng đã chọn')
             onShareAdded && onShareAdded()
             onClose()
             setSelectedUsers([])
             setMessageText('')
         } catch (error) {
-            toast.error(error.message || 'Failed to share message')
+            toast.error(error.message || 'Không thể chia sẻ tin nhắn')
         } finally {
             setIsLoading(false)
         }
@@ -165,7 +165,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
             <div className='bg-white rounded-lg shadow-lg max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto'>
                 {/* Header */}
                 <div className='flex items-center justify-between p-4 border-b border-gray-200 sticky top-0 bg-white'>
-                    <h2 className='text-lg font-semibold'>Share Post</h2>
+                    <h2 className='text-lg font-semibold'>Chia Sẻ Bài Viết</h2>
                     <button
                         onClick={onClose}
                         className='text-gray-400 hover:text-gray-600 transition'
@@ -182,26 +182,26 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                             onClick={() => setShareMode('repost')}
                             className='w-full p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-left'
                         >
-                            <div className='font-semibold text-gray-900'>Share as Post</div>
-                            <div className='text-sm text-gray-600'>Post this on your timeline with your own caption</div>
+                            <div className='font-semibold text-gray-900'>Đăng Làm Bài Viết</div>
+                            <div className='text-sm text-gray-600'>Đăng lại bài viết này trên dòng thời gian của bạn</div>
                         </button>
                         <button
                             onClick={() => setShareMode('message')}
                             className='w-full p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-left'
                         >
-                            <div className='font-semibold text-gray-900'>Send in Message</div>
-                            <div className='text-sm text-gray-600'>Share this post with your connections via message</div>
+                            <div className='font-semibold text-gray-900'>Gửi trong Tin nhắn</div>
+                            <div className='text-sm text-gray-600'>Chia sẻ bài viết này với các bạn bè của bạn qua tin nhắn</div>
                         </button>
                     </div>
                 ) : shareMode === 'repost' ? (
                     // Repost option with caption
                     <div className='p-4 space-y-4'>
                         <div>
-                            <label className='text-sm font-semibold text-gray-700 block mb-2'>Add Caption (Optional)</label>
+                            <label className='text-sm font-semibold text-gray-700 block mb-2'>Thêm nội dung (Không bắt buộc)</label>
                             <textarea
                                 value={captionText}
                                 onChange={(e) => setCaptionText(e.target.value)}
-                                placeholder="What's on your mind?"
+                                placeholder="Bạn đang nghĩ gì?"
                                 rows='3'
                                 className='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
                             />
@@ -209,8 +209,8 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                         </div>
 
                         <div className='bg-gray-50 p-3 rounded-lg text-sm text-gray-700 border border-gray-200'>
-                            <p className='font-semibold mb-2'>Original Post Preview</p>
-                            <p className='text-xs text-gray-600 mb-2'>By <span className='font-semibold'>{previewPost.user?.full_name}</span></p>
+                            <p className='font-semibold mb-2'>Xem Trước Bài Viết Gốc</p>
+                            <p className='text-xs text-gray-600 mb-2'>Bởi <span className='font-semibold'>{previewPost.user?.full_name}</span></p>
                             <p className='line-clamp-3 text-gray-800'>{previewPost.content}</p>
                         </div>
 
@@ -220,7 +220,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                                 disabled={isLoading}
                                 className='w-full p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50'
                             >
-                                {isLoading ? 'Sharing...' : 'Share Now'}
+                                {isLoading ? 'Đang Chia Sẻ...' : 'Chia Sẻ Ngay'}
                             </button>
                             <button
                                 onClick={() => {
@@ -229,7 +229,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                                 }}
                                 className='w-full p-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition'
                             >
-                                Back
+                                Quay Lại
                             </button>
                         </div>
                     </div>
@@ -240,7 +240,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                         <div>
                             <input
                                 type='text'
-                                placeholder='Search connections...'
+                                placeholder='Tìm kiếm bạn bè...'
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
@@ -251,7 +251,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                         <div className='max-h-48 overflow-y-auto border border-gray-200 rounded-lg'>
                             {filteredConnections.length === 0 ? (
                                 <div className='p-4 text-center text-gray-500 text-sm'>
-                                    No connections found
+                                    Không tìm thấy bạn bè nào
                                 </div>
                             ) : (
                                 filteredConnections.map(conn => (
@@ -281,13 +281,13 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
 
                         {selectedUsers.length > 0 && (
                             <div className='text-sm text-gray-600'>
-                                {selectedUsers.length} person(s) selected
+                                {selectedUsers.length} người đã chọn
                             </div>
                         )}
 
                         {/* Message Input */}
                         <textarea
-                            placeholder='Add a message (optional)'
+                            placeholder='Thêm lời nhắn (Ăn không bắt buộc)'
                             value={messageText}
                             onChange={(e) => setMessageText(e.target.value)}
                             rows='3'
@@ -296,7 +296,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
 
                         {/* Post Preview */}
                         <div className='bg-gray-50 p-3 rounded-lg text-sm'>
-                            <p className='font-semibold text-gray-700 mb-2'>Post Link:</p>
+                            <p className='font-semibold text-gray-700 mb-2'>Đường dẫn Bài Viết:</p>
                             <p className='text-indigo-600 break-all text-xs'>{window.location.origin}/post/{post._id}</p>
                             {post.shared_from && (
                                 <p className='text-xs text-gray-500 mt-1'>(Link trỏ về repost này, bao gồm bài gốc bên trong)</p>
@@ -311,13 +311,13 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                                 className='w-full p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2'
                             >
                                 <Send className='w-4 h-4' />
-                                Send
+                                Gửi
                             </button>
                             <button
                                 onClick={() => setShareMode(null)}
                                 className='w-full p-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition'
                             >
-                                Back
+                                Quay Lại
                             </button>
                         </div>
                     </div>

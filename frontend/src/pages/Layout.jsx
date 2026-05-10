@@ -6,7 +6,7 @@ import Sidebar from '../components/Sidebar'
 import { useSelector, useDispatch } from 'react-redux'
 import StoryViewer from '../components/StoryViewer'
 import { setViewStory, deleteStoryAction } from '../features/stories/storiesSlice'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 
 const Layout = () => {
     const user = useSelector((state)=>state.user.value)

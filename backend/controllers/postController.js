@@ -21,7 +21,7 @@ const deleteImageKitFile = async (fileId) => {
 
 export const addPost = async (req, res) => {
     try {
-        const { userId } = req.auth();
+        const userId = req.userId;
         let { content, post_type, shared_from } = req.body;
         const files = req.files || {};
 
@@ -193,7 +193,7 @@ export const addPost = async (req, res) => {
 
 export const getFeedPosts = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { page = 1, limit = 10 } = req.query
         const skip = (page - 1) * limit
 
@@ -255,7 +255,7 @@ export const getPostById = async (req, res) => {
 
 export const likePost = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { postId } = req.body
 
         const post = await Post.findById(postId)
@@ -306,7 +306,7 @@ export const likePost = async (req, res) => {
 
 export const addComment = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { postId, content } = req.body
 
         const comment = await Comment.create({
@@ -395,7 +395,7 @@ export const getComments = async (req, res) => {
 
 export const deleteComment = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { commentId } = req.body
 
         const comment = await Comment.findById(commentId)
@@ -422,7 +422,7 @@ export const deleteComment = async (req, res) => {
 
 export const likeComment = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { commentId } = req.body
 
         const comment = await Comment.findById(commentId)
@@ -471,7 +471,7 @@ export const likeComment = async (req, res) => {
 
 export const reactComment = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { commentId, reactionType } = req.body
 
         const comment = await Comment.findById(commentId)
@@ -539,7 +539,7 @@ export const reactComment = async (req, res) => {
 
 export const deletePost = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { postId } = req.body
 
         const post = await Post.findById(postId)
@@ -579,7 +579,7 @@ export const deletePost = async (req, res) => {
 // Add reply to a comment
 export const addReply = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { commentId, content } = req.body
 
         const parentComment = await Comment.findById(commentId)
@@ -681,7 +681,7 @@ export const getReplies = async (req, res) => {
 // Share post
 export const sharePost = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { postId } = req.body
 
         const post = await Post.findById(postId)
@@ -710,7 +710,7 @@ export const sharePost = async (req, res) => {
 // Delete reply
 export const deleteReply = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { replyId } = req.body
 
         const reply = await Comment.findById(replyId)
@@ -739,7 +739,7 @@ export const deleteReply = async (req, res) => {
 // React to post
 export const reactPost = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { postId, reactionType } = req.body
 
         const post = await Post.findById(postId)

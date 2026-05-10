@@ -1,16 +1,17 @@
 import { BadgeCheck, Heart, MessageCircle, Share2, Trash2 } from 'lucide-react'
-import moment from 'moment'
+import moment from '../utils/moment'
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
 import { updateCommentCount } from '../features/posts/postSlice'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
+import localizeMessage from '../utils/localization'
 import ConfirmDialog from './ConfirmDialog'
 import CommentModal from './CommentModal'
 import ShareModal from './ShareModal'
-import ReactionPicker, { REACTION_ICONS } from './ReactionPicker'
+import ReactionPicker, { REACTION_ICONS, REACTION_LABELS } from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
 
 const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) => {
@@ -46,10 +47,10 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                 // but we also can just call reactPost with 'like'
                 handleReact('like');
             } else {
-                toast(data.message)
+                toast(localizeMessage(data.message))
             }
         } catch (error) {
-            toast.error(error.message)
+            toast.error(localizeMessage(error.message))
         }
     }
 
@@ -60,10 +61,10 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                 setReactions(data.reactions)
                 setLikes(prev => prev.filter(id => id !== currentUser._id))
             } else {
-                toast(data.message)
+                toast(localizeMessage(data.message))
             }
         } catch (error) {
-            toast.error(error.message)
+            toast.error(localizeMessage(error.message))
         }
     }
 
@@ -108,14 +109,14 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                 headers: { Authorization: `Bearer ${token}` }
             })
             if (data.success) {
-                toast.success('Post deleted successfully')
+                toast.success('Xóa bài viết thành công')
                 setShowDeleteConfirm(false)
                 onPostDeleted && onPostDeleted(post._id)
             } else {
-                toast.error(data.message)
+                toast.error(localizeMessage(data.message))
             }
         } catch (error) {
-            toast.error(error.message)
+            toast.error(localizeMessage(error.message))
         } finally {
             setIsDeleting(false)
         }
@@ -143,7 +144,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                         onClick={handleDeleteClick}
                         disabled={isDeleting}
                         className='text-gray-400 hover:text-red-500 transition disabled:opacity-50'
-                        title='Delete post'
+                        title='Xóa bài viết'
                     >
                         <Trash2 className='w-5 h-5' />
                     </button>
@@ -212,7 +213,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                             ) : (
                                 <Heart className={`w-4 h-4 ${likes.includes(currentUser._id) && 'text-red-500 fill-red-500'}`} />
                             )}
-                            <span className="capitalize">{currentUserReaction || 'Like'}</span>
+                            <span className="capitalize">{REACTION_LABELS[currentUserReaction] || 'Thích'}</span>
                         </div>
                     </div>
 
@@ -246,8 +247,8 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
 
             <ConfirmDialog
                 isOpen={showDeleteConfirm}
-                title="Delete Post"
-                message="Are you sure you want to delete this post? This action cannot be undone."
+                title="Xóa Bài Viết"
+                message="Bạn có chắc chắn muốn xóa bài viết này không? Hành động này không thể được hoàn tác."
                 isDangerous={true}
                 isLoading={isDeleting}
                 onConfirm={handleDelete}

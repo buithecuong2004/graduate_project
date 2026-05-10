@@ -4,7 +4,7 @@ import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 import { useSelector } from 'react-redux'
 import api from '../api/axios'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 
 const createRingtone = () => {
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
@@ -516,7 +516,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                     <div className="text-center">
                         <p className="text-white font-semibold text-xl">{otherName}</p>
                         <p className="text-blue-300 text-sm mt-1">
-                            {callType === 'video' ? 'Incoming video call' : 'Incoming voice call'}
+                            {callType === 'video' ? 'Cuộc gọi video đến' : 'Cuộc gọi thoại đến'}
                         </p>
                     </div>
                     <div className="flex gap-8 mt-2">
@@ -539,7 +539,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                     </div>
                     <div className="text-center">
                         <p className="text-white font-semibold text-xl">{otherName}</p>
-                        <p className="text-indigo-300 text-sm mt-1 animate-pulse">Calling...</p>
+                        <p className="text-indigo-300 text-sm mt-1 animate-pulse">Đang gọi...</p>
                     </div>
                     {callType === 'video' && (
                         <div className="w-24 h-32 rounded-xl overflow-hidden border border-indigo-400/40 bg-black">

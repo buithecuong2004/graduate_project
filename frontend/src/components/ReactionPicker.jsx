@@ -9,9 +9,19 @@ export const REACTION_ICONS = {
   angry: '😡'
 }
 
+export const REACTION_LABELS = {
+  like: 'Thích',
+  love: 'Yêu thích',
+  haha: 'Haha',
+  wow: 'Wow',
+  sad: 'Buồn',
+  angry: 'Phẫn nộ'
+}
+
 export const REACTIONS = Object.keys(REACTION_ICONS).map(type => ({
   type,
-  icon: REACTION_ICONS[type]
+  icon: REACTION_ICONS[type],
+  label: REACTION_LABELS[type]
 }))
 
 const ReactionPicker = ({ onReact, currentReaction }) => {
@@ -25,7 +35,7 @@ const ReactionPicker = ({ onReact, currentReaction }) => {
              onReact(reaction.type)
           }}
           className={`text-2xl hover:scale-125 transition-transform origin-bottom p-1 rounded-full ${currentReaction === reaction.type ? 'bg-indigo-50 scale-125 shadow-inner' : 'hover:bg-gray-50'}`}
-          title={reaction.type}
+          title={reaction.label}
         >
           {reaction.icon}
         </button>

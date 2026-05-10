@@ -65,7 +65,7 @@ const populateMessage = async (msgObj) => {
 // ─────────────────────────────────────────────────────────────────
 export const sendMessage = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { to_user_id, shared_post_id, reply_to, is_forwarded, forwarded_type } = req.body
         let { text } = req.body
 
@@ -244,7 +244,7 @@ export const sendMessage = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const getChatMessages = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { to_user_id } = req.body
 
         let messages = await Message.find({
@@ -273,7 +273,7 @@ export const getChatMessages = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const getUserRecentMessages = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
 
         let messages = await Message.find({
             $or: [
@@ -304,7 +304,7 @@ export const getUserRecentMessages = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const markMessagesAsRead = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { from_user_id } = req.body
 
         await Message.updateMany(
@@ -323,12 +323,12 @@ export const markMessagesAsRead = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const deleteMessage = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { messageId } = req.body
 
         const message = await Message.findById(messageId)
         if (!message) return res.json({ success: false, message: 'Message not found' })
-        if (message.from_user_id !== userId) {
+        if (message.from_user_id.toString() !== userId) {
             return res.json({ success: false, message: 'Unauthorized: not your message' })
         }
 
@@ -361,7 +361,7 @@ export const deleteMessage = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const editMessage = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { messageId, text } = req.body
 
         if (!text || !text.trim()) {
@@ -370,7 +370,7 @@ export const editMessage = async (req, res) => {
 
         const message = await Message.findById(messageId)
         if (!message) return res.json({ success: false, message: 'Message not found' })
-        if (message.from_user_id !== userId) {
+        if (message.from_user_id.toString() !== userId) {
             return res.json({ success: false, message: 'Unauthorized: not your message' })
         }
 
@@ -399,7 +399,7 @@ export const editMessage = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const reactMessage = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { messageId, reactionType } = req.body
 
         const message = await Message.findById(messageId)
@@ -463,10 +463,11 @@ export const reactMessage = async (req, res) => {
                 const reactor = await User.findById(userId)
                 if (reactor) {
                     const reactionIcon = REACTION_ICONS[reactionType] || reactionType
+                    
                     const automatedMessage = await Message.create({
                         from_user_id: userId,
                         to_user_id: messageOwner,
-                        text: `Reacted ${reactionIcon} to your message`,
+                        text: `Bày tỏ cảm xúc ${reactionIcon} về tin nhắn của bạn`,
                         message_type: 'reaction',
                         isRead: false,
                         reply_to: messageId
@@ -490,7 +491,7 @@ export const reactMessage = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const saveCall = async (req, res) => {
     try {
-        const { userId } = req.auth()
+        const userId = req.userId
         const { to_user_id, call_type, call_status, call_duration } = req.body
 
         if (!to_user_id || !call_type || !call_status) {
@@ -498,9 +499,9 @@ export const saveCall = async (req, res) => {
         }
 
         const callTexts = {
-            missed: call_type === 'video' ? '📵 Missed video call' : '📵 Missed voice call',
-            rejected: call_type === 'video' ? '❌ Rejected video call' : '❌ Rejected voice call',
-            completed: call_type === 'video' ? '📹 Video call' : '📞 Voice call',
+            missed: call_type === 'video' ? '📵 Đã bỏ lỡ cuộc gọi video' : '📵 Đã bỏ lỡ cuộc gọi thoại',
+            rejected: call_type === 'video' ? '❌ Đã từ chối cuộc gọi video' : '❌ Đã từ chối cuộc gọi thoại',
+            completed: call_type === 'video' ? '📹 Gọi video' : '📞 Gọi thoại',
         }
 
         const message = await Message.create({

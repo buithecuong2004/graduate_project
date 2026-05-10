@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Pencil } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { updateUser } from '../features/user/userSlice'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 
 const ProfileModal = ({setShowEdit}) => {
@@ -45,13 +45,13 @@ const ProfileModal = ({setShowEdit}) => {
     <div className='fixed top-0 bottom-0 left-0 right-0 z-110 h-screen overflow-y-scroll bg-black/50'>
         <div className='max-w-2xl sm:py-6 mx-auto'>
             <div className='bg-white roundeed-lg shadow p-6'>
-                <h1 className='text-2xl font-bold text-gray-900 mb-6'>Edit Profile</h1>
+                <h1 className='text-2xl font-bold text-gray-900 mb-6'>Chỉnh sửa Hồ sơ</h1>
                 <form className='space-y-4' onSubmit={e=>toast.promise(
-                    handleSaveProfile(e), {loading: 'Saving...'}
+                    handleSaveProfile(e), {loading: 'Đang lưu...'}
                 )}>
                     <div className='flex flex-col items-start gap-3'>
                         <label htmlFor="profile_picture" className='block text-sm font-medium text-gray-700'>
-                            Profile Picture
+                            Ảnh Đại Diện
                             <input hidden type="file" accept='image/*' id='profile_picture' className='w-full p-3 border border-gray-200 rounded-lg'
                             onChange={(e)=>setEditForm({...editForm, profile_picture: e.target.files[0]})}
                             />
@@ -68,7 +68,7 @@ const ProfileModal = ({setShowEdit}) => {
 
                     <div className='flex flex-col items-start gap-3'>
                         <label htmlFor="cover_photo" className='block text-sm font-medium text-gray-700 mb-1'>
-                            Cover Photo
+                            Ảnh Bìa
                             <input hidden type="file" accept='image/*' id='cover_photo' className='w-full p-3 border border-gray-200 rounded-lg'
                             onChange={(e)=>setEditForm({...editForm, cover_photo: e.target.files[0]})}
                             />
@@ -85,39 +85,39 @@ const ProfileModal = ({setShowEdit}) => {
 
                     <div>
                         <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Name
+                            Tên
                         </label>
-                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Please enter your full name'
+                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập tên đầy đủ'
                         onChange={(e)=>setEditForm({...editForm, full_name: e.target.value})} value={editForm.full_name}/>
                     </div>
 
                     <div>
                         <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Username
+                            Tên người dùng
                         </label>
-                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Please enter username'
+                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập tên người dùng'
                         onChange={(e)=>setEditForm({...editForm, username: e.target.value})} value={editForm.username}/>
                     </div>
 
                     <div>
                         <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Bio
+                            Tiểu sử
                         </label>
-                        <textarea rows={3} className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Please enter your bio'
+                        <textarea rows={3} className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập tiểu sử của bạn'
                         onChange={(e)=>setEditForm({...editForm, bio: e.target.value})} value={editForm.bio}/>
                     </div>
 
                     <div>
                         <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Location
+                            Vị Trí
                         </label>
-                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Please enter location'
+                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập vị trí'
                         onChange={(e)=>setEditForm({...editForm, location: e.target.value})} value={editForm.location}/>
                     </div>
 
                     <div className='flex justify-end space-x-3 pt-6'>
-                        <button onClick={()=>setShowEdit(false)} type='button' className='px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer'>Cancel</button>
-                        <button type='submit' className='px-4 py-2 bg-linear-to-r from-indigo-500 to-purple-600 text-white rounded-lg hover:from-indigo-600 hover:to-purple-700 transition cursor-pointer'>Save Changes</button>
+                        <button onClick={()=>setShowEdit(false)} type='button' className='px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer'>Hủy</button>
+                        <button type='submit' className='px-4 py-2 bg-linear-to-r from-indigo-500 to-purple-600 text-white rounded-lg hover:from-indigo-600 hover:to-purple-700 transition cursor-pointer'>Lưu Thay đổi</button>
                     </div>
                 </form>
             </div>

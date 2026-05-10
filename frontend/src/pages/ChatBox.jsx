@@ -4,16 +4,17 @@ import { useSocket } from '../context/SocketContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { setViewStory } from '../features/stories/storiesSlice'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuth } from '@clerk/clerk-react'
+import { useAuth } from '../context/AuthContext'
 import api from '../api/axios'
 import { addMessages, fetchMessages, resetMessages, deleteMessageLocal, editMessageLocal, updateMessageReactionsLocal } from '../features/messages/messagesSlice'
 import toast from 'react-hot-toast'
 import Loading from '../components/Loading'
-import moment from 'moment'
+import moment from '../utils/moment'
 import ChatMediaViewer from '../components/ChatMediaViewer'
 import { SmilePlus } from 'lucide-react'
 import ReactionPicker, { REACTION_ICONS } from '../components/ReactionPicker'
 import ReactionListModal from '../components/ReactionListModal'
+import localizeMessage from '../utils/localization'
 
 const ChatBox = ({ onStartCall }) => {
 
@@ -65,7 +66,7 @@ const ChatBox = ({ onStartCall }) => {
   const [showReactionListMsg, setShowReactionListMsg] = useState(null)
 
   const handleStoryClick = async (storyId) => {
-    if (!storyId) return toast.error('Story is no longer available')
+    if (!storyId) return toast.error('Tin không còn khả dụng')
     try {
       const token = await getToken()
       const { data } = await api.get(`/api/story/${storyId}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -73,10 +74,10 @@ const ChatBox = ({ onStartCall }) => {
         setMediaViewerOpen(false)
         dispatch(setViewStory(data.story))
       } else {
-        toast.error('Story is no longer available')
+        toast.error('Tin không còn khả dụng')
       }
     } catch (e) {
-      toast.error('Failed to load story')
+      toast.error('Không thể tải tin')
     }
   }
 
@@ -151,7 +152,7 @@ const ChatBox = ({ onStartCall }) => {
     const today = moment()
     const yesterday = moment().subtract(1, 'day')
     if (messageTime.isSame(today, 'day')) return messageTime.format('HH:mm')
-    else if (messageTime.isSame(yesterday, 'day')) return 'Yesterday ' + messageTime.format('HH:mm')
+    else if (messageTime.isSame(yesterday, 'day')) return 'Hôm qua ' + messageTime.format('HH:mm')
     else if (messageTime.isSame(today, 'year')) return messageTime.format('DD/MM HH:mm')
     else return messageTime.format('DD/MM/YYYY HH:mm')
   }
@@ -160,8 +161,8 @@ const ChatBox = ({ onStartCall }) => {
     const maxSize = 10 * 1024 * 1024
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     for (let file of files) {
-      if (!allowedTypes.includes(file.type)) { toast.error('Invalid image format. Only JPG, PNG, WebP, GIF allowed'); return false }
-      if (file.size > maxSize) { toast.error('Each image must be less than 10MB'); return false }
+      if (!allowedTypes.includes(file.type)) { toast.error('Định dạng hình ảnh không hợp lệ. Chỉ chấp nhận JPG, PNG, WebP, GIF'); return false }
+      if (file.size > maxSize) { toast.error('Mỗi hình ảnh phải nhỏ hơn 10MB'); return false }
     }
     return true
   }
@@ -170,15 +171,15 @@ const ChatBox = ({ onStartCall }) => {
     const maxSize = 100 * 1024 * 1024
     const allowedTypes = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime']
     for (let file of files) {
-      if (!allowedTypes.includes(file.type)) { toast.error('Invalid video format. Only MP4, WebM, OGG, MOV allowed'); return false }
-      if (file.size > maxSize) { toast.error('Each video must be less than 100MB'); return false }
+      if (!allowedTypes.includes(file.type)) { toast.error('Định dạng video không hợp lệ. Chỉ chấp nhận MP4, WebM, OGG, MOV'); return false }
+      if (file.size > maxSize) { toast.error('Mỗi video phải nhỏ hơn 100MB'); return false }
     }
     return true
   }
 
   const handleImagesChange = (e) => {
     const newFiles = Array.from(e.target.files)
-    if (images.length + newFiles.length > 5) { toast.error('Maximum 5 images per message'); return }
+    if (images.length + newFiles.length > 5) { toast.error('Tối đa 5 hình ảnh cho mỗi tin nhắn'); return }
     if (validateImages(newFiles)) {
       setImages(prev => [...prev, ...newFiles])
       setImagePreviews(prev => [...prev, ...newFiles.map(f => URL.createObjectURL(f))])
@@ -187,7 +188,7 @@ const ChatBox = ({ onStartCall }) => {
 
   const handleVideosChange = (e) => {
     const newFiles = Array.from(e.target.files)
-    if (videos.length + newFiles.length > 3) { toast.error('Maximum 3 videos per message'); return }
+    if (videos.length + newFiles.length > 3) { toast.error('Tối đa 3 video cho mỗi tin nhắn'); return }
     if (validateVideos(newFiles)) {
       setVideos(prev => [...prev, ...newFiles])
       setVideoPreviews(prev => [...prev, ...newFiles.map(f => URL.createObjectURL(f))])
@@ -229,7 +230,7 @@ const ChatBox = ({ onStartCall }) => {
       setRecordingTime(0)
       timerRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000)
     } catch (err) {
-      toast.error('Microphone access denied. Please allow microphone permission.')
+      toast.error('Truy cập micro bị từ chối. Vui lòng cấp quyền sử dụng micro.')
     }
   }
 
@@ -265,7 +266,7 @@ const ChatBox = ({ onStartCall }) => {
         dispatch(addMessages(data.message))
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
       } else throw new Error(data.message)
-    } catch (error) { toast.error(error.message) }
+    } catch (error) { toast.error(localizeMessage(error.message)) }
     finally { setIsSendingVoice(false) }
   }
 
@@ -291,8 +292,8 @@ const ChatBox = ({ onStartCall }) => {
       const token = await getToken()
       const { data } = await api.post('/api/message/delete', { messageId }, { headers: { Authorization: `Bearer ${token}` } })
       if (data.success) dispatch(deleteMessageLocal(messageId))
-      else toast.error(data.message)
-    } catch (e) { toast.error(e.message) }
+      else toast.error(localizeMessage(data.message))
+    } catch (e) { toast.error(localizeMessage(e.message)) }
     setOpenMenuId(null)
   }
 
@@ -304,8 +305,8 @@ const ChatBox = ({ onStartCall }) => {
       if (data.success) {
         dispatch(editMessageLocal({ messageId: editingMsg._id, text: editText.trim() }))
         setEditingMsg(null); setEditText(''); setText('')
-      } else toast.error(data.message)
-    } catch (e) { toast.error(e.message) }
+      } else toast.error(localizeMessage(data.message))
+    } catch (e) { toast.error(localizeMessage(e.message)) }
   }
 
   const handleReply = (message) => {
@@ -319,8 +320,8 @@ const ChatBox = ({ onStartCall }) => {
       const { data } = await api.post('/api/message/react', { messageId, reactionType }, { headers: { Authorization: `Bearer ${token}` } })
       if (data.success) {
         dispatch(updateMessageReactionsLocal({ messageId, reactions: data.messageData.reactions }))
-      } else toast.error(data.message)
-    } catch (e) { toast.error(e.message) }
+      } else toast.error(localizeMessage(data.message))
+    } catch (e) { toast.error(localizeMessage(e.message)) }
     setReactionMenuId(null)
     setOpenMenuId(null)
   }
@@ -343,7 +344,7 @@ const ChatBox = ({ onStartCall }) => {
 
   // ── FIX: forward media (images / videos / voice) by passing media_urls + message_type ──
   const handleForwardSend = async () => {
-    if (forwardSelected.length === 0) return toast.error('Select at least one person')
+    if (forwardSelected.length === 0) return toast.error('Vui lòng chọn ít nhất một người')
     try {
       const token = await getToken()
       const isLink = forwardingMsg?.text && /https?:\/\/|\/post\//.test(forwardingMsg.text)
@@ -376,10 +377,10 @@ const ChatBox = ({ onStartCall }) => {
           return res
         })
       )
-      toast.success('Message forwarded')
+      toast.success('Đã chuyển tiếp tin nhắn')
       closeForwardModal()
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { toast.error(localizeMessage(e.message)) }
   }
 
   // ── Scroll to a specific message by id ──────────────────────
@@ -394,11 +395,11 @@ const ChatBox = ({ onStartCall }) => {
   // ── Human-readable label for a message (used in reply bars) ──
   const getReplyLabel = (msg) => {
     if (!msg) return ''
-    if (msg.is_deleted) return 'Message recalled'
-    if (msg.message_type === 'voice') return '🎤 Voice message'
+    if (msg.is_deleted) return 'Tin nhắn đã bị thu hồi'
+    if (msg.message_type === 'voice') return '🎤 Tin nhắn thoại'
     if (msg.message_type?.includes('video')) return `🎬 Video (${msg.media_urls?.length || 1})`
-    if (msg.message_type?.includes('image')) return `🖼️ Image (${msg.media_urls?.length || 1})`
-    return msg.text || '📎 Media'
+    if (msg.message_type?.includes('image')) return `🖼️ Ảnh (${msg.media_urls?.length || 1})`
+    return msg.text || '📎 Phương tiện'
   }
 
   const isEditable = (message) => {
@@ -417,7 +418,7 @@ const ChatBox = ({ onStartCall }) => {
     try {
       const { data } = await api.post('/api/user/profiles', { profileId: userId })
       if (data.success) setUser(data.profile)
-    } catch (error) { toast.error(error.message) }
+    } catch (error) { toast.error(localizeMessage(error.message)) }
     finally { setLoading(false) }
   }
 
@@ -425,7 +426,7 @@ const ChatBox = ({ onStartCall }) => {
     try {
       const token = await getToken()
       dispatch(fetchMessages({ token, userId }))
-    } catch (error) { toast.error(error.message) }
+    } catch (error) { toast.error(localizeMessage(error.message)) }
   }
 
   const sendMessage = async () => {
@@ -450,7 +451,7 @@ const ChatBox = ({ onStartCall }) => {
         dispatch(addMessages(data.message))
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
       } else throw new Error(data.message)
-    } catch (error) { toast.error(error.message) }
+    } catch (error) { toast.error(localizeMessage(error.message)) }
   }
 
   const markMessagesAsRead = async () => {
@@ -528,7 +529,7 @@ const ChatBox = ({ onStartCall }) => {
           <button
             id='voice-call-btn'
             onClick={() => startCall('voice')}
-            title='Voice call'
+            title='Gọi thoại'
             className='p-2 rounded-full hover:bg-indigo-100 text-indigo-500 transition-colors'
           >
             <Phone size={20} />
@@ -536,7 +537,7 @@ const ChatBox = ({ onStartCall }) => {
           <button
             id='video-call-btn'
             onClick={() => startCall('video')}
-            title='Video Call'
+            title='Gọi video'
             className='p-2 rounded-full hover:bg-indigo-100 text-indigo-500 transition-colors'
           >
             <VideoIcon size={20} />
@@ -572,10 +573,10 @@ const ChatBox = ({ onStartCall }) => {
               const isCompleted = call_status === 'completed'
               const callIcon = isMissed ? '📵' : isRejected ? '❌' : isVideo ? '📹' : '📞'
               const statusLabel = isMissed
-                ? (isOwn ? 'Missed call' : 'Missed your call')
+                ? (isOwn ? 'Đã bỏ lỡ cuộc gọi' : 'Đã bỏ lỡ cuộc gọi của bạn')
                 : isRejected
-                  ? (isOwn ? 'Rejected call' : 'Declined the call')
-                  : (isVideo ? 'Video call' : 'Voice call') + formatCallDuration(call_duration)
+                  ? (isOwn ? 'Cuộc gọi nhỡ' : 'Đã từ chối cuộc gọi')
+                  : (isVideo ? 'Gọi video' : 'Gọi thoại') + formatCallDuration(call_duration)
               return (
                 <div key={message._id || index}
                   ref={el => { if (message._id) messageRefs.current[message._id] = el }}
@@ -596,7 +597,7 @@ const ChatBox = ({ onStartCall }) => {
                       <span className='text-base'>{callIcon}</span>
                       <div className='flex flex-col'>
                         <span className='font-medium text-xs leading-tight'>
-                          {isVideo ? 'Video call' : 'Voice call'}
+                          {isVideo ? 'Gọi video' : 'Gọi thoại'}
                         </span>
                         <span className='text-[11px] opacity-75'>{statusLabel}</span>
                       </div>
@@ -649,7 +650,7 @@ const ChatBox = ({ onStartCall }) => {
                 <button
                   onClick={(e) => { e.stopPropagation(); handleReply(message) }}
                   className='p-1 text-gray-400 hover:text-indigo-500 transition-colors'
-                  title='Reply'
+                  title='Trả lời'
                 >
                   <Reply size={15} />
                 </button>
@@ -657,7 +658,7 @@ const ChatBox = ({ onStartCall }) => {
                   <button
                     onClick={(e) => { e.stopPropagation(); setReactionMenuId(reactionMenuOpen ? null : message._id); setOpenMenuId(null) }}
                     className='p-1 text-gray-400 hover:text-indigo-500 transition-colors'
-                    title='React'
+                    title='Bày tỏ cảm xúc'
                   >
                     <SmilePlus size={15} />
                   </button>
@@ -684,21 +685,21 @@ const ChatBox = ({ onStartCall }) => {
                           onClick={() => { setEditingMsg(message); setEditText(message.text || ''); setText(message.text || ''); setOpenMenuId(null) }}
                           className='w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50'
                         >
-                          <Pencil size={13} /> Edit
+                          <Pencil size={13} /> Sửa
                         </button>
                       )}
                       <button
                         onClick={() => handleForwardOpen(message)}
                         className='w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50'
                       >
-                        <CornerUpRight size={13} /> Forward
+                        <CornerUpRight size={13} /> Chuyển tiếp
                       </button>
                       {isOwn && (
                         <button
                           onClick={() => handleDelete(message._id)}
                           className='w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50'
                         >
-                          <Trash2 size={13} /> Delete
+                          <Trash2 size={13} /> Xóa
                         </button>
                       )}
                     </div>
@@ -744,7 +745,7 @@ const ChatBox = ({ onStartCall }) => {
                       {/* Forward label */}
                       {message.is_forwarded && !message.is_deleted && message.forwarded_type !== 'story' && (
                         <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
-                          <CornerUpRight size={10} /> Forwarded
+                          <CornerUpRight size={10} /> Đã chuyển tiếp
                         </p>
                       )}
 
@@ -755,7 +756,7 @@ const ChatBox = ({ onStartCall }) => {
                           onClick={(e) => { e.stopPropagation(); scrollToMessage(message.reply_to._id) }}
                         >
                           <p className='font-semibold text-[10px] mb-0.5'>
-                            {message.reply_to.from_user_id?._id === currentUser._id ? 'You' : message.reply_to.from_user_id?.full_name}
+                            {message.reply_to.from_user_id?._id === currentUser._id ? 'Bạn' : message.reply_to.from_user_id?.full_name}
                           </p>
                           <p className='line-clamp-1 text-[11px]'>
                             {getReplyLabel(message.reply_to)}
@@ -764,7 +765,7 @@ const ChatBox = ({ onStartCall }) => {
                       )}
 
                       {message.is_deleted ? (
-                        <p>Message recalled</p>
+                        <p>Tin nhắn đã bị thu hồi</p>
                       ) : message.is_forwarded && message.forwarded_type === 'story' ? (
                         <div className='flex items-center gap-3'>
                           <div className='w-14 h-20 bg-black/10 rounded-lg overflow-hidden shrink-0 shadow-sm cursor-pointer relative group' onClick={() => handleStoryClick(message.shared_story_id)}>
@@ -785,11 +786,11 @@ const ChatBox = ({ onStartCall }) => {
                           </div>
                           <div className='flex-1 flex flex-col justify-center min-w-[120px]'>
                             <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
-                              <CornerUpRight size={10} /> Replied to story
+                              <CornerUpRight size={10} /> Đã trả lời tin
                             </p>
                             {message.text && renderMessageText(message.text)}
                             {message.is_edited && (
-                              <span className={`text-[10px] mt-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · edited</span>
+                              <span className={`text-[10px] mt-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · đã sửa</span>
                             )}
                           </div>
                         </div>
@@ -822,7 +823,7 @@ const ChatBox = ({ onStartCall }) => {
                           )}
                           {message.text && renderMessageText(message.text)}
                           {message.is_edited && (
-                            <span className={`text-[10px] ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · edited</span>
+                            <span className={`text-[10px] ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · đã sửa</span>
                           )}
                         </>
                       )}
@@ -891,10 +892,10 @@ const ChatBox = ({ onStartCall }) => {
                   <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500'></span>
                 </span>
                 <span className='text-red-500 font-mono text-sm font-semibold flex-1'>
-                  Recording... {formatTime(recordingTime)}
+                  Đang ghi âm... {formatTime(recordingTime)}
                 </span>
                 <button onClick={stopRecording} className='flex items-center gap-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-medium transition'>
-                  <Square size={12} fill='currentColor' /> Stop
+                  <Square size={12} fill='currentColor' /> Dừng
                 </button>
                 <button onClick={cancelRecording} className='flex items-center gap-1 text-gray-400 hover:text-red-500 px-2 py-1.5 rounded-full text-xs transition'>
                   <Trash2 size={14} />
@@ -910,7 +911,7 @@ const ChatBox = ({ onStartCall }) => {
                   {isSendingVoice
                     ? <span className='animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full'></span>
                     : <SendHorizonal size={14} />}
-                  Send
+                  Gửi
                 </button>
                 <button onClick={cancelRecording} className='flex items-center gap-1 text-gray-400 hover:text-red-500 px-2 py-1.5 rounded-full text-xs transition'>
                   <Trash2 size={14} />
@@ -924,7 +925,7 @@ const ChatBox = ({ onStartCall }) => {
         {editingMsg && (
           <div className='flex items-center gap-2 mb-2 px-4 py-2 bg-yellow-50 border border-yellow-200 rounded-xl max-w-2xl mx-auto'>
             <Pencil size={14} className='text-yellow-500 shrink-0' />
-            <span className='text-xs text-yellow-700 flex-1 truncate'>Editing: {editingMsg.text}</span>
+            <span className='text-xs text-yellow-700 flex-1 truncate'>Đang sửa: {editingMsg.text}</span>
             <button onClick={() => { setEditingMsg(null); setEditText(''); setText('') }} className='text-gray-400 hover:text-red-400'><X size={14} /></button>
           </div>
         )}
@@ -935,7 +936,7 @@ const ChatBox = ({ onStartCall }) => {
             <Reply size={14} className='text-indigo-400 shrink-0' />
             <div className='flex-1 min-w-0'>
               <p className='text-[10px] font-semibold text-indigo-600'>
-                {replyingTo.from_user_id?._id === currentUser._id ? 'You' : replyingTo.from_user_id?.full_name}
+                {replyingTo.from_user_id?._id === currentUser._id ? 'Bạn' : replyingTo.from_user_id?.full_name}
               </p>
               <p className='text-xs text-gray-500 truncate'>{getReplyLabel(replyingTo)}</p>
             </div>
@@ -948,7 +949,7 @@ const ChatBox = ({ onStartCall }) => {
           <input
             type="text"
             className='flex-1 outline-none text-slate-700 bg-transparent'
-            placeholder={editingMsg ? 'Edit message...' : 'Type a message...'}
+            placeholder={editingMsg ? 'Sửa tin nhắn...' : 'Nhập tin nhắn...'}
             onKeyDown={e => e.key === 'Enter' && (editingMsg ? handleEditSave() : sendMessage())}
             onChange={(e) => { setText(e.target.value); if (editingMsg) setEditText(e.target.value) }}
             value={text}
@@ -965,7 +966,7 @@ const ChatBox = ({ onStartCall }) => {
             onClick={isRecording ? stopRecording : startRecording}
             disabled={!!audioBlob}
             className={`cursor-pointer transition p-1 rounded-full ${isRecording ? 'text-red-500 animate-pulse' : audioBlob ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-indigo-500'}`}
-            title={isRecording ? 'Stop recording' : 'Start voice message'}
+            title={isRecording ? 'Dừng ghi âm' : 'Bắt đầu ghi âm'}
           >
             <Mic size={22} />
           </button>
@@ -983,17 +984,17 @@ const ChatBox = ({ onStartCall }) => {
         <div className='fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50'>
           <div className='bg-white rounded-2xl shadow-xl w-full max-w-md mx-4'>
             <div className='flex items-center justify-between px-5 py-4 border-b border-gray-100'>
-              <h3 className='font-semibold text-slate-800'>Forward Message</h3>
+              <h3 className='font-semibold text-slate-800'>Chuyển tiếp tin nhắn</h3>
               {/* ✅ closeForwardModal clears all forward state */}
               <button onClick={closeForwardModal} className='text-gray-400 hover:text-gray-600'><X size={18} /></button>
             </div>
             <div className='px-5 py-3'>
               {/* Preview */}
               <div className='bg-gray-50 rounded-xl px-3 py-2 mb-3 text-sm text-gray-600 border border-gray-200'>
-                <p className='text-[10px] text-gray-400 mb-1 flex items-center gap-1'><CornerUpRight size={10} /> Forwarding</p>
-                {forwardingMsg?.message_type === 'voice' && <p>🎤 Voice message</p>}
-                {forwardingMsg?.message_type?.includes('video') && <p>🎬 Video message ({forwardingMsg?.media_urls?.length || 0} file{forwardingMsg?.media_urls?.length > 1 ? 's' : ''})</p>}
-                {forwardingMsg?.message_type?.includes('image') && <p>🖼️ Image message ({forwardingMsg?.media_urls?.length || 0} file{forwardingMsg?.media_urls?.length > 1 ? 's' : ''})</p>}
+                <p className='text-[10px] text-gray-400 mb-1 flex items-center gap-1'><CornerUpRight size={10} /> Đang chuyển tiếp</p>
+                {forwardingMsg?.message_type === 'voice' && <p>🎤 Tin nhắn thoại</p>}
+                {forwardingMsg?.message_type?.includes('video') && <p>🎬 Tin nhắn video ({forwardingMsg?.media_urls?.length || 0} tệp)</p>}
+                {forwardingMsg?.message_type?.includes('image') && <p>🖼️ Tin nhắn ảnh ({forwardingMsg?.media_urls?.length || 0} tệp)</p>}
                 {(!forwardingMsg?.message_type || forwardingMsg?.message_type === 'text') && (
                   <p className='line-clamp-2'>{forwardingMsg?.text || '—'}</p>
                 )}
@@ -1001,7 +1002,7 @@ const ChatBox = ({ onStartCall }) => {
               {/* Search */}
               <input
                 type='text'
-                placeholder='Search connections...'
+                placeholder='Tìm kiếm người bạn...'
                 value={forwardSearch}
                 onChange={e => setForwardSearch(e.target.value)}
                 className='w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-indigo-300 mb-2'
@@ -1026,13 +1027,13 @@ const ChatBox = ({ onStartCall }) => {
               </div>
             </div>
             <div className='px-5 py-4 border-t border-gray-100 flex gap-2'>
-              <button onClick={closeForwardModal} className='flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition'>Cancel</button>
+              <button onClick={closeForwardModal} className='flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition'>Hủy</button>
               <button
                 onClick={handleForwardSend}
                 disabled={forwardSelected.length === 0}
                 className='flex-1 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-medium transition disabled:opacity-50'
               >
-                Send ({forwardSelected.length})
+                Gửi ({forwardSelected.length})
               </button>
             </div>
           </div>
