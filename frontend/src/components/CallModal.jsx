@@ -5,6 +5,7 @@ import { useSocket } from '../context/SocketContext'
 import { useSelector } from 'react-redux'
 import api from '../api/axios'
 import { useAuth } from '../context/AuthContext'
+import Peer from 'simple-peer'
 
 const createRingtone = () => {
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
@@ -33,6 +34,21 @@ const ICE_CFG = {
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
+        {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        }
     ]
 }
 
@@ -97,12 +113,11 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         clearInterval(durationTimerRef.current)
         localStreamRef.current?.getTracks().forEach(t => t.stop())
         if (pcRef.current) {
-            try { pcRef.current.close() } catch (_) { }
+            try { pcRef.current.destroy() } catch (_) { }
             pcRef.current = null
         }
         localStreamRef.current = null
         remoteStreamRef.current = null
-        iceCandidateBufferRef.current = []
     }, [])
 
     const endCall = useCallback(async (reason = 'completed') => {
@@ -149,72 +164,50 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         }
     }, [callType])
 
-    // ─── Create RTCPeerConnection ────────────────────────────────────────
-    const createPC = useCallback(() => {
-        if (pcRef.current) {
-            console.warn('⚠️ PeerConnection already exists');
-            return pcRef.current;
-        }
+    // ─── Create Simple-Peer ──────────────────────────────────────────────
+    const createPC = useCallback((isInitiator = false) => {
+        if (pcRef.current) return pcRef.current;
 
-        console.log('🚀 Creating RTCPeerConnection');
-        const pc = new RTCPeerConnection(ICE_CFG)
+        console.log(`🚀 Creating SimplePeer (initiator=${isInitiator})`);
+        const peer = new Peer({
+            initiator: isInitiator,
+            trickle: true,
+            stream: localStreamRef.current,
+            config: ICE_CFG
+        })
 
-        // Add local tracks to connection
-        const stream = localStreamRef.current
-        if (stream) {
-            stream.getTracks().forEach(track => {
-                console.log(`📤 Adding local track: ${track.kind}`)
-                pc.addTrack(track, stream)
+        peer.on('signal', data => {
+            console.log(`📡 Sending signal:`, data.type || 'candidate')
+            socketRef.current?.emit('webrtc-signal', {
+                to: otherUserId,
+                from: currentUser._id,
+                signal: data
             })
-        }
+        })
 
-        // Handle remote tracks
-        const remoteStream = new MediaStream()
-        pc.ontrack = (event) => {
-            console.log(`🎥 Remote track received: ${event.track.kind}`)
-            remoteStream.addTrack(event.track)
-            attachRemote(remoteStream)
-        }
+        peer.on('stream', stream => {
+            console.log('🎥 Remote stream received from simple-peer')
+            attachRemote(stream)
+        })
 
-        // Send ICE candidates via signaling
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                console.log('📡 Sending ICE candidate')
-                socketRef.current?.emit('webrtc-signal', {
-                    to: otherUserId,
-                    from: currentUser._id,
-                    signal: { type: 'candidate', candidate: event.candidate }
-                })
+        peer.on('connect', () => {
+            console.log('🔗 Peer connected')
+            if (callStateRef.current !== 'active') {
+                setState('active')
+                startTimer()
             }
-        }
+        })
 
-        pc.onconnectionstatechange = () => {
-            console.log('🔗 Connection state:', pc.connectionState)
-            if (pc.connectionState === 'connected') {
-                if (callStateRef.current !== 'active') {
-                    setState('active')
-                    startTimer()
-                }
-            }
-        }
+        peer.on('error', err => {
+            console.error('❌ Peer error:', err)
+        })
 
-        pc.oniceconnectionstatechange = () => {
-            console.log('🧊 ICE state:', pc.iceConnectionState)
-        }
+        peer.on('close', () => {
+            console.log('📵 Peer closed')
+        })
 
-        pcRef.current = pc
-
-        // Flush buffered ICE candidates
-        if (iceCandidateBufferRef.current.length > 0) {
-            console.log(`📦 Flushing ${iceCandidateBufferRef.current.length} buffered candidates`)
-            const buf = [...iceCandidateBufferRef.current]
-            iceCandidateBufferRef.current = []
-            buf.forEach(c => {
-                pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.error('Buffered ICE error:', e))
-            })
-        }
-
-        return pc
+        pcRef.current = peer
+        return peer
     }, [socketRef, otherUserId, currentUser._id, attachRemote, setState, startTimer])
 
     // ─── Socket Listeners ────────────────────────────────────────────────
@@ -237,84 +230,22 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             setState('active')
             startTimer()
 
-            // Caller: ensure media, create PC, then create & send offer
+            // Caller: ensure media, create initiator PC
             if (!localStreamRef.current) await getMedia()
-            const pc = createPC()
-
-            try {
-                const offer = await pc.createOffer()
-                await pc.setLocalDescription(offer)
-                console.log('📡 Sending offer')
-                socket.emit('webrtc-signal', {
-                    to: otherUserId,
-                    from: currentUser._id,
-                    signal: { type: 'offer', sdp: offer.sdp }
-                })
-            } catch (e) {
-                console.error('❌ Create offer error:', e)
-            }
+            createPC(true) // initiator = true -> will automatically generate offer and trigger peer.on('signal')
         }
 
         const onWebRTCSignal = async (data) => {
             if (!data?.signal) return
             console.log(`📶 Signal received: ${data.signal.type || 'candidate'}, hasPC: ${!!pcRef.current}`)
 
-            const sig = data.signal
-
-            if (sig.type === 'offer') {
-                // Receiver gets offer → create PC, set remote, create answer
+            if (pcRef.current) {
+                pcRef.current.signal(data.signal)
+            } else {
+                console.warn('⚠️ Received signal but pcRef is null. Creating non-initiator PC.')
                 if (!localStreamRef.current) await getMedia()
-                const pc = pcRef.current || createPC()
-                try {
-                    await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: sig.sdp }))
-                    const answer = await pc.createAnswer()
-                    await pc.setLocalDescription(answer)
-                    console.log('📡 Sending answer')
-                    socket.emit('webrtc-signal', {
-                        to: otherUserId,
-                        from: currentUser._id,
-                        signal: { type: 'answer', sdp: answer.sdp }
-                    })
-                    // Flush any buffered ICE candidates now that remote description is set
-                    if (iceCandidateBufferRef.current.length > 0) {
-                        const buf = [...iceCandidateBufferRef.current]
-                        iceCandidateBufferRef.current = []
-                        for (const c of buf) {
-                            await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.error('Buffered ICE error:', e))
-                        }
-                    }
-                } catch (e) {
-                    console.error('❌ Handle offer error:', e)
-                }
-            } else if (sig.type === 'answer') {
-                // Caller gets answer → set remote description
-                if (pcRef.current) {
-                    try {
-                        await pcRef.current.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: sig.sdp }))
-                        // Flush any buffered ICE candidates
-                        if (iceCandidateBufferRef.current.length > 0) {
-                            const buf = [...iceCandidateBufferRef.current]
-                            iceCandidateBufferRef.current = []
-                            for (const c of buf) {
-                                await pcRef.current.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.error('Buffered ICE error:', e))
-                            }
-                        }
-                    } catch (e) {
-                        console.error('❌ Set answer error:', e)
-                    }
-                }
-            } else if (sig.type === 'candidate') {
-                // ICE candidate
-                if (pcRef.current && pcRef.current.remoteDescription) {
-                    try {
-                        await pcRef.current.addIceCandidate(new RTCIceCandidate(sig.candidate))
-                    } catch (e) {
-                        console.error('ICE candidate error:', e)
-                    }
-                } else {
-                    // Buffer if remote description not set yet
-                    iceCandidateBufferRef.current.push(sig.candidate)
-                }
+                const pc = createPC(false)
+                pc.signal(data.signal)
             }
         }
 
@@ -364,8 +295,8 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         setState('active')
         startTimer()
 
-        // Create PC for receiver (will wait for offer)
-        createPC()
+        // Create PC for receiver (wait for caller's signal)
+        createPC(false)
 
         // Tell caller we accepted → caller will send offer
         socketRef.current?.emit('call-accepted', {
