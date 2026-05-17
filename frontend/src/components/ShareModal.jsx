@@ -68,7 +68,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
             })
 
             if (!shareResponse.data.success) {
-                toast.error('Failed to increment share count')
+                toast.error('Không thể cập nhật lượt chia sẻ')
                 setIsLoading(false)
                 return
             }
@@ -97,7 +97,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
             }
         } catch (error) {
             console.error('Share error:', error)
-            toast.error(error.message || 'Failed to share post')
+            toast.error(error.message || 'Không thể chia sẻ bài viết')
         } finally {
             setIsLoading(false)
         }
@@ -147,7 +147,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
             setSelectedUsers([])
             setMessageText('')
         } catch (error) {
-            toast.error(error.message || 'Không thể chia sẻ tin nhắn')
+            toast.error(error.message || 'Không thể chia sẻ qua tin nhắn')
         } finally {
             setIsLoading(false)
         }

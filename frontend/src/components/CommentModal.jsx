@@ -62,7 +62,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             }
         } catch (error) {
             console.log('Error fetching comments:', error)
-            toast.error('Failed to load comments')
+            toast.error('Không thể tải bình luận')
         } finally {
             setIsLoadingComments(false)
             setIsLoadingMore(false)
@@ -216,7 +216,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                         : c
                 )
             )
-            toast.error('Failed to like comment')
+            toast.error('Không thể thích bình luận')
         }
     }
 
@@ -238,7 +238,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 )
             }
         } catch (error) {
-            toast.error('Failed to react')
+            toast.error('Không thể thả cảm xúc')
         }
     }
 
@@ -283,7 +283,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                         : r
                 )
             }))
-            toast.error('Failed to like reply')
+            toast.error('Không thể thích phản hồi')
         }
     }
 
@@ -306,7 +306,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 }))
             }
         } catch (error) {
-            toast.error('Failed to react')
+            toast.error('Không thể thả cảm xúc')
         }
     }
 
@@ -332,7 +332,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 )
                 if (data.success) {
                     setComments(prev => prev.filter(c => c._id !== deleteTarget.id))
-                    toast.success('Comment deleted')
+                    toast.success('Đã xóa bình luận')
                 }
             } else {
                 const { data } = await api.post(
@@ -352,11 +352,11 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                 : c
                         )
                     )
-                    toast.success('Reply deleted')
+                    toast.success('Đã xóa phản hồi')
                 }
             }
         } catch (error) {
-            toast.error('Failed to delete')
+            toast.error('Không thể xóa')
         } finally {
             setIsLoading(false)
             setDeleteTarget(null)
@@ -460,7 +460,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             <div className='bg-white rounded-2xl shadow-xl w-full max-w-5xl h-[90vh] flex flex-col'>
                 {/* Header */}
                 <div className='flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0'>
-                    <h2 className='text-xl font-semibold'>Post of {post.user.full_name}</h2>
+                    <h2 className='text-xl font-semibold'>Bài viết của {post.user.full_name}</h2>
                     <button
                         onClick={onClose}
                         className='text-gray-400 hover:text-gray-600 p-1'
@@ -516,7 +516,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                     <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600'></div>
                                 </div>
                             ) : comments.length === 0 ? (
-                                <p className='text-center text-gray-500 py-8 text-sm'>No comments yet. Be the first!</p>
+                                <p className='text-center text-gray-500 py-8 text-sm'>Chưa có bình luận. Hãy là người đầu tiên!</p>
                             ) : (
                                 <div className='space-y-4'>
                                     {comments.map((comment) => (
@@ -614,7 +614,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                     <textarea
                                         value={newComment}
                                         onChange={(e) => setNewComment(e.target.value)}
-                                        placeholder='Add a comment...'
+                                        placeholder='Thêm bình luận...'
                                         className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none text-sm'
                                         rows="2"
                                         disabled={isLoading}

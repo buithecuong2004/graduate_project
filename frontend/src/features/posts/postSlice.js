@@ -3,6 +3,7 @@ import api from '../../api/axios'
 
 const initialState = {
     posts: [],
+    suggestedPosts: [],
     loading: false,
     hasMore: true,
     page: 1,
@@ -16,7 +17,8 @@ export const fetchPosts = createAsyncThunk('posts/fetchPosts', async ({ token, p
     return {
         posts: data.success ? data.posts : [],
         hasMore: data.hasMore !== false,
-        page
+        page,
+        suggestedPosts: data.suggestedPosts || []
     }
 })
 
@@ -42,6 +44,7 @@ const postSlice = createSlice({
             state.page = 1
             state.posts = []
             state.hasMore = true
+            state.suggestedPosts = []
         }
     },
     extraReducers: (builder) => {
@@ -50,9 +53,10 @@ const postSlice = createSlice({
                 state.loading = true
             })
             .addCase(fetchPosts.fulfilled, (state, action) => {
-                const { posts, hasMore, page } = action.payload
+                const { posts, hasMore, page, suggestedPosts } = action.payload
                 if (page === 1) {
                     state.posts = posts
+                    state.suggestedPosts = suggestedPosts || []
                 } else {
                     state.posts = [...state.posts, ...posts]
                 }

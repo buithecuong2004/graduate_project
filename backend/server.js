@@ -1,18 +1,27 @@
-import express from 'express'
-import cors from 'cors'
-import 'dotenv/config'
-import connectDB from './configs/db.js';
-import {inngest, functions} from './inngest/index.js'
-import {serve} from 'inngest/express'
-import passport from './configs/passport.js'
-import cookieParser from 'cookie-parser'
-import authRouter from './routes/authRoute.js'
-import userRouter from './routes/userRoutes.js';
-import postRouter from './routes/postRoute.js';
-import storyRouter from './routes/storyRoute.js';
-import messageRouter from './routes/messageRoute.js';
-import { createServer } from 'http'
-import { setupSocket } from './configs/socket.js'
+import dotenv from 'dotenv'
+import fs from 'fs'
+
+// Load env vars TRƯỚC KHI bất kỳ module nào khác được import
+if (fs.existsSync('.env.local')) {
+    dotenv.config({ path: '.env.local' })
+}
+dotenv.config()
+
+// Dynamic imports — chạy SAU KHI env vars đã sẵn sàng
+const { default: express } = await import('express')
+const { default: cors } = await import('cors')
+const { default: connectDB } = await import('./configs/db.js')
+const { inngest, functions } = await import('./inngest/index.js')
+const { serve } = await import('inngest/express')
+const { default: passport } = await import('./configs/passport.js')
+const { default: cookieParser } = await import('cookie-parser')
+const { default: authRouter } = await import('./routes/authRoute.js')
+const { default: userRouter } = await import('./routes/userRoutes.js')
+const { default: postRouter } = await import('./routes/postRoute.js')
+const { default: storyRouter } = await import('./routes/storyRoute.js')
+const { default: messageRouter } = await import('./routes/messageRoute.js')
+const { createServer } = await import('http')
+const { setupSocket } = await import('./configs/socket.js')
 
 const app = express();
 const server = createServer(app);

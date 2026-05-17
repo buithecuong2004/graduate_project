@@ -196,34 +196,104 @@ export const getFeedPosts = async (req, res) => {
         const userId = req.userId
         const { page = 1, limit = 10 } = req.query
         const skip = (page - 1) * limit
+        const limitNum = parseInt(limit)
 
         const user = await User.findById(userId)
+        const connectionIds = (user.connections || []).map(id => id.toString())
+        const followingIds = (user.following || []).map(id => id.toString())
 
-        const userIds = [userId, ...user.connections, ...user.following]
-        
-        // Get total count for pagination
-        const totalPosts = await Post.countDocuments({user: {$in: userIds}})
+        // All user IDs in the social graph
+        const networkIds = [userId, ...connectionIds, ...followingIds]
 
-        const posts = await Post.find({user: {$in: userIds}})
+        // --- SCORING HELPER ---
+        const scorePost = (post, commentCount) => {
+            const reactions = (post.reactions || []).length
+            const comments = commentCount || 0
+            const shares = (post.shares_count || []).length
+
+            // Engagement score
+            const engagementScore = reactions * 3 + comments * 2 + shares * 1.5
+
+            // Recency bonus (exponential time decay)
+            const ageHours = (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60)
+            let recencyBonus = 0
+            if (ageHours < 1) recencyBonus = 50
+            else if (ageHours < 6) recencyBonus = 30
+            else if (ageHours < 24) recencyBonus = 15
+            else if (ageHours < 72) recencyBonus = 5
+
+            // Relationship bonus
+            const postUserId = (post.user._id || post.user).toString()
+            let relationshipBonus = 0
+            if (postUserId === userId.toString()) relationshipBonus = 25
+            else if (connectionIds.includes(postUserId)) relationshipBonus = 20
+            else if (followingIds.includes(postUserId)) relationshipBonus = 10
+
+            return engagementScore + recencyBonus + relationshipBonus
+        }
+
+        // --- FETCH NETWORK POSTS ---
+        const totalNetworkPosts = await Post.countDocuments({ user: { $in: networkIds } })
+
+        // Fetch a wider pool to allow scoring — fetch 3x page window for better ranking
+        const poolSize = Math.max(limitNum * 3, 30)
+        const networkPosts = await Post.find({ user: { $in: networkIds } })
             .populate('user')
             .populate({
                 path: 'shared_from',
                 populate: { path: 'user' }
             })
             .populate('reactions.user', 'full_name username profile_picture _id')
-            .sort({createdAt: -1})
+            .sort({ createdAt: -1 })
             .skip(skip)
-            .limit(parseInt(limit))
+            .limit(poolSize)
 
-        // Dếm tổng comment (top-level + replies) vì replies cũng có field post: postId
-        const postsWithCount = await Promise.all(posts.map(async (post) => {
+        // Attach comment counts and scores
+        const scoredPosts = await Promise.all(networkPosts.map(async (post) => {
             const totalComments = await Comment.countDocuments({ post: post._id })
-            return { ...post.toObject(), total_comments_count: totalComments }
+            const postObj = { ...post.toObject(), total_comments_count: totalComments }
+            postObj._score = scorePost(postObj, totalComments)
+            return postObj
         }))
 
-        const hasMore = skip + parseInt(limit) < totalPosts
+        // Sort by score descending, take the page slice
+        const sortedPosts = scoredPosts
+            .sort((a, b) => b._score - a._score)
+            .slice(0, limitNum)
+            .map(p => { const { _score, ...rest } = p; return rest })
 
-        res.json({ success: true, posts: postsWithCount, hasMore, page: parseInt(page) })
+        const hasMore = skip + limitNum < totalNetworkPosts
+
+        // --- SUGGESTED POSTS (from outside user network, trending) ---
+        // Only fetch suggestions on page 1 to inject into feed
+        let suggestedPosts = []
+        if (parseInt(page) === 1) {
+            const ageThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // last 7 days
+            const trending = await Post.find({
+                user: { $nin: networkIds },
+                createdAt: { $gte: ageThreshold }
+            })
+                .populate('user')
+                .populate('reactions.user', 'full_name username profile_picture _id')
+                .sort({ createdAt: -1 })
+                .limit(50)
+
+            const scoredTrending = await Promise.all(trending.map(async (post) => {
+                const totalComments = await Comment.countDocuments({ post: post._id })
+                const postObj = { ...post.toObject(), total_comments_count: totalComments, is_suggested: true }
+                const reactions = (post.reactions || []).length
+                const shares = (post.shares_count || []).length
+                postObj._score = reactions * 3 + totalComments * 2 + shares * 1.5
+                return postObj
+            }))
+
+            suggestedPosts = scoredTrending
+                .sort((a, b) => b._score - a._score)
+                .slice(0, 3)
+                .map(p => { const { _score, ...rest } = p; return rest })
+        }
+
+        res.json({ success: true, posts: sortedPosts, hasMore, page: parseInt(page), suggestedPosts })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
