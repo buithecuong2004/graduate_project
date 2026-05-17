@@ -30,22 +30,29 @@ const fmt = s => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).t
 
 const ICE_CFG = {
     iceServers: [
+        // STUN servers (free, chỉ dùng để lấy public IP)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
+
+        // TURN servers - UDP (ưu tiên, nhanh nhất)
         {
-            urls: 'turn:openrelay.metered.ca:80',
+            urls: 'turn:openrelay.metered.ca:3478?transport=udp',
             username: 'openrelayproject',
             credential: 'openrelayproject'
         },
-        {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        },
+
+        // TURN servers - TCP (fallback, khi UDP không work)
         {
             urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+
+        // TURN servers - TLS (fallback thứ 2, an toàn nhất)
+        {
+            urls: 'turns:openrelay.metered.ca:443?transport=tcp',
             username: 'openrelayproject',
             credential: 'openrelayproject'
         }
@@ -126,7 +133,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         cleanup()
         if (reason === 'completed') await saveCallRecord('completed', dur)
         onCloseRef.current()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [otherUserId, currentUser._id, socketRef, cleanup, saveCallRecord])
 
     const getMedia = useCallback(async () => {
@@ -312,7 +319,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         await saveCallRecord('rejected', 0)
         removeListeners()
         cleanup(); onCloseRef.current()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [socketRef, otherUserId, currentUser._id, saveCallRecord, cleanup, removeListeners])
 
     const toggleMute = () => {
@@ -356,7 +363,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                 cleanup()
             }
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     // Unmount cleanup
@@ -366,7 +373,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             removeListeners()
             cleanup()
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     // Re-attach streams on UI state change
