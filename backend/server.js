@@ -20,6 +20,7 @@ const { default: userRouter } = await import('./routes/userRoutes.js')
 const { default: postRouter } = await import('./routes/postRoute.js')
 const { default: storyRouter } = await import('./routes/storyRoute.js')
 const { default: messageRouter } = await import('./routes/messageRoute.js')
+const { default: callRouter } = await import('./routes/callRoute.js')
 const { createServer } = await import('http')
 const { setupSocket } = await import('./configs/socket.js')
 
@@ -52,6 +53,7 @@ app.use('/api/user', userRouter)
 app.use('/api/post', postRouter)
 app.use('/api/story', storyRouter)
 app.use('/api/message', messageRouter)
+app.use('/api/call', callRouter)
 
 const PORT = process.env.PORT || 4000
 
