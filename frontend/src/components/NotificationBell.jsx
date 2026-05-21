@@ -11,7 +11,7 @@ const NotificationBell = () => {
         <>
             <button
                 onClick={() => setIsOpen(true)}
-                className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition"
+                className="relative p-2.5 text-slate-600 hover:text-cyan-700 hover:bg-cyan-50 rounded-full transition"
             >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (

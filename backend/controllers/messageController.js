@@ -12,6 +12,24 @@ const REACTION_ICONS = {
     angry: '😡'
 };
 
+const getVoiceFileExtension = (file) => {
+    const mimeType = file.mimetype?.split(';')[0]?.toLowerCase()
+    const extensionByMime = {
+        'audio/webm': 'webm',
+        'audio/ogg': 'ogg',
+        'audio/wav': 'wav',
+        'audio/wave': 'wav',
+        'audio/x-wav': 'wav',
+        'audio/mpeg': 'mp3',
+        'audio/mp4': 'm4a',
+        'audio/aac': 'aac',
+        'audio/x-m4a': 'm4a'
+    }
+    const originalExt = file.originalname?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()
+
+    return extensionByMime[mimeType] || originalExt || 'webm'
+}
+
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
     try {
@@ -105,12 +123,15 @@ export const sendMessage = async (req, res) => {
                 const voiceFile = voiceFiles[0]
                 try {
                     const fileBuffer = fs.readFileSync(voiceFile.path)
+                    const extension = getVoiceFileExtension(voiceFile)
                     const response = await imagekit.upload({
                         file: fileBuffer,
-                        fileName: `voice_${Date.now()}.webm`,
+                        fileName: `voice_${Date.now()}.${extension}`,
                         folder: 'messages/voice'
                     })
-                    media_urls.push(response.url)
+                    const voiceUrl = response.url || (response.filePath ? imagekit.url({ path: response.filePath }) : '')
+                    if (!voiceUrl) throw new Error('Voice upload did not return a URL')
+                    media_urls.push(voiceUrl)
                     media_ids.push(response.fileId)
                 } catch (uploadError) {
                     console.error('ImageKit voice upload error:', uploadError)

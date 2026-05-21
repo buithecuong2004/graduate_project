@@ -25,8 +25,6 @@ const Notification = ({ t, message }) => {
         messageText = message.text.length > 30 ? message.text.slice(0, 30) + '...' : message.text;
     }
 
-    console.log('✅ Notification rendering:', sender.full_name, messageText)
-
     return (
         <div className={`max-w-md w-full bg-white shadow-lg rounded-xl flex border border-gray-300 hover:scale-105 transition cursor-pointer`}>
             <div className='flex-1 p-4'>
@@ -48,7 +46,6 @@ const Notification = ({ t, message }) => {
             </div>
             <div className='flex border-l border-gray-200'>
                 <button onClick={() => {
-                    console.log('Navigating to:', `/messages/${sender._id}`)
                     navigate(`/messages/${sender._id}`);
                     toast.dismiss(t.id)
                 }}

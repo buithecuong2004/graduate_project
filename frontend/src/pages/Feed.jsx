@@ -10,15 +10,8 @@ import { useDispatch, useSelector } from 'react-redux'
 import { useLocation } from 'react-router-dom'
 import { fetchPosts, deletePost, incrementPage } from '../features/posts/postSlice'
 
-// Số bài viết mạng xã hội trước khi chèn bài gợi ý
 const SUGGESTED_INJECT_INTERVAL = 5
 
-/**
- * Xây dựng danh sách bài viết hiển thị, chèn bài gợi ý vào mỗi SUGGESTED_INJECT_INTERVAL bài.
- * Thuật toán:
- *   - Cứ mỗi N bài thường → chèn 1 bài gợi ý (nếu còn)
- *   - Mỗi bài gợi ý chỉ được chèn 1 lần duy nhất
- */
 const buildInterleavedFeed = (posts, suggestedPosts) => {
   const result = []
   let suggestedIndex = 0
@@ -26,9 +19,7 @@ const buildInterleavedFeed = (posts, suggestedPosts) => {
   posts.forEach((post, i) => {
     result.push({ type: 'post', data: post })
 
-    // Sau mỗi SUGGESTED_INJECT_INTERVAL bài → chèn 1 bài gợi ý
-    const isInjectionPoint = (i + 1) % SUGGESTED_INJECT_INTERVAL === 0
-    if (isInjectionPoint && suggestedIndex < suggestedPosts.length) {
+    if ((i + 1) % SUGGESTED_INJECT_INTERVAL === 0 && suggestedIndex < suggestedPosts.length) {
       result.push({ type: 'suggested', data: suggestedPosts[suggestedIndex] })
       suggestedIndex++
     }
@@ -38,12 +29,12 @@ const buildInterleavedFeed = (posts, suggestedPosts) => {
 }
 
 const SuggestedBadge = () => (
-  <div className='flex items-center gap-1.5 mb-2'>
-    <div className='flex items-center gap-1.5 bg-gradient-to-r from-violet-100 to-indigo-100 border border-indigo-200 text-indigo-700 text-xs font-semibold px-3 py-1 rounded-full'>
+  <div className='mb-3 flex items-center gap-3'>
+    <div className='inline-flex items-center gap-2 rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700'>
       <Sparkles className='w-3 h-3' />
       <span>Gợi ý cho bạn</span>
     </div>
-    <div className='flex-1 h-px bg-gradient-to-r from-indigo-100 to-transparent' />
+    <div className='h-px flex-1 bg-slate-200' />
   </div>
 )
 
@@ -67,7 +58,6 @@ const Feed = () => {
     dispatch(deletePost(postId))
   }
 
-  // Infinite scroll handler
   const handleScroll = useCallback((e) => {
     const { scrollTop, scrollHeight, clientHeight } = e.target
     if (scrollHeight - scrollTop - clientHeight < 500 && hasMore && !loading && !isLoadingMore.current) {
@@ -82,49 +72,67 @@ const Feed = () => {
     }
   }, [hasMore, loading, page, getToken, dispatch])
 
-  // Xây dựng feed xen kẽ (bài thường + bài gợi ý)
   const interleavedFeed = buildInterleavedFeed(posts, suggestedPosts || [])
 
   return (
-    <div ref={feedRef} onScroll={handleScroll} className='h-full overflow-y-scroll py-10 xl:pr-5 flex items-start justify-center xl:gap-8'>
-       <div className='w-full max-w-2xl'>
-        <StoriesBar refreshTrigger={location.state?.refresh}/>
-        <div className='space-y-6 pt-4'>
-          {loading && page === 1
-            ? <Loading height='60vh'/>
-            : <>
-                {interleavedFeed.map((item, idx) => (
-                  item.type === 'suggested'
-                    ? (
-                      <div key={`suggested-${item.data._id}-${idx}`}>
-                        <SuggestedBadge />
-                        <PostCard post={item.data} onPostDeleted={handlePostDeleted}/>
-                      </div>
-                    )
-                    : (
-                      <PostCard key={item.data._id} post={item.data} onPostDeleted={handlePostDeleted}/>
-                    )
-                ))}
-                {loading && page > 1 && <Loading height='10vh'/>}
-                {!hasMore && posts.length > 0 && (
-                  <div className='text-center text-gray-500 py-8 text-sm'>
-                    Không còn bài viết để tải
-                  </div>
-                )}
-              </>
-          }
-        </div>
-       </div>
+    <div ref={feedRef} onScroll={handleScroll} className='app-page h-full overflow-y-scroll'>
+      <div className='app-container xl:max-w-7xl'>
+        <div className='grid gap-8 xl:grid-cols-[minmax(0,42rem)_22rem] xl:items-start xl:justify-center'>
+          <main className='min-w-0'>
+            <section className='mb-6 rounded-[2rem] surface p-5 sm:p-6'>
+              <p className='page-kicker'>Bảng tin</p>
+              <div className='mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between'>
+                <div>
+                  <h1 className='page-title !text-[1.75rem] sm:!text-[2.25rem] lg:!text-[2.5rem]'>Hôm nay có gì mới?</h1>
+                  <p className='page-subtitle mt-3 max-w-xl'>Theo dõi bài viết, story và những cập nhật mới từ mạng lưới của bạn.</p>
+                </div>
+              </div>
+              <div className='mt-5'>
+                <StoriesBar refreshTrigger={location.state?.refresh}/>
+              </div>
+            </section>
 
-       <div className='max-xl:hidden sticky top-0'>
-        <div className='max-w-xs bg-white text-xs p-4 rounded-md inline-flex flex-col gap-2 shadow'>
-          <h3 className='text-slate-800 font-semibold'>Được tài trợ</h3>
-          <img src={assets.sponsored_img} className='w-75 h-50 rounded-md' alt="" />
-          <p className='text-slate-600'>Email Marketing</p>
-          <p className='text-slate-400'>Tăng cường tiếp thị email của bạn với nền tảng mạnh mẽ, dễ sử dụng được xây dựng cho kết quả.</p>
+            <div className='space-y-6'>
+              {loading && page === 1
+                ? <Loading height='60vh'/>
+                : <>
+                    {interleavedFeed.map((item, idx) => (
+                      item.type === 'suggested'
+                        ? (
+                          <div key={`suggested-${item.data._id}-${idx}`}>
+                            <SuggestedBadge />
+                            <PostCard post={item.data} onPostDeleted={handlePostDeleted}/>
+                          </div>
+                        )
+                        : (
+                          <PostCard key={item.data._id} post={item.data} onPostDeleted={handlePostDeleted}/>
+                        )
+                    ))}
+                    {loading && page > 1 && <Loading height='10vh'/>}
+                    {!hasMore && posts.length > 0 && (
+                      <div className='rounded-2xl border border-slate-200 bg-white/70 py-6 text-center text-sm text-slate-500'>
+                        Không còn bài viết để tải
+                      </div>
+                    )}
+                  </>
+              }
+            </div>
+          </main>
+
+          <aside className='max-xl:hidden sticky top-6 space-y-5'>
+            <div className='surface overflow-hidden rounded-[1.5rem] p-4 text-sm text-slate-700'>
+              <div className='mb-3 flex items-center justify-between'>
+                <h3 className='font-black text-slate-900'>Được tài trợ</h3>
+                <span className='rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700'>Ad</span>
+              </div>
+              <img src={assets.sponsored_img} className='h-44 w-full rounded-2xl object-cover' alt='' />
+              <p className='mt-4 font-bold text-slate-900'>Email Marketing</p>
+              <p className='mt-1 leading-6 text-slate-500'>Tăng cường tiếp thị email với nền tảng mạnh mẽ, dễ sử dụng và tối ưu cho kết quả.</p>
+            </div>
+            <RecentMessages/>
+          </aside>
         </div>
-        <RecentMessages/>
-       </div>
+      </div>
     </div>
   )
 }

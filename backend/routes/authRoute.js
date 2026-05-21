@@ -3,6 +3,7 @@ import passport from 'passport'
 import jwt from 'jsonwebtoken'
 import mongoose from 'mongoose'
 import User from '../models/User.js'
+import { getFrontendUrl } from '../utils/appUrl.js'
 
 const authRouter = express.Router()
 
@@ -21,10 +22,10 @@ authRouter.get('/google', passport.authenticate('google', {
 }))
 
 authRouter.get('/google/callback',
-    passport.authenticate('google', { session: false, failureRedirect: `${process.env.FRONTEND_URL}?error=google_auth_failed` }),
+    passport.authenticate('google', { session: false, failureRedirect: getFrontendUrl('/?error=google_auth_failed') }),
     (req, res) => {
         const token = generateToken(req.user)
-        res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`)
+        res.redirect(getFrontendUrl(`/auth/callback?token=${token}`))
     }
 )
 
@@ -34,10 +35,10 @@ authRouter.get('/facebook', passport.authenticate('facebook', {
 }))
 
 authRouter.get('/facebook/callback',
-    passport.authenticate('facebook', { session: false, failureRedirect: `${process.env.FRONTEND_URL}?error=facebook_auth_failed` }),
+    passport.authenticate('facebook', { session: false, failureRedirect: getFrontendUrl('/?error=facebook_auth_failed') }),
     (req, res) => {
         const token = generateToken(req.user)
-        res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`)
+        res.redirect(getFrontendUrl(`/auth/callback?token=${token}`))
     }
 )
 

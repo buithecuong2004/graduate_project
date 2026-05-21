@@ -1,8 +1,8 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { X, BadgeCheck } from 'lucide-react'
+import { BadgeCheck, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { REACTION_ICONS } from './ReactionPicker'
+import { REACTION_ICONS } from '../utils/reactions'
 
 const ReactionListModal = ({ isOpen, onClose, reactions = [] }) => {
   const navigate = useNavigate()
@@ -10,57 +10,66 @@ const ReactionListModal = ({ isOpen, onClose, reactions = [] }) => {
   if (!isOpen) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={onClose}>
-      <div className="bg-white rounded-xl w-full max-w-md shadow-xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-xl font-bold">Cảm xúc</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full transition">
-            <X className="w-6 h-6" />
+    <div className='fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm' onClick={onClose}>
+      <div className='surface flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-[2rem]' onClick={e => e.stopPropagation()}>
+        <div className='flex items-center justify-between border-b border-slate-200 px-5 py-4'>
+          <div>
+            <p className='page-kicker'>Tương tác</p>
+            <h2 className='mt-1 text-xl font-black text-slate-950'>Cảm xúc</h2>
+          </div>
+          <button onClick={onClose} className='rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 cursor-pointer'>
+            <X className='size-6' />
           </button>
         </div>
-        
-        <div className="overflow-y-auto flex-1 p-4">
+
+        <div className='flex-1 overflow-y-auto p-4'>
           {reactions.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">Chưa có cảm xúc nào.</div>
+            <div className='py-10 text-center text-sm font-bold text-slate-500'>Chưa có cảm xúc nào.</div>
           ) : (
-            <div className="space-y-4">
-              {reactions.map((reaction, index) => (
-                <div 
-                  key={index} 
-                  className="flex items-center justify-between cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition"
-                  onClick={() => {
-                    onClose()
-                    navigate(`/profile/${reaction.user._id}`)
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <img 
-                        src={reaction.user?.profile_picture || 'https://via.placeholder.com/40'} 
-                        alt="" 
-                        className="w-10 h-10 rounded-full object-cover shadow-sm"
-                      />
-                      <div className="absolute -bottom-1 -right-1 text-sm bg-white rounded-full leading-none shadow-sm">
-                        {REACTION_ICONS[reaction.type]}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="font-semibold text-sm flex items-center gap-1">
-                        {reaction.user?.full_name}
-                        <BadgeCheck className="w-3.5 h-3.5 text-blue-500" />
-                      </div>
-                      <div className="text-xs text-gray-500">@{reaction.user?.username}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className='space-y-2'>
+              {reactions.map((reaction, index) => {
+                const user = reaction.user
+                const userId = user?._id || user
+
+                return (
+                  <button
+                    type='button'
+                    key={`${userId || 'reaction'}-${index}`}
+                    className='flex w-full cursor-pointer items-center justify-between rounded-2xl p-3 text-left transition hover:bg-cyan-50/70'
+                    onClick={() => {
+                      onClose()
+                      if (userId) navigate(`/profile/${userId}`)
+                    }}
+                  >
+                    <span className='flex min-w-0 items-center gap-3'>
+                      <span className='relative shrink-0'>
+                        <img
+                          src={user?.profile_picture || 'https://via.placeholder.com/40'}
+                          alt=''
+                          className='size-11 rounded-full object-cover avatar-ring'
+                        />
+                        <span className='absolute -bottom-1 -right-1 rounded-full bg-white text-sm leading-none shadow-sm'>
+                          {REACTION_ICONS[reaction.type]}
+                        </span>
+                      </span>
+                      <span className='min-w-0'>
+                        <span className='flex items-center gap-1 text-sm font-black text-slate-950'>
+                          <span className='truncate'>{user?.full_name || 'Người dùng'}</span>
+                          <BadgeCheck className='size-3.5 shrink-0 text-cyan-500' />
+                        </span>
+                        <span className='block truncate text-xs text-slate-500'>@{user?.username || 'user'}</span>
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
       </div>
     </div>,
     document.body
-  );
+  )
 }
 
-export default ReactionListModal;
+export default ReactionListModal

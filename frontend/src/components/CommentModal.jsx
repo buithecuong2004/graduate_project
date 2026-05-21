@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
-import { X, Heart, ChevronDown, ChevronUp, SmilePlus } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { ChevronDown, ChevronUp, MessageCircle, SendHorizonal, SmilePlus, Trash2, X } from 'lucide-react'
 import moment from '../utils/moment'
 import { useSelector } from 'react-redux'
 import { useAuth } from '../context/AuthContext'
@@ -7,10 +8,23 @@ import { useNavigate } from 'react-router-dom'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 import ConfirmDialog from './ConfirmDialog'
-import ReactionPicker, { REACTION_ICONS } from './ReactionPicker'
+import ReactionPicker from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
+import { REACTION_ICONS, REACTION_LABELS } from '../utils/reactions'
 
-const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onTotalCount, onCountChange, targetCommentId }) => {
+const getReactionSummary = (reactions = []) => {
+    const counts = reactions.reduce((acc, reaction) => {
+        acc[reaction.type] = (acc[reaction.type] || 0) + 1
+        return acc
+    }, {})
+
+    return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([type]) => type)
+}
+
+const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onTotalCount, onCountChange }) => {
     const [comments, setComments] = useState([])
     const [newComment, setNewComment] = useState('')
     const [isLoading, setIsLoading] = useState(false)
@@ -23,20 +37,12 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     const [commentPage, setCommentPage] = useState(1)
     const [hasMoreComments, setHasMoreComments] = useState(true)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
-    const commentsRef = React.useRef(null)
+    const [reactionMenuId, setReactionMenuId] = useState(null)
+    const [showReactionListMsg, setShowReactionListMsg] = useState(null)
+
     const currentUser = useSelector((state) => state.user.value)
     const { getToken } = useAuth()
     const navigate = useNavigate()
-    const [showReactionListMsg, setShowReactionListMsg] = useState(null)
-
-    useEffect(() => {
-        if (isOpen && post?._id) {
-            setCommentPage(1)
-            setComments([])
-            setHasMoreComments(true)
-            fetchComments()
-        }
-    }, [isOpen, post?._id])
 
     const fetchComments = async (pageNum = 1) => {
         try {
@@ -50,18 +56,13 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             })
 
             if (data.success) {
-                if (pageNum === 1) {
-                    setComments(data.comments)
-                } else {
-                    setComments(prev => [...prev, ...data.comments])
-                }
+                setComments(pageNum === 1 ? data.comments : (prev) => [...prev, ...data.comments])
                 setHasMoreComments(data.hasMore !== false)
                 setCommentPage(pageNum)
                 const total = data.comments.reduce((sum, c) => sum + 1 + (c.replies?.length || 0), 0)
-                if (onTotalCount) onTotalCount(total)
+                onTotalCount?.(total)
             }
-        } catch (error) {
-            console.log('Error fetching comments:', error)
+        } catch {
             toast.error('Không thể tải bình luận')
         } finally {
             setIsLoadingComments(false)
@@ -69,12 +70,14 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         }
     }
 
-    const handleCommentsScroll = (e) => {
-        const { scrollTop, scrollHeight, clientHeight } = e.target
-        if (scrollHeight - scrollTop - clientHeight < 200 && hasMoreComments && !isLoadingMore && !isLoadingComments) {
-            fetchComments(commentPage + 1)
+    useEffect(() => {
+        if (isOpen && post?._id) {
+            setCommentPage(1)
+            setComments([])
+            setHasMoreComments(true)
+            fetchComments()
         }
-    }
+    }, [isOpen, post?._id])
 
     const fetchReplies = async (commentId) => {
         if (replies[commentId]) return
@@ -85,49 +88,45 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 headers: { Authorization: `Bearer ${token}` }
             })
             if (data.success) {
-                setReplies(prev => ({
-                    ...prev,
-                    [commentId]: data.replies
-                }))
+                setReplies(prev => ({ ...prev, [commentId]: data.replies }))
             }
-        } catch (error) {
-            console.log('Error fetching replies:', error)
+        } catch {
+            toast.error('Không thể tải phản hồi')
         }
     }
 
     const toggleReplies = (commentId) => {
-        setExpandedReplies(prev => ({
-            ...prev,
-            [commentId]: !prev[commentId]
-        }))
-        if (!expandedReplies[commentId]) {
-            fetchReplies(commentId)
+        setExpandedReplies(prev => ({ ...prev, [commentId]: !prev[commentId] }))
+        if (!expandedReplies[commentId]) fetchReplies(commentId)
+    }
+
+    const handleCommentsScroll = (e) => {
+        const { scrollTop, scrollHeight, clientHeight } = e.target
+        if (scrollHeight - scrollTop - clientHeight < 200 && hasMoreComments && !isLoadingMore && !isLoadingComments) {
+            fetchComments(commentPage + 1)
         }
     }
 
     const handleAddComment = async (e) => {
         e.preventDefault()
-        if (!newComment.trim()) {
-            toast.error('Bình luận không thể để trống')
-            return
-        }
+        if (!newComment.trim()) return toast.error('Bình luận không thể để trống')
 
         try {
             setIsLoading(true)
             const token = await getToken()
             const { data } = await api.post(
                 '/api/post/comment/add',
-                { postId: post._id, content: newComment },
+                { postId: post._id, content: newComment.trim() },
                 { headers: { Authorization: `Bearer ${token}` } }
             )
+
             if (data.success) {
                 setComments([data.comment, ...comments])
                 setNewComment('')
                 toast.success('Bình luận đã được thêm')
-                if (onCommentAdded) onCommentAdded()
+                onCommentAdded?.()
             }
-        } catch (error) {
-            console.log('Error adding comment:', error)
+        } catch {
             toast.error('Không thể thêm bình luận')
         } finally {
             setIsLoading(false)
@@ -136,91 +135,42 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
 
     const handleAddReply = async (e, commentId) => {
         e.preventDefault()
-        if (!replyText.trim()) {
-            toast.error('Trả lời không thể để trống')
-            return
-        }
+        if (!replyText.trim()) return toast.error('Phản hồi không thể để trống')
 
         try {
             setIsLoading(true)
             const token = await getToken()
             const { data } = await api.post(
                 '/api/post/reply/add',
-                { commentId, content: replyText },
+                { commentId, content: replyText.trim() },
                 { headers: { Authorization: `Bearer ${token}` } }
             )
+
             if (data.success) {
                 setReplies(prev => ({
                     ...prev,
                     [commentId]: [data.reply, ...(prev[commentId] || [])]
                 }))
-
-                setComments(prev =>
-                    prev.map(c =>
-                        c._id === commentId
-                            ? { ...c, replies: [data.reply, ...(c.replies || [])] }
-                            : c
-                    )
-                )
-
+                setComments(prev => prev.map(c => (
+                    c._id === commentId
+                        ? { ...c, replies: [data.reply, ...(c.replies || [])] }
+                        : c
+                )))
+                setExpandedReplies(prev => ({ ...prev, [commentId]: true }))
                 setReplyCommentId(null)
                 setReplyText('')
-                toast.success('Trả lời đã được thêm')
-                if (onReplyAdded) onReplyAdded()
-                if (onCountChange) onCountChange(1)
+                toast.success('Phản hồi đã được thêm')
+                onReplyAdded?.()
+                onCountChange?.(1)
             }
-        } catch (error) {
-            console.log('Error adding reply:', error)
-            toast.error('Không thể thêm trả lời')
+        } catch {
+            toast.error('Không thể thêm phản hồi')
         } finally {
             setIsLoading(false)
         }
     }
 
-    const handleLikeComment = async (commentId) => {
-        const alreadyLiked = comments.find(c => c._id === commentId)?.likes_count?.includes(currentUser._id)
-
-        // Optimistic update ngay lập tức, không chờ API
-        setComments(prev =>
-            prev.map(c =>
-                c._id === commentId
-                    ? {
-                        ...c,
-                        likes_count: alreadyLiked
-                            ? c.likes_count.filter(id => id !== currentUser._id)
-                            : [...(c.likes_count || []), currentUser._id]
-                    }
-                    : c
-            )
-        )
-
-        try {
-            const token = await getToken()
-            await api.post(
-                '/api/post/comment/like',
-                { commentId },
-                { headers: { Authorization: `Bearer ${token}` } }
-            )
-            // Không sync lại từ server — optimistic đã đúng
-        } catch (error) {
-            // Rollback về trạng thái cũ nếu API lỗi
-            setComments(prev =>
-                prev.map(c =>
-                    c._id === commentId
-                        ? {
-                            ...c,
-                            likes_count: alreadyLiked
-                                ? [...(c.likes_count || []), currentUser._id]
-                                : c.likes_count.filter(id => id !== currentUser._id)
-                        }
-                        : c
-                )
-            )
-            toast.error('Không thể thích bình luận')
-        }
-    }
-
-    const handleReactComment = async (commentId, type) => {
+    const handleReactComment = async (commentId, type, isReply, parentCommentId) => {
         try {
             const token = await getToken()
             const { data } = await api.post(
@@ -228,98 +178,30 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 { commentId, reactionType: type },
                 { headers: { Authorization: `Bearer ${token}` } }
             )
-            if (data.success) {
-                setComments(prev =>
-                    prev.map(c => c._id === commentId ? {
-                        ...c,
-                        reactions: data.reactions,
-                        likes_count: c.likes_count?.filter(id => id !== currentUser._id) || []
-                    } : c)
-                )
-            }
-        } catch (error) {
-            toast.error('Không thể thả cảm xúc')
-        }
-    }
 
-    const handleLikeReply = async (replyId, commentId) => {
-        const alreadyLiked = replies[commentId]?.find(r => r._id === replyId)?.likes_count?.includes(currentUser._id)
+            if (!data.success) return
 
-        // Optimistic update ngay lập tức, không chờ API
-        setReplies(prev => ({
-            ...prev,
-            [commentId]: (prev[commentId] || []).map(r =>
-                r._id === replyId
-                    ? {
-                        ...r,
-                        likes_count: alreadyLiked
-                            ? r.likes_count.filter(id => id !== currentUser._id)
-                            : [...(r.likes_count || []), currentUser._id]
-                    }
-                    : r
-            )
-        }))
-
-        try {
-            const token = await getToken()
-            await api.post(
-                '/api/post/comment/like',
-                { commentId: replyId },
-                { headers: { Authorization: `Bearer ${token}` } }
-            )
-            // Không sync lại từ server — optimistic đã đúng
-        } catch (error) {
-            // Rollback về trạng thái cũ nếu API lỗi
-            setReplies(prev => ({
-                ...prev,
-                [commentId]: (prev[commentId] || []).map(r =>
-                    r._id === replyId
-                        ? {
-                            ...r,
-                            likes_count: alreadyLiked
-                                ? [...(r.likes_count || []), currentUser._id]
-                                : r.likes_count.filter(id => id !== currentUser._id)
-                        }
-                        : r
-                )
-            }))
-            toast.error('Không thể thích phản hồi')
-        }
-    }
-
-    const handleReactReply = async (replyId, commentId, type) => {
-        try {
-            const token = await getToken()
-            const { data } = await api.post(
-                '/api/post/comment/react',
-                { commentId: replyId, reactionType: type },
-                { headers: { Authorization: `Bearer ${token}` } }
-            )
-            if (data.success) {
+            if (isReply) {
                 setReplies(prev => ({
                     ...prev,
-                    [commentId]: (prev[commentId] || []).map(r => r._id === replyId ? {
-                        ...r,
-                        reactions: data.reactions,
-                        likes_count: r.likes_count?.filter(id => id !== currentUser._id) || []
-                    } : r)
+                    [parentCommentId]: (prev[parentCommentId] || []).map(reply => (
+                        reply._id === commentId ? { ...reply, reactions: data.reactions } : reply
+                    ))
                 }))
+            } else {
+                setComments(prev => prev.map(comment => (
+                    comment._id === commentId ? { ...comment, reactions: data.reactions } : comment
+                )))
             }
-        } catch (error) {
+            setReactionMenuId(null)
+        } catch {
             toast.error('Không thể thả cảm xúc')
         }
-    }
-
-    const handleDeleteComment = (commentId) => {
-        setDeleteTarget({ type: 'comment', id: commentId })
-    }
-
-    const handleDeleteReply = (replyId, commentId) => {
-        setDeleteTarget({ type: 'reply', id: replyId, commentId })
     }
 
     const handleConfirmDelete = async () => {
         if (!deleteTarget) return
+
         try {
             setIsLoading(true)
             const token = await getToken()
@@ -343,19 +225,17 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 if (data.success) {
                     setReplies(prev => ({
                         ...prev,
-                        [deleteTarget.commentId]: prev[deleteTarget.commentId].filter(r => r._id !== deleteTarget.id)
+                        [deleteTarget.commentId]: (prev[deleteTarget.commentId] || []).filter(r => r._id !== deleteTarget.id)
                     }))
-                    setComments(prev =>
-                        prev.map(c =>
-                            c._id === deleteTarget.commentId
-                                ? { ...c, replies: c.replies.filter(r => r._id !== deleteTarget.id) }
-                                : c
-                        )
-                    )
+                    setComments(prev => prev.map(c => (
+                        c._id === deleteTarget.commentId
+                            ? { ...c, replies: (c.replies || []).filter(r => r._id !== deleteTarget.id) }
+                            : c
+                    )))
                     toast.success('Đã xóa phản hồi')
                 }
             }
-        } catch (error) {
+        } catch {
             toast.error('Không thể xóa')
         } finally {
             setIsLoading(false)
@@ -363,228 +243,174 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         }
     }
 
-    const CommentItem = ({ comment, isReply = false }) => {
+    const openProfile = (userId) => {
+        navigate(`/profile/${userId}`)
+        onClose()
+    }
+
+    const CommentItem = ({ comment, isReply = false, parentCommentId = null }) => {
+        const reactionMenuOpen = reactionMenuId === comment._id
+        const reactions = comment.reactions || []
+        const currentReaction = reactions.find(r => (r.user?._id || r.user) === currentUser?._id)?.type
+        const topReactions = getReactionSummary(reactions)
+        const canDelete = comment.user?._id === currentUser?._id
+
         return (
-            <div className={`border rounded-lg p-4 transition-all duration-1000 border-gray-200`}>
+            <article className={`rounded-2xl border border-slate-200 bg-white p-4 ${isReply ? 'ml-8' : ''}`}>
                 <div className='flex gap-3'>
                     <img
                         src={comment.user?.profile_picture}
-                        alt=""
-                        className='w-10 h-10 rounded-full cursor-pointer hover:opacity-80 flex-shrink-0'
-                        onClick={() => {
-                            navigate(`/profile/${comment.user?._id}`)
-                            onClose()
-                        }}
+                        alt=''
+                        className='size-10 rounded-full object-cover avatar-ring cursor-pointer'
+                        onClick={() => openProfile(comment.user?._id)}
                     />
-                    <div className='flex-1'>
-                        <div className='flex items-center justify-between'>
-                            <div
-                                className='cursor-pointer hover:text-indigo-600'
-                                onClick={() => {
-                                    navigate(`/profile/${comment.user?._id}`)
-                                    onClose()
-                                }}
-                            >
-                                <h4 className='font-semibold text-sm'>{comment.user?.full_name}</h4>
-                                <p className='text-xs text-gray-500'>@{comment.user?.username}</p>
-                            </div>
-                            {comment.user?._id === currentUser._id && (
+                    <div className='min-w-0 flex-1'>
+                        <div className='flex items-start justify-between gap-3'>
+                            <button type='button' className='min-w-0 text-left cursor-pointer' onClick={() => openProfile(comment.user?._id)}>
+                                <h4 className='truncate text-sm font-black text-slate-900 hover:text-cyan-700'>{comment.user?.full_name}</h4>
+                                <p className='text-xs text-slate-500'>@{comment.user?.username}</p>
+                            </button>
+                            {canDelete && (
                                 <button
-                                    onClick={() => isReply ? handleDeleteReply(comment._id, comment.parent_comment_id) : handleDeleteComment(comment._id)}
-                                    className='text-xs text-red-500 hover:text-red-600'
+                                    type='button'
+                                    onClick={() => setDeleteTarget({ type: isReply ? 'reply' : 'comment', id: comment._id, commentId: parentCommentId })}
+                                    className='rounded-full p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-500 cursor-pointer'
                                 >
-                                    Xoá
+                                    <Trash2 className='size-4'/>
                                 </button>
                             )}
                         </div>
-                        <p className='text-gray-800 text-sm mt-2'>{comment.content}</p>
-                        <div className='flex items-center gap-4 mt-2 text-xs text-gray-500'>
+
+                        <p className='mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'>{comment.content}</p>
+
+                        <div className='mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500'>
                             <span>{moment(comment.createdAt).fromNow()}</span>
 
-                            <div className='relative group/reaction pb-2 mb-[-8px] pt-2 mt-[-8px]'>
+                            <div className='relative'>
                                 <button
-                                    className='flex items-center gap-1 hover:text-indigo-600 text-gray-400'
+                                    type='button'
+                                    onClick={() => setReactionMenuId(reactionMenuOpen ? null : comment._id)}
+                                    className={`flex items-center gap-1 font-bold transition hover:text-cyan-700 cursor-pointer ${currentReaction ? 'text-cyan-700' : ''}`}
                                 >
-                                    <SmilePlus className={`w-4 h-4 ${comment.reactions?.some(r => (r.user?._id || r.user) === currentUser?._id) ? 'text-indigo-600' : ''}`} />
+                                    <SmilePlus className='size-4'/>
+                                    <span>{currentReaction ? REACTION_LABELS[currentReaction] : 'Cảm xúc'}</span>
                                 </button>
-                                {/* Hover Reaction Picker */}
-                                <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 invisible group-hover/reaction:opacity-100 group-hover/reaction:visible transition-all duration-200 z-50'>
-                                    <ReactionPicker
-                                        onReact={(type) => isReply ? handleReactReply(comment._id, comment.parent_comment_id, type) : handleReactComment(comment._id, type)}
-                                        currentReaction={comment.reactions?.find(r => (r.user?._id || r.user) === currentUser?._id)?.type}
-                                    />
-                                </div>
+                                {reactionMenuOpen && (
+                                    <div className='absolute bottom-full left-0 z-50 mb-2'>
+                                        <ReactionPicker
+                                            onReact={(type) => handleReactComment(comment._id, type, isReply, parentCommentId)}
+                                            currentReaction={currentReaction}
+                                        />
+                                    </div>
+                                )}
                             </div>
 
                             {!isReply && (
-                                <button
-                                    onClick={() => setReplyCommentId(comment._id)}
-                                    className='hover:text-indigo-600 font-medium'
-                                >
+                                <button type='button' onClick={() => setReplyCommentId(comment._id)} className='font-bold transition hover:text-cyan-700 cursor-pointer'>
                                     Phản hồi
                                 </button>
                             )}
 
-                            {/* Reaction Display */}
-                            {comment.reactions && comment.reactions.length > 0 && (
-                                <div
-                                    className='flex items-center cursor-pointer hover:underline text-gray-500'
+                            {reactions.length > 0 && (
+                                <button
+                                    type='button'
+                                    className='flex items-center gap-1 hover:underline cursor-pointer'
                                     onClick={() => setShowReactionListMsg(comment)}
                                 >
-                                    <div className="flex -space-x-1 mr-1">
-                                        {Object.entries(
-                                            comment.reactions.reduce((acc, r) => {
-                                                acc[r.type] = (acc[r.type] || 0) + 1;
-                                                return acc;
-                                            }, {})
-                                        ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([type], idx) => (
-                                            <span key={type} className="text-[12px] bg-white rounded-full z-10" style={{ zIndex: 3 - idx }}>
-                                                {REACTION_ICONS[type]}
-                                            </span>
+                                    <span className='flex -space-x-1'>
+                                        {topReactions.map((type) => (
+                                            <span key={type} className='rounded-full bg-white text-xs'>{REACTION_ICONS[type]}</span>
                                         ))}
-                                    </div>
-                                    <span>{comment.reactions.length}</span>
-                                </div>
+                                    </span>
+                                    <span>{reactions.length}</span>
+                                </button>
                             )}
                         </div>
                     </div>
                 </div>
-            </div>
+            </article>
         )
     }
 
     if (!isOpen || !post) return null
 
-    return (
-        <div className='fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4'>
-            <div className='bg-white rounded-2xl shadow-xl w-full max-w-5xl h-[90vh] flex flex-col'>
-                {/* Header */}
-                <div className='flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0'>
-                    <h2 className='text-xl font-semibold'>Bài viết của {post.user.full_name}</h2>
-                    <button
-                        onClick={onClose}
-                        className='text-gray-400 hover:text-gray-600 p-1'
-                    >
-                        <X className='w-6 h-6' />
+    return createPortal(
+        <div className='fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm'>
+            <div className='surface flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem]'>
+                <header className='flex items-center justify-between border-b border-slate-200 px-6 py-5'>
+                    <div>
+                        <p className='page-kicker'>Bình luận</p>
+                        <h2 className='mt-1 text-2xl font-black text-slate-900'>Bài viết của {post.user.full_name}</h2>
+                    </div>
+                    <button onClick={onClose} className='rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 cursor-pointer'>
+                        <X className='size-6' />
                     </button>
-                </div>
+                </header>
 
-                {/* Main Content Area - Two Column */}
-                <div className='flex flex-col md:flex-row flex-1 min-h-0'>
-                    {/* Post Content - Left Side (40%) */}
-                    <div className='w-full md:w-2/5 border-b md:border-b-0 md:border-r border-gray-200 overflow-y-auto p-6 flex flex-col md:max-h-full max-h-[35vh]'>
-                        {/* Post Header */}
-                        <div className='flex gap-4 mb-4 cursor-pointer'
-                            onClick={() => {
-                                navigate(`/profile/${post.user._id}`)
-                                onClose()
-                            }}
-                        >
-                            <img src={post.user.profile_picture} alt="" className='w-12 h-12 rounded-full hover:opacity-80 flex-shrink-0' />
+                <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
+                    <aside className='max-h-[34vh] w-full overflow-y-auto border-b border-slate-200 bg-slate-50/80 p-6 md:max-h-none md:w-2/5 md:border-b-0 md:border-r'>
+                        <div className='mb-4 flex gap-4 cursor-pointer' onClick={() => openProfile(post.user._id)}>
+                            <img src={post.user.profile_picture} alt='' className='size-12 rounded-full object-cover avatar-ring' />
                             <div>
-                                <h3 className='font-semibold hover:text-indigo-600'>{post.user.full_name}</h3>
-                                <p className='text-sm text-gray-500'>@{post.user.username}</p>
+                                <h3 className='font-black text-slate-900 hover:text-cyan-700'>{post.user.full_name}</h3>
+                                <p className='text-sm text-slate-500'>@{post.user.username}</p>
                             </div>
                         </div>
 
-                        {/* Post Content */}
-                        {post.content && (
-                            <p className='text-gray-800 mb-4 whitespace-pre-line text-sm leading-relaxed'>{post.content}</p>
-                        )}
-
-                        {/* Post Video */}
-                        {post.video_url && (
-                            <video src={post.video_url} controls className='w-full max-h-64 object-contain rounded-lg bg-black mb-4' />
-                        )}
-
-                        {/* Post Images */}
-                        {post.image_urls && post.image_urls.length > 0 && (
-                            <div className={`grid gap-2 mb-4 ${post.image_urls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                        {post.content && <p className='mb-4 whitespace-pre-line text-sm leading-7 text-slate-700'>{post.content}</p>}
+                        {post.video_url && <video src={post.video_url} controls className='mb-4 w-full max-h-64 rounded-2xl bg-black object-contain' />}
+                        {post.image_urls?.length > 0 && (
+                            <div className={`grid gap-2 ${post.image_urls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                                 {post.image_urls.map((img, idx) => (
-                                    <img key={idx} src={img} alt="" className='w-full h-auto max-h-64 object-cover rounded-lg' />
+                                    <img key={idx} src={img} alt='' className='max-h-64 w-full rounded-2xl object-cover' />
                                 ))}
                             </div>
                         )}
-                    </div>
+                    </aside>
 
-                    {/* Comments Section - Right Side (60%) */}
-                    <div className='w-full md:w-3/5 flex flex-col min-h-0'>
-                        {/* Comments List */}
-                        <div className='flex-1 overflow-y-auto px-6 py-4' ref={commentsRef} onScroll={handleCommentsScroll}>
+                    <section className='flex min-h-0 flex-1 flex-col'>
+                        <div className='flex-1 overflow-y-auto px-5 py-5' onScroll={handleCommentsScroll}>
                             {isLoadingComments ? (
-                                <div className='flex justify-center items-center h-32'>
-                                    <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600'></div>
+                                <div className='flex h-48 items-center justify-center'>
+                                    <div className='h-8 w-8 animate-spin rounded-full border-3 border-cyan-600 border-t-transparent'/>
                                 </div>
                             ) : comments.length === 0 ? (
-                                <p className='text-center text-gray-500 py-8 text-sm'>Chưa có bình luận. Hãy là người đầu tiên!</p>
+                                <div className='flex min-h-72 flex-col items-center justify-center rounded-3xl bg-slate-50 text-center'>
+                                    <MessageCircle className='mb-3 size-10 text-slate-300'/>
+                                    <p className='text-sm font-bold text-slate-500'>Chưa có bình luận. Hãy là người đầu tiên!</p>
+                                </div>
                             ) : (
                                 <div className='space-y-4'>
                                     {comments.map((comment) => (
-                                        <div key={comment._id}>
+                                        <div key={comment._id} className='space-y-3'>
                                             <CommentItem comment={comment} />
 
-                                            {/* Reply Input */}
                                             {replyCommentId === comment._id && (
-                                                <form onSubmit={(e) => handleAddReply(e, comment._id)} className='mt-3 ml-6 border-l-2 border-indigo-200 pl-4'>
-                                                    <div className='flex gap-2'>
-                                                        <img src={currentUser?.profile_picture} alt="" className='w-8 h-8 rounded-full flex-shrink-0' />
-                                                        <div className='flex-1'>
-                                                            <textarea
-                                                                value={replyText}
-                                                                onChange={(e) => setReplyText(e.target.value)}
-                                                                placeholder='Viết phản hồi...'
-                                                                className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none text-sm'
-                                                                rows="2"
-                                                                disabled={isLoading}
-                                                            />
-                                                            <div className='flex justify-end gap-2 mt-2'>
-                                                                <button
-                                                                    type='button'
-                                                                    onClick={() => {
-                                                                        setReplyCommentId(null)
-                                                                        setReplyText('')
-                                                                    }}
-                                                                    className='px-3 py-1 text-gray-600 rounded hover:bg-gray-100 text-xs'
-                                                                >
-                                                                    Huỷ bỏ
-                                                                </button>
-                                                                <button
-                                                                    type='submit'
-                                                                    disabled={isLoading || !replyText.trim()}
-                                                                    className='px-3 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50'
-                                                                >
-                                                                    {isLoading ? 'Đang phản hồi...' : 'Phản hồi'}
-                                                                </button>
-                                                            </div>
-                                                        </div>
+                                                <form onSubmit={(e) => handleAddReply(e, comment._id)} className='ml-8 rounded-2xl border border-cyan-100 bg-cyan-50/70 p-3'>
+                                                    <textarea
+                                                        value={replyText}
+                                                        onChange={(e) => setReplyText(e.target.value)}
+                                                        placeholder='Viết phản hồi...'
+                                                        className='input-modern min-h-20 resize-none px-4 py-3 text-sm'
+                                                        disabled={isLoading}
+                                                    />
+                                                    <div className='mt-2 flex justify-end gap-2'>
+                                                        <button type='button' onClick={() => { setReplyCommentId(null); setReplyText('') }} className='btn-muted px-4 py-2 text-xs cursor-pointer'>Hủy</button>
+                                                        <button type='submit' disabled={isLoading || !replyText.trim()} className='btn-primary px-4 py-2 text-xs disabled:opacity-50 cursor-pointer'>Phản hồi</button>
                                                     </div>
                                                 </form>
                                             )}
 
-                                            {/* Replies Section */}
-                                            {comment.replies && comment.replies.length > 0 && (
-                                                <div className='mt-3 ml-6 border-l-2 border-gray-200 pl-4'>
-                                                    <button
-                                                        onClick={() => toggleReplies(comment._id)}
-                                                        className='flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 mb-3'
-                                                    >
-                                                        {expandedReplies[comment._id] ? (
-                                                            <>
-                                                                <ChevronUp className='w-4 h-4' />
-                                                                Ẩn phản hồi ({comment.replies.length})
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <ChevronDown className='w-4 h-4' />
-                                                                Hiện phản hồi ({comment.replies.length})
-                                                            </>
-                                                        )}
+                                            {comment.replies?.length > 0 && (
+                                                <div className='ml-8'>
+                                                    <button onClick={() => toggleReplies(comment._id)} className='mb-3 flex items-center gap-1 text-xs font-bold text-cyan-700 hover:text-cyan-800 cursor-pointer'>
+                                                        {expandedReplies[comment._id] ? <ChevronUp className='size-4' /> : <ChevronDown className='size-4' />}
+                                                        {expandedReplies[comment._id] ? 'Ẩn' : 'Hiện'} phản hồi ({comment.replies.length})
                                                     </button>
-
                                                     {expandedReplies[comment._id] && replies[comment._id] && (
                                                         <div className='space-y-3'>
                                                             {replies[comment._id].map((reply) => (
-                                                                <CommentItem key={reply._id} comment={reply} isReply={true} />
+                                                                <CommentItem key={reply._id} comment={reply} isReply={true} parentCommentId={comment._id} />
                                                             ))}
                                                         </div>
                                                     )}
@@ -595,52 +421,41 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
 
                                     {isLoadingMore && (
                                         <div className='flex justify-center py-4'>
-                                            <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600'></div>
+                                            <div className='h-6 w-6 animate-spin rounded-full border-2 border-cyan-600 border-t-transparent'/>
                                         </div>
                                     )}
                                 </div>
                             )}
                         </div>
 
-                        {/* Comment Input */}
-                        <div className='border-t border-gray-200 p-4 flex-shrink-0'>
-                            <form onSubmit={handleAddComment} className='flex gap-3'>
-                                <img
-                                    src={currentUser?.profile_picture}
-                                    alt=""
-                                    className='w-8 h-8 rounded-full flex-shrink-0'
-                                />
+                        <form onSubmit={handleAddComment} className='border-t border-slate-200 bg-slate-50/80 p-4'>
+                            <div className='flex gap-3'>
+                                <img src={currentUser?.profile_picture} alt='' className='size-10 rounded-full object-cover avatar-ring'/>
                                 <div className='flex-1'>
                                     <textarea
                                         value={newComment}
                                         onChange={(e) => setNewComment(e.target.value)}
                                         placeholder='Thêm bình luận...'
-                                        className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 resize-none text-sm'
-                                        rows="2"
+                                        className='input-modern min-h-20 resize-none px-4 py-3 text-sm'
                                         disabled={isLoading}
                                     />
-                                    <div className='flex justify-end mt-2'>
-                                        <button
-                                            type='submit'
-                                            disabled={isLoading || !newComment.trim()}
-                                            className='px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium'
-                                        >
-                                            {isLoading ? 'Đang gửi...' : 'Gửi'}
+                                    <div className='mt-2 flex justify-end'>
+                                        <button type='submit' disabled={isLoading || !newComment.trim()} className='btn-primary px-5 py-2.5 text-sm disabled:opacity-50 cursor-pointer'>
+                                            <SendHorizonal className='size-4'/>
+                                            Gửi
                                         </button>
                                     </div>
                                 </div>
-                            </form>
-                        </div>
-                    </div>
+                            </div>
+                        </form>
+                    </section>
                 </div>
             </div>
 
             <ConfirmDialog
                 isOpen={!!deleteTarget}
-                title={deleteTarget?.type === 'reply' ? 'Xoá phản hồi' : 'Xoá bình luận'}
-                message={deleteTarget?.type === 'reply'
-                    ? 'Bạn có chắc chắn muốn xóa phản hồi này? Hành động này không thể hoàn tác.'
-                    : 'Bạn có chắc chắn muốn xóa bình luận này? Hành động này không thể hoàn tác.'}
+                title={deleteTarget?.type === 'reply' ? 'Xóa phản hồi' : 'Xóa bình luận'}
+                message='Bạn có chắc chắn muốn xóa nội dung này? Hành động này không thể hoàn tác.'
                 isDangerous={true}
                 isLoading={isLoading}
                 onConfirm={handleConfirmDelete}
@@ -652,7 +467,8 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 onClose={() => setShowReactionListMsg(null)}
                 reactions={showReactionListMsg?.reactions || []}
             />
-        </div>
+        </div>,
+        document.body
     )
 }
 

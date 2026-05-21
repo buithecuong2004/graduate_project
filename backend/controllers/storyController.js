@@ -5,6 +5,7 @@ import User from "../models/User.js"
 import Message from "../models/Message.js"
 import { inngest } from "../inngest/index.js"
 import axios from "axios"
+import { getUniqueNotificationRecipientIds } from "../utils/notificationRecipients.js"
 
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
@@ -72,20 +73,8 @@ export const addUserStory = async (req, res) => {
             background_color
         })
 
-        await inngest.send({
-            name: 'app/story.delete',
-            data: {storyId: story._id}
-        })
-
-        res.json({success: true, message: 'Story created successfully'})
-
-        // Send new story notification to all followers/connections via socket
         const storyUser = await User.findById(userId)
-        const followersFollowing = [...new Set([
-            ...(storyUser.followers || []),
-            ...(storyUser.following || []),
-            ...(storyUser.connections || [])
-        ])]
+        const recipientIds = getUniqueNotificationRecipientIds(storyUser, userId)
         const storyWithUser = {
             ...story.toObject(),
             user: storyUser
@@ -108,6 +97,7 @@ export const addUserStory = async (req, res) => {
                 createdAt: story.createdAt
             }
             const newStoryNotification = {
+                id: `new_story:${story._id}`,
                 type: 'new_story',
                 data: {
                     story_id: story._id,
@@ -116,14 +106,22 @@ export const addUserStory = async (req, res) => {
                 }
             }
 
-            // Only send notification to followers/connections, not to the story creator
-            followersFollowing.forEach(followerId => {
-                if(followerId !== userId) {
-                    console.log('📖 Sending new story notification to:', followerId, 'from:', storyUser.full_name)
-                    io.to(`user-${followerId}`).emit('new-story', newStoryNotification)
-                }
+            recipientIds.forEach(recipientId => {
+                console.log('📖 Sending new story notification to:', recipientId, 'from:', storyUser.full_name)
+                io.to(`user-${recipientId}`).emit('new-story', newStoryNotification)
             })
         }
+
+        try {
+            await inngest.send({
+                name: 'app/story.delete',
+                data: {storyId: story._id}
+            })
+        } catch (inngestError) {
+            console.log('Inngest story delete schedule error:', inngestError.message)
+        }
+
+        res.json({success: true, message: 'Story created successfully', story: storyWithUser})
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -183,7 +181,7 @@ export const deleteStory = async (req, res) => {
             return res.json({ success: false, message: 'Story not found' })
         }
 
-        if (story.user !== userId) {
+        if (story.user.toString() !== userId) {
             return res.json({ success: false, message: 'You can only delete your own stories' })
         }
 

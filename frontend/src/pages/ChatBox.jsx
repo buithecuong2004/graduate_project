@@ -12,9 +12,10 @@ import Loading from '../components/Loading'
 import moment from '../utils/moment'
 import ChatMediaViewer from '../components/ChatMediaViewer'
 import { SmilePlus } from 'lucide-react'
-import ReactionPicker, { REACTION_ICONS } from '../components/ReactionPicker'
+import ReactionPicker from '../components/ReactionPicker'
 import ReactionListModal from '../components/ReactionListModal'
 import localizeMessage from '../utils/localization'
+import { REACTION_ICONS } from '../utils/reactions'
 
 const ChatBox = ({ onStartCall }) => {
 
@@ -76,7 +77,7 @@ const ChatBox = ({ onStartCall }) => {
       } else {
         toast.error('Tin không còn khả dụng')
       }
-    } catch (e) {
+    } catch {
       toast.error('Không thể tải tin')
     }
   }
@@ -110,6 +111,44 @@ const ChatBox = ({ onStartCall }) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0')
     const s = (seconds % 60).toString().padStart(2, '0')
     return `${m}:${s}`
+  }
+
+  const getSupportedAudioMimeType = () => {
+    if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return ''
+
+    return [
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/mp4',
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+      'audio/wav'
+    ].find(type => MediaRecorder.isTypeSupported(type)) || ''
+  }
+
+  const getAudioExtension = (mimeType = '') => {
+    const baseType = mimeType.split(';')[0].toLowerCase()
+    if (baseType === 'audio/mp4') return 'm4a'
+    if (baseType === 'audio/ogg') return 'ogg'
+    if (baseType === 'audio/wav' || baseType === 'audio/wave' || baseType === 'audio/x-wav') return 'wav'
+    if (baseType === 'audio/mpeg') return 'mp3'
+    if (baseType === 'audio/aac') return 'aac'
+    return 'webm'
+  }
+
+  const getAudioSourceType = (url = '') => {
+    const cleanUrl = url.split('?')[0].toLowerCase()
+    if (cleanUrl.endsWith('.m4a') || cleanUrl.endsWith('.mp4')) return 'audio/mp4'
+    if (cleanUrl.endsWith('.ogg') || cleanUrl.endsWith('.oga')) return 'audio/ogg'
+    if (cleanUrl.endsWith('.wav')) return 'audio/wav'
+    if (cleanUrl.endsWith('.mp3')) return 'audio/mpeg'
+    if (cleanUrl.endsWith('.aac')) return 'audio/aac'
+    return 'audio/webm'
+  }
+
+  const stopAudioControlEvent = (event) => {
+    event.stopPropagation()
   }
 
   const renderMessageText = (text) => {
@@ -213,14 +252,14 @@ const ChatBox = ({ onStartCall }) => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
       audioChunksRef.current = []
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      const mimeType = getSupportedAudioMimeType()
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
       mediaRecorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: mimeType })
+        const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || mimeType || 'audio/webm' })
         setAudioBlob(blob)
         setAudioPreviewUrl(URL.createObjectURL(blob))
         stream.getTracks().forEach(t => t.stop())
@@ -229,7 +268,7 @@ const ChatBox = ({ onStartCall }) => {
       setIsRecording(true)
       setRecordingTime(0)
       timerRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000)
-    } catch (err) {
+    } catch {
       toast.error('Truy cập micro bị từ chối. Vui lòng cấp quyền sử dụng micro.')
     }
   }
@@ -257,7 +296,7 @@ const ChatBox = ({ onStartCall }) => {
       const token = await getToken()
       const formData = new FormData()
       formData.append('to_user_id', userId)
-      const ext = audioBlob.type.includes('ogg') ? 'ogg' : 'webm'
+      const ext = getAudioExtension(audioBlob.type)
       formData.append('voice', audioBlob, `voice_${Date.now()}.${ext}`)
       const { data } = await api.post('/api/message/send', formData, { headers: { Authorization: `Bearer ${token}` } })
       if (data.success) {
@@ -516,13 +555,13 @@ const ChatBox = ({ onStartCall }) => {
   }
 
   return user && (
-    <div className='flex flex-col h-screen'>
+    <div className='flex h-screen flex-col bg-slate-100'>
       {/* ── Header ── */}
-      <div className='flex items-center pl-8 pr-4 pt-2 pb-2 bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 shadow-sm'>
-        <img src={user.profile_picture} alt="" className='size-10 rounded-full shadow-sm' />
+      <div className='surface m-3 mb-0 flex items-center rounded-[1.4rem] px-4 py-3'>
+        <img src={user.profile_picture} alt="" className='size-11 rounded-full object-cover avatar-ring' />
         <div className='ml-4 flex-1'>
-          <p className='font-semibold text-slate-800'>{user.full_name}</p>
-          <p className='text-sm text-gray-500'>@{user.username}</p>
+          <p className='font-black text-slate-900'>{user.full_name}</p>
+          <p className='text-sm text-slate-500'>@{user.username}</p>
         </div>
         {/* Call buttons */}
         <div className='flex items-center gap-1'>
@@ -530,7 +569,7 @@ const ChatBox = ({ onStartCall }) => {
             id='voice-call-btn'
             onClick={() => startCall('voice')}
             title='Gọi thoại'
-            className='p-2 rounded-full hover:bg-indigo-100 text-indigo-500 transition-colors'
+            className='p-2 rounded-full hover:bg-cyan-50 text-cyan-700 transition-colors cursor-pointer'
           >
             <Phone size={20} />
           </button>
@@ -538,7 +577,7 @@ const ChatBox = ({ onStartCall }) => {
             id='video-call-btn'
             onClick={() => startCall('video')}
             title='Gọi video'
-            className='p-2 rounded-full hover:bg-indigo-100 text-indigo-500 transition-colors'
+            className='p-2 rounded-full hover:bg-cyan-50 text-cyan-700 transition-colors cursor-pointer'
           >
             <VideoIcon size={20} />
           </button>
@@ -547,7 +586,7 @@ const ChatBox = ({ onStartCall }) => {
 
       {/* ── Messages area ── */}
       <div
-        className='px-3 md:px-6 h-full overflow-y-scroll bg-gray-50'
+        className='px-3 md:px-6 h-full overflow-y-scroll bg-[radial-gradient(circle_at_top,rgba(6,182,212,0.08),transparent_30rem),#f8fafc]'
         ref={messagesContainerRef}
         onScroll={() => {
           if (messagesContainerRef.current) {
@@ -556,7 +595,7 @@ const ChatBox = ({ onStartCall }) => {
           }
         }}
       >
-        <div className='space-y-2 py-4' onClick={() => setOpenMenuId(null)}>
+        <div className='mx-auto max-w-4xl space-y-2 py-5' onClick={() => setOpenMenuId(null)}>
           {messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).map((message, index) => {
             if (message.message_type === 'reaction') return null;
 
@@ -649,7 +688,7 @@ const ChatBox = ({ onStartCall }) => {
               `}>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleReply(message) }}
-                  className='p-1 text-gray-400 hover:text-indigo-500 transition-colors'
+                  className='p-1 text-gray-400 hover:text-cyan-600 transition-colors'
                   title='Trả lời'
                 >
                   <Reply size={15} />
@@ -657,7 +696,7 @@ const ChatBox = ({ onStartCall }) => {
                 <div className='relative'>
                   <button
                     onClick={(e) => { e.stopPropagation(); setReactionMenuId(reactionMenuOpen ? null : message._id); setOpenMenuId(null) }}
-                    className='p-1 text-gray-400 hover:text-indigo-500 transition-colors'
+                    className='p-1 text-gray-400 hover:text-cyan-600 transition-colors'
                     title='Bày tỏ cảm xúc'
                   >
                     <SmilePlus size={15} />
@@ -671,7 +710,7 @@ const ChatBox = ({ onStartCall }) => {
                 <div className='relative'>
                   <button
                     onClick={(e) => { e.stopPropagation(); setOpenMenuId(menuOpen ? null : message._id) }}
-                    className='p-1 text-gray-400 hover:text-indigo-500 transition-colors'
+                    className='p-1 text-gray-400 hover:text-cyan-600 transition-colors'
                   >
                     <MoreVertical size={15} />
                   </button>
@@ -734,17 +773,17 @@ const ChatBox = ({ onStartCall }) => {
                     <div className={`
                     p-3 text-sm
                     max-w-[70vw] md:max-w-lg lg:max-w-xl
-                    rounded-2xl shadow-sm
+                    rounded-[1.25rem] shadow-sm
                     ${message.is_deleted
-                        ? 'bg-gray-100 text-gray-400 italic border border-dashed border-gray-300 rounded-br-none'
+                        ? 'bg-slate-100 text-slate-400 italic border border-dashed border-slate-300 rounded-br-none'
                         : isOwn
-                          ? 'bg-indigo-500 text-white rounded-br-none'
-                          : 'bg-white text-slate-800 rounded-bl-none border border-gray-200'
+                          ? 'bg-cyan-700 text-white rounded-br-none shadow-cyan-700/10'
+                          : 'bg-white text-slate-800 rounded-bl-none border border-slate-200'
                       }
                   `}>
                       {/* Forward label */}
                       {message.is_forwarded && !message.is_deleted && message.forwarded_type !== 'story' && (
-                        <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
+                        <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-cyan-100' : 'text-slate-400'}`}>
                           <CornerUpRight size={10} /> Đã chuyển tiếp
                         </p>
                       )}
@@ -752,7 +791,7 @@ const ChatBox = ({ onStartCall }) => {
                       {/* ── Reply quote — click scrolls to original ── */}
                       {message.reply_to && !message.is_deleted && (
                         <div
-                          className={`text-xs mb-2 px-2 py-1 rounded-lg border-l-2 cursor-pointer transition-opacity hover:opacity-80 ${isOwn ? 'bg-indigo-400/40 border-indigo-200 text-indigo-100' : 'bg-gray-100 border-indigo-400 text-gray-600'}`}
+                          className={`text-xs mb-2 px-2 py-1 rounded-lg border-l-2 cursor-pointer transition-opacity hover:opacity-80 ${isOwn ? 'bg-cyan-600/50 border-cyan-100 text-cyan-50' : 'bg-slate-100 border-cyan-400 text-slate-600'}`}
                           onClick={(e) => { e.stopPropagation(); scrollToMessage(message.reply_to._id) }}
                         >
                           <p className='font-semibold text-[10px] mb-0.5'>
@@ -779,18 +818,18 @@ const ChatBox = ({ onStartCall }) => {
                             ) : mediaUrls[0] ? (
                               <img src={mediaUrls[0]} className='w-full h-full object-cover group-hover:brightness-90 transition' />
                             ) : (
-                              <div className='w-full h-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center'>
+                              <div className='w-full h-full bg-gradient-to-tr from-cyan-600 to-teal-600 flex items-center justify-center'>
                                 <span className='text-white text-xs font-bold'>Aa</span>
                               </div>
                             )}
                           </div>
                           <div className='flex-1 flex flex-col justify-center min-w-[120px]'>
-                            <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}>
+                            <p className={`text-[10px] mb-1 flex items-center gap-1 ${isOwn ? 'text-cyan-100' : 'text-gray-400'}`}>
                               <CornerUpRight size={10} /> Đã trả lời tin
                             </p>
                             {message.text && renderMessageText(message.text)}
                             {message.is_edited && (
-                              <span className={`text-[10px] mt-1 ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · đã sửa</span>
+                              <span className={`text-[10px] mt-1 ${isOwn ? 'text-cyan-100' : 'text-gray-400'}`}> · đã sửa</span>
                             )}
                           </div>
                         </div>
@@ -799,7 +838,17 @@ const ChatBox = ({ onStartCall }) => {
                           {isVoice && mediaUrls.length > 0 && (
                             <div className='flex items-center gap-2 min-w-[200px]'>
                               <span className='text-lg'>🎤</span>
-                              <audio controls src={mediaUrls[0]} className='h-8 w-full max-w-[220px]' style={{ accentColor: isOwn ? '#fff' : '#6366f1' }} />
+                              <audio
+                                controls
+                                preload='metadata'
+                                className='h-8 w-full max-w-[220px]'
+                                style={{ accentColor: isOwn ? '#fff' : '#6366f1' }}
+                                onClick={stopAudioControlEvent}
+                                onPointerDown={stopAudioControlEvent}
+                                onTouchStart={stopAudioControlEvent}
+                              >
+                                <source src={mediaUrls[0]} type={getAudioSourceType(mediaUrls[0])} />
+                              </audio>
                             </div>
                           )}
                           {!isVoice && mediaUrls.length > 0 && (
@@ -823,7 +872,7 @@ const ChatBox = ({ onStartCall }) => {
                           )}
                           {message.text && renderMessageText(message.text)}
                           {message.is_edited && (
-                            <span className={`text-[10px] ${isOwn ? 'text-indigo-200' : 'text-gray-400'}`}> · đã sửa</span>
+                            <span className={`text-[10px] ${isOwn ? 'text-cyan-100' : 'text-gray-400'}`}> · đã sửa</span>
                           )}
                         </>
                       )}
@@ -858,7 +907,7 @@ const ChatBox = ({ onStartCall }) => {
       </div>
 
       {/* ── Input area ── */}
-      <div className='px-4 pb-5'>
+      <div className='px-4 pb-5 pt-2 bg-slate-100'>
         {/* Media previews */}
         {(imagePreviews.length > 0 || videoPreviews.length > 0) && (
           <div className='flex flex-wrap gap-2 mb-3 p-3 bg-white rounded-lg border border-gray-200 max-w-4xl mx-auto'>
@@ -878,13 +927,13 @@ const ChatBox = ({ onStartCall }) => {
                 </button>
               </div>
             ))}
-            <p className='text-xs text-gray-500 w-full'>({images.length}/5 images, {videos.length}/3 videos)</p>
+            <p className='text-xs text-gray-500 w-full'>({images.length}/5 ảnh, {videos.length}/3 video)</p>
           </div>
         )}
 
         {/* Voice recording panel */}
         {(isRecording || audioBlob) && (
-          <div className='flex items-center gap-3 mb-3 px-4 py-3 bg-white rounded-2xl border border-indigo-200 shadow-sm max-w-2xl mx-auto'>
+          <div className='surface flex items-center gap-3 mb-3 px-4 py-3 rounded-2xl max-w-2xl mx-auto'>
             {isRecording ? (
               <>
                 <span className='relative flex h-3 w-3'>
@@ -894,7 +943,7 @@ const ChatBox = ({ onStartCall }) => {
                 <span className='text-red-500 font-mono text-sm font-semibold flex-1'>
                   Đang ghi âm... {formatTime(recordingTime)}
                 </span>
-                <button onClick={stopRecording} className='flex items-center gap-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-medium transition'>
+                <button onClick={stopRecording} className='flex items-center gap-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 px-3 py-1.5 rounded-full text-xs font-medium transition'>
                   <Square size={12} fill='currentColor' /> Dừng
                 </button>
                 <button onClick={cancelRecording} className='flex items-center gap-1 text-gray-400 hover:text-red-500 px-2 py-1.5 rounded-full text-xs transition'>
@@ -903,11 +952,18 @@ const ChatBox = ({ onStartCall }) => {
               </>
             ) : (
               <>
-                <span className='text-indigo-500 text-lg'>🎤</span>
-                <audio controls src={audioPreviewUrl} className='h-8 flex-1' />
+                <span className='text-cyan-600 text-lg'>🎤</span>
+                <audio
+                  controls
+                  src={audioPreviewUrl}
+                  className='h-8 flex-1'
+                  onClick={stopAudioControlEvent}
+                  onPointerDown={stopAudioControlEvent}
+                  onTouchStart={stopAudioControlEvent}
+                />
                 <span className='text-xs text-gray-400 font-mono'>{formatTime(recordingTime)}</span>
                 <button onClick={sendVoiceMessage} disabled={isSendingVoice}
-                  className='bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-60 text-white px-4 py-1.5 rounded-full text-xs font-medium transition flex items-center gap-1'>
+                  className='btn-primary disabled:opacity-60 px-4 py-1.5 text-xs transition flex items-center gap-1'>
                   {isSendingVoice
                     ? <span className='animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full'></span>
                     : <SendHorizonal size={14} />}
@@ -932,10 +988,10 @@ const ChatBox = ({ onStartCall }) => {
 
         {/* Reply bar */}
         {replyingTo && (
-          <div className='flex items-center gap-2 mb-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl max-w-2xl mx-auto'>
-            <Reply size={14} className='text-indigo-400 shrink-0' />
+          <div className='flex items-center gap-2 mb-2 px-4 py-2 bg-cyan-50 border border-cyan-100 rounded-xl max-w-2xl mx-auto'>
+            <Reply size={14} className='text-cyan-500 shrink-0' />
             <div className='flex-1 min-w-0'>
-              <p className='text-[10px] font-semibold text-indigo-600'>
+              <p className='text-[10px] font-semibold text-cyan-700'>
                 {replyingTo.from_user_id?._id === currentUser._id ? 'Bạn' : replyingTo.from_user_id?.full_name}
               </p>
               <p className='text-xs text-gray-500 truncate'>{getReplyLabel(replyingTo)}</p>
@@ -945,7 +1001,7 @@ const ChatBox = ({ onStartCall }) => {
         )}
 
         {/* Main input bar */}
-        <div className='flex items-center gap-3 pl-5 p-1.5 bg-white w-full max-w-2xl mx-auto border border-gray-200 shadow-sm rounded-full'>
+        <div className='surface flex items-center gap-3 pl-5 p-2 w-full max-w-2xl mx-auto rounded-full'>
           <input
             type="text"
             className='flex-1 outline-none text-slate-700 bg-transparent'
@@ -954,25 +1010,34 @@ const ChatBox = ({ onStartCall }) => {
             onChange={(e) => { setText(e.target.value); if (editingMsg) setEditText(e.target.value) }}
             value={text}
           />
-          <label htmlFor="images" className='cursor-pointer'>
+          <label htmlFor="images" className='group relative cursor-pointer'>
             <ImageIcon className='size-6 text-gray-400 hover:text-gray-600 transition' />
+            <span className='pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
+              Thêm ảnh
+            </span>
             <input type="file" id='images' accept='image/*' hidden multiple onChange={handleImagesChange} />
           </label>
-          <label htmlFor="videos" className='cursor-pointer'>
+          <label htmlFor="videos" className='group relative cursor-pointer'>
             <Video className='size-6 text-gray-400 hover:text-gray-600 transition' />
+            <span className='pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
+              Thêm video
+            </span>
             <input type="file" id='videos' accept='video/*' hidden multiple onChange={handleVideosChange} />
           </label>
           <button
             onClick={isRecording ? stopRecording : startRecording}
             disabled={!!audioBlob}
-            className={`cursor-pointer transition p-1 rounded-full ${isRecording ? 'text-red-500 animate-pulse' : audioBlob ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-indigo-500'}`}
+            className={`group relative cursor-pointer transition p-1 rounded-full ${isRecording ? 'text-red-500 animate-pulse' : audioBlob ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-cyan-600'}`}
             title={isRecording ? 'Dừng ghi âm' : 'Bắt đầu ghi âm'}
           >
             <Mic size={22} />
+            <span className='pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
+              {isRecording ? 'Dừng ghi âm' : audioBlob ? 'Đã có ghi âm' : 'Ghi âm'}
+            </span>
           </button>
           <button
             onClick={editingMsg ? handleEditSave : sendMessage}
-            className='bg-linear-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-95 cursor-pointer text-white p-2 rounded-full transition'
+            className='btn-primary p-2 cursor-pointer'
           >
             {editingMsg ? <Check size={18} /> : <SendHorizonal size={18} />}
           </button>
@@ -1031,7 +1096,7 @@ const ChatBox = ({ onStartCall }) => {
               <button
                 onClick={handleForwardSend}
                 disabled={forwardSelected.length === 0}
-                className='flex-1 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-medium transition disabled:opacity-50'
+                className='flex-1 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-medium transition disabled:opacity-50'
               >
                 Gửi ({forwardSelected.length})
               </button>

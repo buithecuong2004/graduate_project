@@ -70,7 +70,6 @@ const AppInner = () => {
         socketRef.current = socket
 
         socket.on('connect', () => {
-          console.log('🔌 Socket connected:', socket.id)
           socket.emit('user-connect', currentUser._id)
         })
 
@@ -101,7 +100,6 @@ const AppInner = () => {
 
         // ── Incoming Call ─────────────────────────────────────────────
         socket.on('incoming-call', (data) => {
-          console.log('📞 Incoming call:', data)
           if (activeCallRef.current) return
           setIncomingCall(data)
         })
@@ -111,52 +109,42 @@ const AppInner = () => {
 
         // Listen for friend requests
         socket.on('friend-request', (notification) => {
-          console.log('🤝 Friend request received:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('connection-accepted', (notification) => {
-          console.log('✅ Connection accepted:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-story', (notification) => {
-          console.log('📖 New story received:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-post-notification', (notification) => {
-          console.log('📝 New post notification:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-comment-notification', (notification) => {
-          console.log('💬 New comment notification:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-reply-notification', (notification) => {
-          console.log('💬 New reply notification:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-like-notification', (notification) => {
-          console.log('👍 New like notification:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-reaction-notification', (notification) => {
-          console.log('😮 New reaction notification:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-message-reaction-notification', (notification) => {
-          console.log('😮 New message reaction notification:', notification)
           dispatch(addNotification(notification))
         })
 
         socket.on('new-story-reaction-notification', (notification) => {
-          console.log('😮 New story reaction notification:', notification)
           dispatch(addNotification(notification))
         })
 

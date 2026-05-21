@@ -11,12 +11,15 @@ import localizeMessage from '../utils/localization'
 import ConfirmDialog from './ConfirmDialog'
 import CommentModal from './CommentModal'
 import ShareModal from './ShareModal'
-import ReactionPicker, { REACTION_ICONS, REACTION_LABELS } from './ReactionPicker'
+import ReactionPicker from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
+import { REACTION_ICONS, REACTION_LABELS } from '../utils/reactions'
+
+const withHashtags = (content = '') => content.replace(/(#\w+)/g, '<span class="text-cyan-700 font-semibold">$1</span>')
 
 const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) => {
 
-    const postWithHashtags = post.content.replace(/(#\w+)/g, '<span class="text-indigo-600">$1</span>')
+    const postWithHashtags = withHashtags(post.content)
     const [likes, setLikes] = useState(Array.isArray(post.likes_count) ? post.likes_count : [])
     const [reactions, setReactions] = useState(post.reactions || [])
     const [shares, setShares] = useState(post.shares_count || [])
@@ -27,10 +30,9 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     const [showReactionList, setShowReactionList] = useState(false)
 
     useEffect(() => {
-        if (autoOpenComments) {
-            setShowCommentModal(true)
-        }
+        if (autoOpenComments) setShowCommentModal(true)
     }, [autoOpenComments])
+
     const commentCount = post.total_comments_count ?? post.comments?.length ?? 0
     const currentUser = useSelector((state) => state.user.value)
     const dispatch = useDispatch()
@@ -38,21 +40,6 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     const { getToken } = useAuth()
     const navigate = useNavigate()
     const isOwner = post.user._id === currentUser._id
-
-    const handleLike = async () => {
-        try {
-            const { data } = await api.post('/api/post/like', { postId: post._id }, { headers: { Authorization: `Bearer ${await getToken()}` } })
-            if (data.success) {
-                // If it's a simple like, we still call the backend like API for legacy, 
-                // but we also can just call reactPost with 'like'
-                handleReact('like');
-            } else {
-                toast(localizeMessage(data.message))
-            }
-        } catch (error) {
-            toast.error(localizeMessage(error.message))
-        }
-    }
 
     const handleReact = async (reactionType) => {
         try {
@@ -68,38 +55,31 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
         }
     }
 
-    // Reaction summary calculation
     const reactionCounts = reactions.reduce((acc, r) => {
-        acc[r.type] = (acc[r.type] || 0) + 1;
-        return acc;
-    }, {});
+        acc[r.type] = (acc[r.type] || 0) + 1
+        return acc
+    }, {})
 
-    // Add old likes to 'like' count if they aren't already in reactions
-    let oldLikesCount = 0;
+    let oldLikesCount = 0
     if (likes && likes.length > 0) {
-        const usersInReactions = new Set(reactions.map(r => r.user?._id || r.user));
-        oldLikesCount = likes.filter(userId => !usersInReactions.has(userId)).length;
-        if (oldLikesCount > 0) {
-            reactionCounts['like'] = (reactionCounts['like'] || 0) + oldLikesCount;
-        }
+        const usersInReactions = new Set(reactions.map(r => r.user?._id || r.user))
+        oldLikesCount = likes.filter(userId => !usersInReactions.has(userId)).length
+        if (oldLikesCount > 0) reactionCounts.like = (reactionCounts.like || 0) + oldLikesCount
     }
 
-    // Get top 3 reactions for icons
     const topReactions = Object.entries(reactionCounts)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
-        .map(entry => entry[0]);
+        .map(entry => entry[0])
 
-    const totalReactions = reactions.length + oldLikesCount;
+    const totalReactions = reactions.length + oldLikesCount
 
-    // Check if current user reacted (from new reactions array)
     const currentUserReactionObj = reactions.find(r =>
         (r.user?._id || r.user) === currentUser._id
-    );
-    // If not in reactions array, fallback to old likes array
+    )
     const currentUserReaction = currentUserReactionObj
         ? currentUserReactionObj.type
-        : (likes.includes(currentUser._id) ? 'like' : null);
+        : (likes.includes(currentUser._id) ? 'like' : null)
 
     const handleDelete = async () => {
         try {
@@ -122,28 +102,24 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
         }
     }
 
-    const handleDeleteClick = () => {
-        setShowDeleteConfirm(true)
-    }
-
     return (
-        <div className='bg-white rounded-xl shadow p-4 space-y-4 w-full max-w-2xl'>
+        <article className='surface w-full max-w-2xl rounded-[1.6rem] p-4 space-y-4 sm:p-5'>
             <div className='flex items-center justify-between'>
-                <div onClick={() => navigate('/profile/' + post.user._id)} className='inline-flex items-center gap-3 cursor-pointer'>
-                    <img src={post.user.profile_picture} alt="" className='w-10 h-10 rounded-full shadow' />
-                    <div>
-                        <div className='flex items-center space-x-1'>
-                            <span>{post.user.full_name}</span>
-                            <BadgeCheck className='w-4 h-4 text-blue-500' />
+                <div onClick={() => navigate('/profile/' + post.user._id)} className='inline-flex min-w-0 items-center gap-3 cursor-pointer'>
+                    <img src={post.user.profile_picture} alt='' className='w-11 h-11 rounded-full object-cover avatar-ring' />
+                    <div className='min-w-0'>
+                        <div className='flex items-center gap-1'>
+                            <span className='truncate font-bold text-slate-950'>{post.user.full_name}</span>
+                            <BadgeCheck className='w-4 h-4 text-cyan-500 shrink-0' />
                         </div>
-                        <div className='text-gray-500 text-sm'>@{post.user.username} ● {moment(post.createdAt).fromNow()}</div>
+                        <div className='text-slate-500 text-sm truncate'>@{post.user.username} · {moment(post.createdAt).fromNow()}</div>
                     </div>
                 </div>
                 {isOwner && (
                     <button
-                        onClick={handleDeleteClick}
+                        onClick={() => setShowDeleteConfirm(true)}
                         disabled={isDeleting}
-                        className='text-gray-400 hover:text-red-500 transition disabled:opacity-50'
+                        className='text-slate-400 hover:text-red-500 transition disabled:opacity-50 cursor-pointer'
                         title='Xóa bài viết'
                     >
                         <Trash2 className='w-5 h-5' />
@@ -151,104 +127,94 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                 )}
             </div>
 
-            {post.content && <div className='text-gray-800 text-sm whitespace-pre-line' dangerouslySetInnerHTML={{ __html: postWithHashtags }} />}
+            {post.content && <div className='text-slate-800 text-[15px] leading-7 whitespace-pre-line' dangerouslySetInnerHTML={{ __html: postWithHashtags }} />}
 
             {post.video_url && (
-                <video
-                    src={post.video_url}
-                    controls
-                    className='w-full h-auto rounded-lg bg-black'
-                />
+                <video src={post.video_url} controls className='w-full h-auto rounded-2xl bg-black' />
             )}
 
             {post.image_urls && post.image_urls.length > 0 && (
                 <div className='grid grid-cols-2 gap-2'>
                     {post.image_urls.map((img, index) => (
-                        <img src={img} key={index} className={`w-full h-48 object-cover rounded-lg ${post.image_urls.length === 1 && 'col-span-2 h-auto'}`} alt="" />
+                        <img src={img} key={index} className={`w-full h-52 object-cover rounded-2xl ${post.image_urls.length === 1 && 'col-span-2 h-auto max-h-[34rem]'}`} alt='' />
                     ))}
                 </div>
             )}
 
             {post.shared_from && post.shared_from.user && (
-                <div className='bg-gray-50 border border-gray-200 rounded-lg p-3 mt-2'>
+                <div className='surface-soft rounded-2xl p-3 mt-2'>
                     <div onClick={() => navigate('/profile/' + post.shared_from.user._id)} className='inline-flex items-center gap-2 cursor-pointer mb-2'>
-                        <img src={post.shared_from.user.profile_picture} alt="" className='w-8 h-8 rounded-full shadow' />
+                        <img src={post.shared_from.user.profile_picture} alt='' className='w-9 h-9 rounded-full object-cover avatar-ring' />
                         <div>
-                            <div className='flex items-center space-x-1 text-sm'>
-                                <span className='font-semibold'>{post.shared_from.user.full_name}</span>
-                                <BadgeCheck className='w-3 h-3 text-blue-500' />
+                            <div className='flex items-center gap-1 text-sm'>
+                                <span className='font-bold text-slate-900'>{post.shared_from.user.full_name}</span>
+                                <BadgeCheck className='w-3 h-3 text-cyan-500' />
                             </div>
-                            <div className='text-gray-500 text-xs'>@{post.shared_from.user.username}</div>
+                            <div className='text-slate-500 text-xs'>@{post.shared_from.user.username}</div>
                         </div>
                     </div>
-                    {post.shared_from.content && <div className='text-gray-800 text-sm whitespace-pre-line' dangerouslySetInnerHTML={{ __html: post.shared_from.content.replace(/(#\w+)/g, '<span class="text-indigo-600">$1</span>') }} />}
+                    {post.shared_from.content && <div className='text-slate-800 text-sm whitespace-pre-line' dangerouslySetInnerHTML={{ __html: withHashtags(post.shared_from.content) }} />}
                     {post.shared_from.video_url && (
-                        <video
-                            src={post.shared_from.video_url}
-                            controls
-                            className='w-full h-auto rounded-lg bg-black mt-2'
-                        />
+                        <video src={post.shared_from.video_url} controls className='w-full h-auto rounded-2xl bg-black mt-2' />
                     )}
                     {post.shared_from.image_urls && post.shared_from.image_urls.length > 0 && (
                         <div className='grid grid-cols-2 gap-2 mt-2'>
                             {post.shared_from.image_urls.map((img, index) => (
-                                <img src={img} key={index} className={`w-full h-32 object-cover rounded-lg ${post.shared_from.image_urls.length === 1 && 'col-span-2 h-auto'}`} alt="" />
+                                <img src={img} key={index} className={`w-full h-32 object-cover rounded-xl ${post.shared_from.image_urls.length === 1 && 'col-span-2 h-auto'}`} alt='' />
                             ))}
                         </div>
                     )}
                 </div>
             )}
 
-            <div className='flex items-center justify-between text-gray-600 text-sm pt-2 border-t border-gray-300'>
-                <div className='flex items-center gap-4'>
+            <div className='flex items-center justify-between text-slate-600 text-sm pt-3 border-t border-slate-200'>
+                <div className='flex items-center gap-2'>
                     <div className='group relative flex items-center gap-1 cursor-pointer'>
-                        {/* Hover Reaction Menu */}
-                        <div className="absolute bottom-full left-0 pb-2 hidden group-hover:block z-20">
+                        <div className='absolute bottom-full left-0 pb-2 hidden group-hover:block z-20'>
                             <ReactionPicker onReact={handleReact} currentReaction={currentUserReaction} />
                         </div>
-                        {/* Like Button */}
-                        <div onClick={() => handleReact('like')} className={`flex items-center gap-1 hover:text-indigo-600 ${currentUserReaction ? 'text-indigo-600' : ''}`}>
+                        <button type='button' onClick={() => handleReact('like')} className={`flex items-center gap-1 rounded-full px-2.5 py-1.5 transition hover:bg-cyan-50 hover:text-cyan-700 cursor-pointer ${currentUserReaction ? 'text-cyan-700' : ''}`}>
                             {currentUserReaction ? (
-                                <span className="text-xl leading-none">{REACTION_ICONS[currentUserReaction]}</span>
+                                <span className='text-xl leading-none'>{REACTION_ICONS[currentUserReaction]}</span>
                             ) : (
                                 <Heart className={`w-4 h-4 ${likes.includes(currentUser._id) && 'text-red-500 fill-red-500'}`} />
                             )}
-                            <span className="capitalize">{REACTION_LABELS[currentUserReaction] || 'Thích'}</span>
-                        </div>
+                            <span className='capitalize'>{REACTION_LABELS[currentUserReaction] || 'Thích'}</span>
+                        </button>
                     </div>
 
-                    <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowCommentModal(true)}>
+                    <button type='button' className='flex items-center gap-1 rounded-full px-2.5 py-1.5 cursor-pointer transition hover:bg-cyan-50 hover:text-cyan-700' onClick={() => setShowCommentModal(true)}>
                         <MessageCircle className='w-4 h-4' />
                         <span>{commentCount}</span>
-                    </div>
-                    <div className='flex items-center gap-1 cursor-pointer hover:text-indigo-600' onClick={() => setShowShareModal(true)}>
+                    </button>
+                    <button type='button' className='flex items-center gap-1 rounded-full px-2.5 py-1.5 cursor-pointer transition hover:bg-cyan-50 hover:text-cyan-700' onClick={() => setShowShareModal(true)}>
                         <Share2 className='w-4 h-4' />
                         <span>{shares.length}</span>
-                    </div>
+                    </button>
                 </div>
 
-                {/* Reaction Summary */}
                 {totalReactions > 0 && (
-                    <div
-                        className="flex items-center gap-1 cursor-pointer hover:underline"
+                    <button
+                        type='button'
+                        className='flex items-center gap-1 cursor-pointer hover:underline'
                         onClick={() => setShowReactionList(true)}
                     >
-                        <div className="flex -space-x-1">
+                        <span className='flex -space-x-1'>
                             {topReactions.map((type, idx) => (
-                                <span key={type} className="text-sm bg-white rounded-full z-10" style={{ zIndex: 3 - idx }}>
+                                <span key={type} className='text-sm bg-white rounded-full z-10' style={{ zIndex: 3 - idx }}>
                                     {REACTION_ICONS[type]}
                                 </span>
                             ))}
-                        </div>
+                        </span>
                         <span>{totalReactions}</span>
-                    </div>
+                    </button>
                 )}
             </div>
 
             <ConfirmDialog
                 isOpen={showDeleteConfirm}
-                title="Xóa Bài Viết"
-                message="Bạn có chắc chắn muốn xóa bài viết này không? Hành động này không thể được hoàn tác."
+                title='Xóa bài viết'
+                message='Bạn có chắc chắn muốn xóa bài viết này không? Hành động này không thể hoàn tác.'
                 isDangerous={true}
                 isLoading={isDeleting}
                 onConfirm={handleDelete}
@@ -280,7 +246,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                 onClose={() => setShowReactionList(false)}
                 reactions={reactions}
             />
-        </div>
+        </article>
     )
 }
 

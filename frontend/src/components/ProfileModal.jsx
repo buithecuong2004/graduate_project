@@ -1,16 +1,16 @@
 import React, { useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { Camera, ImagePlus, Pencil, X } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { updateUser } from '../features/user/userSlice'
 import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 
-const ProfileModal = ({setShowEdit}) => {
-
+const ProfileModal = ({setShowEdit, onUserUpdated}) => {
     const dispatch = useDispatch()
     const {getToken} = useAuth()
-
     const user = useSelector((state)=>state.user.value)
+
+    const [isSaving, setIsSaving] = useState(false)
     const [editForm, setEditForm] = useState({
         username: user.username,
         bio: user.bio,
@@ -21,106 +21,129 @@ const ProfileModal = ({setShowEdit}) => {
     })
 
     const handleSaveProfile = async(e) => {
-        e.preventDefault();
+        e.preventDefault()
+        if(isSaving) return
+
+        setIsSaving(true)
         try {
             const userData = new FormData()
             const {full_name, username, bio, location, profile_picture, cover_photo} = editForm
 
-            userData.append('username',username)
-            userData.append('bio',bio)
-            userData.append('location',location)
-            userData.append('full_name',full_name)
+            userData.append('username', username)
+            userData.append('bio', bio)
+            userData.append('location', location)
+            userData.append('full_name', full_name)
             profile_picture && userData.append('profile', profile_picture)
             cover_photo && userData.append('cover', cover_photo)
 
             const token = await getToken()
-            dispatch(updateUser({userData, token}))
+            const updatedUser = await dispatch(updateUser({userData, token})).unwrap()
+            onUserUpdated?.(updatedUser)
             setShowEdit(false)
         } catch (error) {
-            toast.error(error.message)
+            if(error instanceof Error) toast.error(error.message)
+        } finally {
+            setIsSaving(false)
         }
     }
 
+    const profilePreview = editForm.profile_picture ? URL.createObjectURL(editForm.profile_picture) : user.profile_picture
+    const coverPreview = editForm.cover_photo ? URL.createObjectURL(editForm.cover_photo) : user.cover_photo
+
   return (
-    <div className='fixed top-0 bottom-0 left-0 right-0 z-110 h-screen overflow-y-scroll bg-black/50'>
-        <div className='max-w-2xl sm:py-6 mx-auto'>
-            <div className='bg-white roundeed-lg shadow p-6'>
-                <h1 className='text-2xl font-bold text-gray-900 mb-6'>Chỉnh sửa Hồ sơ</h1>
-                <form className='space-y-4' onSubmit={e=>toast.promise(
-                    handleSaveProfile(e), {loading: 'Đang lưu...'}
-                )}>
-                    <div className='flex flex-col items-start gap-3'>
-                        <label htmlFor="profile_picture" className='block text-sm font-medium text-gray-700'>
-                            Ảnh Đại Diện
-                            <input hidden type="file" accept='image/*' id='profile_picture' className='w-full p-3 border border-gray-200 rounded-lg'
-                            onChange={(e)=>setEditForm({...editForm, profile_picture: e.target.files[0]})}
+    <div className='fixed inset-0 z-[140] h-screen overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm'>
+        <div className='mx-auto flex min-h-full max-w-3xl items-center justify-center'>
+            <form onSubmit={handleSaveProfile} className='surface w-full overflow-hidden rounded-[2rem]'>
+                <div className='flex items-center justify-between border-b border-slate-200 px-6 py-5'>
+                    <div>
+                        <p className='page-kicker'>Hồ sơ</p>
+                        <h1 className='mt-1 text-2xl font-black text-slate-900'>Chỉnh sửa hồ sơ</h1>
+                    </div>
+                    <button type='button' onClick={()=>setShowEdit(false)} className='rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 cursor-pointer'>
+                        <X className='size-5'/>
+                    </button>
+                </div>
+
+                <div className='p-6'>
+                    <label htmlFor='cover_photo' className='group/cover relative block h-48 cursor-pointer overflow-hidden rounded-[1.5rem] bg-[linear-gradient(135deg,#0f172a,#0e7490,#0f766e)]'>
+                        {coverPreview && <img src={coverPreview} alt='' className='h-full w-full object-cover'/>}
+                        <input hidden type='file' accept='image/*' id='cover_photo' onChange={(e)=>setEditForm({...editForm, cover_photo: e.target.files[0]})}/>
+                        <div className='absolute inset-0 hidden items-center justify-center bg-black/35 text-white group-hover/cover:flex'>
+                            <span className='flex items-center gap-2 rounded-full bg-white/20 px-4 py-2 font-bold backdrop-blur'>
+                                <ImagePlus className='size-5'/>
+                                Đổi ảnh bìa
+                            </span>
+                        </div>
+                    </label>
+
+                    <div className='relative -mt-14 mb-6 flex items-end justify-between gap-4 px-4'>
+                        <label htmlFor='profile_picture' className='group/profile relative block size-28 cursor-pointer rounded-full bg-white p-1 shadow-xl'>
+                            <img src={profilePreview} alt='' className='h-full w-full rounded-full object-cover avatar-ring'/>
+                            <input hidden type='file' accept='image/*' id='profile_picture' onChange={(e)=>setEditForm({...editForm, profile_picture: e.target.files[0]})}/>
+                            <span className='absolute bottom-1 right-1 flex size-9 items-center justify-center rounded-full bg-slate-950 text-white shadow-lg transition group-hover/profile:bg-cyan-700'>
+                                <Camera className='size-4'/>
+                            </span>
+                        </label>
+                        <p className='mb-3 hidden text-sm text-slate-500 sm:block'>Cập nhật thông tin cá nhân để bạn bè nhận ra bạn dễ hơn.</p>
+                    </div>
+
+                    <div className='grid gap-4 sm:grid-cols-2'>
+                        <div>
+                            <label className='mb-1.5 block text-sm font-bold text-slate-700'>Tên</label>
+                            <input
+                                type='text'
+                                className='input-modern px-4 py-3'
+                                placeholder='Nhập tên đầy đủ'
+                                onChange={(e)=>setEditForm({...editForm, full_name: e.target.value})}
+                                value={editForm.full_name}
                             />
-                            <div className='group/profile relative'>
-                                <img src={editForm.profile_picture ? URL.createObjectURL(editForm.profile_picture) : user.profile_picture} alt="" 
-                                className='w-24 h-24 rounded-full object-cover mt-2'/>
+                        </div>
 
-                                <div className='absolute hidden group-hover/profile:flex top-0 left-0 right-0 bottom-0 bg-black/20 rounded-full items-center justify-center'>
-                                    <Pencil className='w-5 h-5 text-white'/>
-                                </div>
-                            </div>
-                        </label>
-                    </div>
-
-                    <div className='flex flex-col items-start gap-3'>
-                        <label htmlFor="cover_photo" className='block text-sm font-medium text-gray-700 mb-1'>
-                            Ảnh Bìa
-                            <input hidden type="file" accept='image/*' id='cover_photo' className='w-full p-3 border border-gray-200 rounded-lg'
-                            onChange={(e)=>setEditForm({...editForm, cover_photo: e.target.files[0]})}
+                        <div>
+                            <label className='mb-1.5 block text-sm font-bold text-slate-700'>Tên người dùng</label>
+                            <input
+                                type='text'
+                                className='input-modern px-4 py-3'
+                                placeholder='Nhập tên người dùng'
+                                onChange={(e)=>setEditForm({...editForm, username: e.target.value})}
+                                value={editForm.username}
                             />
-                            <div className='group/cover relative'>
-                                <img src={editForm.cover_photo ? URL.createObjectURL(editForm.cover_photo) : user.cover_photo} alt=""
-                                className='w-80 h-40 rounded-lg bg-linear-to-r from-indigo-200 via-purple-200 to-pink-200 object-cover mt-2'
-                                />
-                                <div className='absolute hidden group-hover/cover:flex top-0 left-0 right-0 bottom-0 bg-black/20 rounded-lg items-center justify-center'>
-                                    <Pencil className='w-5 h-5 text-white'/>
-                                </div>
-                            </div>
-                        </label>
-                    </div>
+                        </div>
 
-                    <div>
-                        <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Tên
-                        </label>
-                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập tên đầy đủ'
-                        onChange={(e)=>setEditForm({...editForm, full_name: e.target.value})} value={editForm.full_name}/>
-                    </div>
+                        <div className='sm:col-span-2'>
+                            <label className='mb-1.5 block text-sm font-bold text-slate-700'>Tiểu sử</label>
+                            <textarea
+                                rows={4}
+                                className='input-modern resize-none px-4 py-3'
+                                placeholder='Viết vài dòng giới thiệu về bạn'
+                                onChange={(e)=>setEditForm({...editForm, bio: e.target.value})}
+                                value={editForm.bio}
+                            />
+                        </div>
 
-                    <div>
-                        <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Tên người dùng
-                        </label>
-                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập tên người dùng'
-                        onChange={(e)=>setEditForm({...editForm, username: e.target.value})} value={editForm.username}/>
+                        <div className='sm:col-span-2'>
+                            <label className='mb-1.5 block text-sm font-bold text-slate-700'>Vị trí</label>
+                            <input
+                                type='text'
+                                className='input-modern px-4 py-3'
+                                placeholder='Nhập vị trí'
+                                onChange={(e)=>setEditForm({...editForm, location: e.target.value})}
+                                value={editForm.location}
+                            />
+                        </div>
                     </div>
+                </div>
 
-                    <div>
-                        <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Tiểu sử
-                        </label>
-                        <textarea rows={3} className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập tiểu sử của bạn'
-                        onChange={(e)=>setEditForm({...editForm, bio: e.target.value})} value={editForm.bio}/>
-                    </div>
-
-                    <div>
-                        <label className='block text-sm font-medium text-gray-700 mb-1'>
-                            Vị Trí
-                        </label>
-                        <input type="text" name="" id="" className='w-full p-3 border border-gray-200 rounded-lg' placeholder='Vui lòng nhập vị trí'
-                        onChange={(e)=>setEditForm({...editForm, location: e.target.value})} value={editForm.location}/>
-                    </div>
-
-                    <div className='flex justify-end space-x-3 pt-6'>
-                        <button onClick={()=>setShowEdit(false)} type='button' className='px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer'>Hủy</button>
-                        <button type='submit' className='px-4 py-2 bg-linear-to-r from-indigo-500 to-purple-600 text-white rounded-lg hover:from-indigo-600 hover:to-purple-700 transition cursor-pointer'>Lưu Thay đổi</button>
-                    </div>
-                </form>
-            </div>
+                <div className='flex justify-end gap-3 border-t border-slate-200 bg-slate-50/70 px-6 py-5'>
+                    <button onClick={()=>setShowEdit(false)} type='button' disabled={isSaving} className='btn-muted px-5 py-2.5 cursor-pointer disabled:opacity-60'>
+                        Hủy
+                    </button>
+                    <button type='submit' disabled={isSaving} className='btn-primary px-6 py-2.5 cursor-pointer disabled:opacity-60'>
+                        <Pencil className='size-4'/>
+                        {isSaving ? 'Đang lưu...' : 'Lưu thay đổi'}
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
   )

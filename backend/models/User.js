@@ -5,7 +5,7 @@ const userSchema = new mongoose.Schema({
     full_name: {type: String, required: true},
     username: {type: String, unique: true},
     role: {type: String,  default: 'user'},
-    bio: {type: String, default: 'Hey there! I am using Tarous'},
+    bio: {type: String, default: 'Chào mọi người. Tôi đang dùng Tarous!!'},
     profile_picture: {type: String, default: ''},
     cover_photo: {type: String, default: ''},
     location: {type: String, default: ''},

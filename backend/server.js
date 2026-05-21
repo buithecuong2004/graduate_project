@@ -1,13 +1,23 @@
 import dotenv from 'dotenv'
 import fs from 'fs'
 
-// Load env vars TRƯỚC KHI bất kỳ module nào khác được import
-if (fs.existsSync('.env.local')) {
-    dotenv.config({ path: '.env.local' })
-}
+// Load env vars before dynamic imports; .env.local is only for local dev.
 dotenv.config()
 
-// Dynamic imports — chạy SAU KHI env vars đã sẵn sàng
+const shouldLoadLocalEnv =
+    !process.env.VERCEL &&
+    !process.env.VERCEL_ENV &&
+    (
+        process.env.NODE_ENV === 'development' ||
+        process.env.APP_ENV === 'local' ||
+        process.env.npm_lifecycle_event === 'server'
+    )
+
+if (shouldLoadLocalEnv && fs.existsSync('.env.local')) {
+    dotenv.config({ path: '.env.local', override: true })
+}
+
+// Dynamic imports run after env vars are ready.
 const { default: express } = await import('express')
 const { default: cors } = await import('cors')
 const { default: connectDB } = await import('./configs/db.js')

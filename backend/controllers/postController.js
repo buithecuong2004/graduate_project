@@ -4,6 +4,7 @@ import Post from "../models/Post.js";
 import Comment from "../models/Comment.js";
 import User from "../models/User.js";
 import axios from "axios";
+import { getUniqueNotificationRecipientIds } from "../utils/notificationRecipients.js";
 
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
@@ -143,18 +144,10 @@ export const addPost = async (req, res) => {
                 populate: { path: 'user' }
             })
 
-        res.json({ success: true, message: 'Post created successfully', post: populatedPost})
-
         // Broadcast new post to all connections (followers/connected users) via socket
         const currentUser = await User.findById(userId)
-       // ✅ postController.js — trong addPost
-        const followersFollowing = [...new Set([
-            ...(currentUser.followers || []),
-            ...(currentUser.following || []),
-            ...(currentUser.connections || [])
-        ])]
-        
-        const postUser = await User.findById(userId)
+        const recipientIds = getUniqueNotificationRecipientIds(currentUser, userId)
+        const postUser = currentUser
         const postUserData = {
             _id: postUser._id,
             full_name: postUser.full_name,
@@ -163,6 +156,7 @@ export const addPost = async (req, res) => {
         }
 
         const newPostNotification = {
+            id: `new_post:${newPost._id}`,
             type: 'new_post',
             data: {
                 post_id: newPost._id,
@@ -178,13 +172,12 @@ export const addPost = async (req, res) => {
 
         const io = req.app.locals.io
         if(io && postUser) {
-            followersFollowing.forEach(followerId => {
-                if(followerId !== userId) {
-                    console.log('📖 Broadcasting new post to:', followerId, 'from:', postUser.full_name)
-                    io.to(`user-${followerId}`).emit('new-post-notification', newPostNotification)
-                }
+            recipientIds.forEach(recipientId => {
+                console.log('📖 Broadcasting new post to:', recipientId, 'from:', postUser.full_name)
+                io.to(`user-${recipientId}`).emit('new-post-notification', newPostNotification)
             })
         }
+        res.json({ success: true, message: 'Post created successfully', post: populatedPost})
     } catch(error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -341,7 +334,7 @@ export const likePost = async (req, res) => {
             const liker = await User.findById(userId)
             
             // Only send notification if the liker is not the post owner
-            if(userId !== postOwner && liker) {
+            if(postOwner.toString() !== userId && liker) {
                 const io = req.app.locals.io
                 if(io) {
                     const likerData = {
@@ -363,7 +356,7 @@ export const likePost = async (req, res) => {
                 }
             }
         } else {
-            post.likes_count = post.likes_count.filter(user => user !== userId)
+            post.likes_count = post.likes_count.filter(user => user.toString() !== userId)
             await post.save()
             res.json({ success: true, message: 'Post unliked' })
         }
@@ -505,7 +498,7 @@ export const likeComment = async (req, res) => {
 
             // Send like notification via socket to comment author (only if not self-like)
             const commentAuthor = comment.user
-            if(userId !== commentAuthor) {
+            if(commentAuthor.toString() !== userId) {
                 const liker = await User.findById(userId)
                 const io = req.app.locals.io
                 if(io && liker) {
@@ -528,7 +521,7 @@ export const likeComment = async (req, res) => {
                 }
             }
         } else {
-            comment.likes_count = comment.likes_count.filter(user => user !== userId)
+            comment.likes_count = comment.likes_count.filter(user => user.toString() !== userId)
             await comment.save()
             res.json({ success: true, message: 'Comment unliked' })
         }
@@ -618,7 +611,7 @@ export const deletePost = async (req, res) => {
             return res.json({ success: false, message: 'Post not found' })
         }
 
-        if (post.user !== userId) {
+        if (post.user.toString() !== userId) {
             return res.json({ success: false, message: 'You can only delete your own posts' })
         }
 
@@ -759,14 +752,14 @@ export const sharePost = async (req, res) => {
             post.shares_count = []
         }
 
-        const isSharing = !post.shares_count.includes(userId)
+        const isSharing = !post.shares_count.some(user => user.toString() === userId)
 
         if(isSharing) {
             post.shares_count.push(userId)
             await post.save()
             res.json({ success: true, message: 'Post shared', shares_count: post.shares_count })
         } else {
-            post.shares_count = post.shares_count.filter(user => user !== userId)
+            post.shares_count = post.shares_count.filter(user => user.toString() !== userId)
             await post.save()
             res.json({ success: true, message: 'Share removed', shares_count: post.shares_count })
         }

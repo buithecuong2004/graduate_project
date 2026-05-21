@@ -5,8 +5,17 @@ import sendEmail from "../configs/nodeMailer.js";
 import Story from "../models/Story.js";
 import Message from "../models/Message.js";
 import imagekit from "../configs/imageKit.js";
+import { getFrontendUrl } from "../utils/appUrl.js";
 
 export const inngest = new Inngest({ id: "tarous-app" });
+
+const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+})[char]);
 
 // Inngest Function to send Reminder when a new connection request is added
 const sendNewConnectionRequestReminder = inngest.createFunction(
@@ -17,17 +26,26 @@ const sendNewConnectionRequestReminder = inngest.createFunction(
     async ({ event, step }) => {
         const { connectionId } = event.data;
 
-        const generateEmailBody = (connection) => `
-        <div style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>Hi ${connection.to_user_id.full_name},</h2>
-            <p>You have a new connection request from ${connection.from_user_id.full_name}
-             - @${connection.from_user_id.username}</p>
-             <p>Click <a href="${process.env.FRONTEND_URL}/connections" style="color: #10b981;">
-             here</a> to accept or reject the request</p>
-             <br/>
-             <p>Thanks, <br/>Tarous - Stay Connected</p>
-        </div>
-        `;
+        const generateEmailBody = (connection) => {
+            const recipientName = escapeHtml(connection.to_user_id.full_name || connection.to_user_id.username || 'bạn');
+            const requesterName = escapeHtml(connection.from_user_id.full_name || connection.from_user_id.username || 'Một người dùng');
+            const requesterUsername = connection.from_user_id.username
+                ? ` - @${escapeHtml(connection.from_user_id.username)}`
+                : '';
+
+            return `
+            <div style="font-family: Arial, sans-serif; padding: 20px;">
+                <h2>Xin chào ${recipientName},</h2>
+                <p>${requesterName}${requesterUsername} vừa gửi cho bạn lời mời kết bạn trên Tarous.</p>
+                <p>
+                    Nhấn <a href="${getFrontendUrl('/connections')}" style="color: #10b981;">
+                    vào đây</a> để chấp nhận hoặc từ chối lời mời.
+                </p>
+                <br/>
+                <p>Trân trọng,<br/>Tarous - Luôn kết nối</p>
+            </div>
+            `;
+        };
 
         await step.run('send-connection-request-mail', async () => {
             const connection = await Connection
@@ -42,7 +60,7 @@ const sendNewConnectionRequestReminder = inngest.createFunction(
 
             await sendEmail({
                 to: connection.to_user_id.email,
-                subject: 'New Connection Request',
+                subject: 'Bạn có lời mời kết bạn mới',
                 body: generateEmailBody(connection)
             });
         });
@@ -63,7 +81,7 @@ const sendNewConnectionRequestReminder = inngest.createFunction(
 
             await sendEmail({
                 to: connection.to_user_id.email,
-                subject: 'Reminder: Connection Request',
+                subject: 'Nhắc nhở: Bạn có lời mời kết bạn đang chờ',
                 body: generateEmailBody(connection)
             });
 
@@ -134,7 +152,7 @@ const sendNotificationOfUnseenMessages = inngest.createFunction(
                     <h2>Hi ${user.full_name},</h2>
                     <p>You have ${count} unseen messages</p>
                     <p>
-                        Click <a href="${process.env.FRONTEND_URL}/messages" style="color: #10b981">
+                        Click <a href="${getFrontendUrl('/messages')}" style="color: #10b981">
                         here</a> to view them
                     </p>
                     <br/>

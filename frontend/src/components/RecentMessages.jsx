@@ -127,7 +127,7 @@ const RecentMessages = () => {
                         else if (call_status === 'rejected') content = isVideo ? '❌ Cuộc gọi video bị từ chối' : '❌ Cuộc gọi thoại bị từ chối'
                         else content = (isVideo ? '📹 Cuộc gọi video' : '📞 Cuộc gọi thoại') + durStr
                     } else if (msg.is_deleted) {
-                        content = 'Message recalled'
+                        content = 'Tin nhăn đã thu hồi'
                     } else if (msg.is_forwarded) {
                         const ft = msg.forwarded_type
                         if (ft === 'story') {
@@ -184,7 +184,7 @@ const RecentMessages = () => {
                                         {displayText}
                                     </p>
                                     {effectiveUnreadCount > 0 && (
-                                        <p className='bg-indigo-500 text-white w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold min-w-5'>
+                                        <p className='bg-cyan-600 text-white w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold min-w-5'>
                                             {effectiveUnreadCount}
                                         </p>
                                     )}

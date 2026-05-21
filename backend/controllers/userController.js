@@ -34,7 +34,7 @@ export const getUserData = async (req,res) => {
                     },
                     { new: true }
                 )
-                console.log(`🧹 Cleaned dangling refs for user ${userId}`)
+                console.log(`ðŸ§¹ Cleaned dangling refs for user ${userId}`)
             }
         }
 
@@ -51,13 +51,22 @@ export const updateUserData = async (req,res) => {
         let {username, bio, location, full_name} = req.body;
 
         const tempUser = await User.findById(userId)
+        if(!tempUser) {
+            return res.json({success: false, message: "User not found"})
+        }
+
+        username = typeof username === 'string' ? username.trim() : tempUser.username
+        full_name = typeof full_name === 'string' ? full_name.trim() : tempUser.full_name
+        bio = typeof bio === 'string' ? bio.trim() : tempUser.bio
+        location = typeof location === 'string' ? location.trim() : tempUser.location
 
         !username && (username = tempUser.username)
+        !full_name && (full_name = tempUser.full_name)
 
         if(tempUser.username !== username) {
-            const existingUser = await User.findOne({username})
+            const existingUser = await User.findOne({username, _id: {$ne: userId}})
             if(existingUser ) {
-                username = tempUser.username
+                return res.json({success: false, message: 'Username already exists'})
             }
         }
 
@@ -68,48 +77,51 @@ export const updateUserData = async (req,res) => {
             full_name
         }
 
-        const profile = req.files.profile && req.files.profile[0]
-        const cover = req.files.cover && req.files.cover[0]
+        const files = req.files || {}
+        const profile = files.profile && files.profile[0]
+        const cover = files.cover && files.cover[0]
 
-        if(profile) {
-            const buffer = fs.readFileSync(profile.path)
+        const uploadImage = async (file, folder, width) => {
+            const fileBuffer = fs.readFileSync(file.path)
             const response = await imagekit.upload({
-                file: buffer,
-                fileName: profile.originalname,
+                file: fileBuffer,
+                fileName: file.originalname,
+                folder
             })
 
-            const url = imagekit.url({
-                path: response.filePath,
-                transformation: [
-                    {quality: 'auto'},
-                    {format: 'webp'},
-                    {width: '512'}
-                ]
-            })
-            updatedData.profile_picture = url;
+            return response.filePath
+                ? imagekit.url({
+                    path: response.filePath,
+                    transformation: [
+                        {quality: 'auto'},
+                        {format: 'webp'},
+                        {width}
+                    ]
+                })
+                : response.url
         }
 
-        if(cover) {
-            const buffer = fs.readFileSync(cover.path)
-            const response = await imagekit.upload({
-                file: buffer,
-                fileName: cover.originalname,
-            })
+        try {
+            const [profileUrl, coverUrl] = await Promise.all([
+                profile ? uploadImage(profile, 'users/profile', '400') : Promise.resolve(null),
+                cover ? uploadImage(cover, 'users/cover', '1280') : Promise.resolve(null)
+            ])
 
-            const url = imagekit.url({
-                path: response.filePath,
-                transformation: [
-                    {quality: 'auto'},
-                    {format: 'webp'},
-                    {width: '1280'}
-                ]
+            if(profileUrl) updatedData.profile_picture = profileUrl
+            if(coverUrl) updatedData.cover_photo = coverUrl
+        } finally {
+            [profile, cover].forEach(file => {
+                if(file?.path) {
+                    fs.unlink(file.path, (err) => {
+                        if(err) console.log('File cleanup error:', err)
+                    })
+                }
             })
-            updatedData.cover_photo = url;
         }
 
-        const user = await User.findByIdAndUpdate(userId, updatedData, {new : true})
+        const user = await User.findByIdAndUpdate(userId, updatedData, {new : true, runValidators: true})
 
-        res.json({success: true, user, message: 'Profile updated successfully'})
+        res.json({success: true, user, message: 'Cập nhật hồ sơ thành công'})
 
     } catch (error) {
         console.log(error)
@@ -123,6 +135,9 @@ export const discoverUsers = async (req,res) => {
         const { input } = req.body
 
         const currentUser = await User.findById(userId)
+        if(!currentUser) {
+            return res.json({success: false, message: "User not found"})
+        }
         const query = input
             ? {
                 $or: [
@@ -131,14 +146,55 @@ export const discoverUsers = async (req,res) => {
                     {full_name: new RegExp(input, 'i')},
                     {location: new RegExp(input, 'i')},
                 ]
-              }
+            }
             : {}
         const allUsers = await User.find(query)
-        const filteredUsers = allUsers.filter(user=> user._id.toString() !== userId).map(user => ({
-            ...user.toObject(),
-            isFollowing: currentUser.following.map(id => id.toString()).includes(user._id.toString()),
-            isConnected: currentUser.connections.map(id => id.toString()).includes(user._id.toString())
-        }))
+        const targetUsers = allUsers.filter(user => user._id.toString() !== userId)
+        const targetUserIds = targetUsers.map(user => user._id)
+        const followingIds = new Set(currentUser.following.map(id => id.toString()))
+        const connectedIds = new Set(currentUser.connections.map(id => id.toString()))
+        const relationships = new Map()
+
+        if(targetUserIds.length > 0) {
+            const connections = await Connection.find({
+                $or: [
+                    {from_user_id: userId, to_user_id: {$in: targetUserIds}},
+                    {from_user_id: {$in: targetUserIds}, to_user_id: userId},
+                ]
+            }).select('from_user_id to_user_id status')
+
+            connections.forEach(connection => {
+                const fromId = connection.from_user_id.toString()
+                const toId = connection.to_user_id.toString()
+                const otherUserId = fromId === userId ? toId : fromId
+                let connectionStatus = 'none'
+
+                if(connection.status === 'accepted') {
+                    connectionStatus = 'connected'
+                } else if(connection.status === 'pending') {
+                    connectionStatus = fromId === userId ? 'pending_sent' : 'pending_received'
+                }
+
+                relationships.set(otherUserId, {
+                    connectionStatus,
+                    connectionId: connection._id.toString()
+                })
+            })
+        }
+
+        const filteredUsers = targetUsers.map(user => {
+            const userObject = user.toObject()
+            const relationship = relationships.get(user._id.toString())
+            const isConnected = connectedIds.has(user._id.toString()) || relationship?.connectionStatus === 'connected'
+
+            return {
+                ...userObject,
+                isFollowing: followingIds.has(user._id.toString()),
+                isConnected,
+                connectionStatus: relationship?.connectionStatus || (isConnected ? 'connected' : 'none'),
+                connectionId: relationship?.connectionId || null
+            }
+        })
         return res.json({success: true, users: filteredUsers})
 
     } catch (error) {
@@ -165,7 +221,7 @@ export const followUser = async (req,res) => {
        toUser.followers.push(userId)
        await toUser.save()
 
-       res.json({success: true, message: 'Now you are following this user'})
+       res.json({success: true, message: 'Báº¡n Ä‘ang theo dÃµi ngÆ°á»i nÃ y'})
 
     } catch (error) {
         console.log(error)
@@ -186,7 +242,7 @@ export const unfollowUser = async (req,res) => {
        toUser.followers = toUser.followers.filter(fid => fid.toString() !== userId)
        await toUser.save()
        
-       res.json({success: true, message: 'Now you are no longer follow this user'})
+       res.json({success: true, message: 'Báº¡n khÃ´ng cÃ²n theo dÃµi ngÆ°á»i nÃ y'})
 
     } catch (error) {
         console.log(error)
@@ -240,16 +296,39 @@ export const sendConnectionRequest = async (req, res) => {
                         connection_id: newConnection._id
                     }
                 }
-                console.log('🤝 Sending friend request notification to:', id, 'from:', requesterUser.full_name)
                 io.to(`user-${id}`).emit('friend-request', friendRequestNotification)
             }
 
-            return res.json({success: true, message: 'Connection request sent successfully'})
+            return res.json({success: true, message: 'Đã gửi lời mời kết bạn'})
         }else if(connection && connection.status === 'accepted') {
-            return res.json({success: false, message: 'You are already connected with this user'})
+            return res.json({success: false, message: 'Bạn đã kết bạn với người dùng này'})
         }
 
-        return res.json({success: false, message: 'Connection request pending'})
+        return res.json({success: false, message: 'Đang chờ phản hồi'})
+    } catch (error) {
+        console.log(error)
+        return res.json({success: false, message: error.message})
+    }
+}
+
+export const cancelConnectionRequest = async (req, res) => {
+    try {
+        const userId = req.userId
+        const {id} = req.body
+
+        const connection = await Connection.findOne({
+            from_user_id: userId,
+            to_user_id: id,
+            status: 'pending'
+        })
+
+        if(!connection) {
+            return res.json({success: false, message: 'Connection request not found'})
+        }
+
+        await Connection.findByIdAndDelete(connection._id)
+
+        return res.json({success: true, message: 'Đã hủy lời mời kết bạn'})
     } catch (error) {
         console.log(error)
         return res.json({success: false, message: error.message})
@@ -320,11 +399,11 @@ export const acceptConnectionRequest = async (req, res) => {
                     connection_id: connection._id
                 }
             }
-            console.log('✅ Sending connection accepted notification to:', id, 'from:', acceptingUser.full_name)
+            console.log('âœ… Sending connection accepted notification to:', id, 'from:', acceptingUser.full_name)
             io.to(`user-${id}`).emit('connection-accepted', acceptanceNotification)
         }
 
-        res.json({success: true, message: 'Connection accepted successfully'})
+        res.json({success: true, message: 'Đã chấp nhận lời mời kết bạn'})
 
     } catch (error) {
         console.log(error)
@@ -356,7 +435,7 @@ export const removeConnection = async (req, res) => {
             await Connection.findByIdAndDelete(connection._id)
         }
 
-        res.json({success: true, message: 'Connection removed successfully'})
+        res.json({success: true, message: 'Đã huỷ kết bạn'})
 
     } catch (error) {
         console.log(error)
@@ -377,7 +456,7 @@ export const declineConnectionRequest = async (req, res) => {
 
         await Connection.findByIdAndDelete(connection._id)
 
-        res.json({success: true, message: 'Connection request declined'})
+        res.json({success: true, message: 'Đã từ chối lời mời kết bạn'})
 
     } catch (error) {
         console.log(error)

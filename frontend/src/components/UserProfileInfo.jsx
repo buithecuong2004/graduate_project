@@ -4,53 +4,52 @@ import React from 'react'
 
 const UserProfileInfo = ({ user, posts, profileId, setShowEdit }) => {
     return (
-        <div className='relative py-4 px-6 md:px-8 bg-white'>
-            <div className='flex flex-col md:flex-row items-start gap-6'>
-                <div className='w-32 h-32 border-4 border-white shadow-lg absolute -top-16 rounded-full'>
-                    <img src={user.profile_picture} alt="" className='absolute rounded-full w-full h-full object-cover z-2' />
+        <div className='relative bg-white px-5 pb-6 pt-4 sm:px-8'>
+            <div className='flex flex-col gap-6 md:flex-row md:items-end'>
+                <div className='-mt-20 size-32 sm:size-36 rounded-full bg-white p-1 shadow-xl'>
+                    <img src={user.profile_picture} alt='' className='h-full w-full rounded-full object-cover avatar-ring' />
                 </div>
 
-                <div className='w-full pt-16 md:pt-0 md:pl-36'>
-                    <div className='flex flex-col md:flex-row items-start justify-between'>
-                        <div>
-                            <div className='flex items-center gap-3'>
-                                <h1>{user.full_name}</h1>
-                                <Verified className='w-6 h-6 text-blue-500' />
+                <div className='min-w-0 flex-1'>
+                    <div className='flex flex-col gap-4 md:flex-row md:items-start md:justify-between'>
+                        <div className='min-w-0'>
+                            <div className='flex items-center gap-2'>
+                                <h1 className='truncate text-3xl font-black text-slate-950'>{user.full_name}</h1>
+                                <Verified className='w-6 h-6 text-cyan-500 shrink-0' />
                             </div>
-                            <p className='text-gray-600'>{user.username ? `@${user.username}` : 'Thêm tên người dùng'}</p>
+                            <p className='mt-1 text-slate-500'>{user.username ? `@${user.username}` : 'Thêm tên người dùng'}</p>
                         </div>
                         {!profileId &&
-                            <button onClick={() => setShowEdit(true)} className='cursor-pointer flex items-center gap-2 border border-gray-300 hover:bg-gray-50 px-4 py-2 rounded-lg font-medium transition-colors mt-4 md:mt-0'>
+                            <button onClick={() => setShowEdit(true)} className='btn-muted px-4 py-2.5 cursor-pointer'>
                                 <PenBox className='w-4 h-4' />
                                 Chỉnh sửa
                             </button>}
                     </div>
-                    <p className='text-gray-700 text-sm max-w-md mt-4'>{user.bio}</p>
 
-                    <div className='flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-500 mt-4'>
+                    <p className='mt-4 max-w-2xl text-sm leading-7 text-slate-700'>{user.bio}</p>
+
+                    <div className='mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500'>
                         <span className='flex items-center gap-1.5'>
-                            <MapPin className='w-4 h-4' />
+                            <MapPin className='w-4 h-4 text-cyan-600' />
                             {user.location ? user.location : 'Thêm vị trí'}
                         </span>
                         <span className='flex items-center gap-1.5'>
-                            <Calendar className='w-4 h-4' />
-                            Đã tham gia <span className='font-medium'>{moment(user.createdAt).fromNow()}</span>
+                            <Calendar className='w-4 h-4 text-cyan-600' />
+                            Đã tham gia <span className='font-semibold text-slate-700'>{moment(user.createdAt).fromNow()}</span>
                         </span>
                     </div>
 
-                    <div className='flex items-center gap-6 mt-6 border-t border-gray-200 pt-4'>
-                        <div>
-                            <span className='sm:text-xl font-bold text-gray-900'>{posts.length}</span>
-                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Bài viết</span>
-                        </div>
-                        <div>
-                            <span className='sm:text-xl font-bold text-gray-900'>{user.followers.length}</span>
-                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Người theo dõi</span>
-                        </div>
-                        <div>
-                            <span className='sm:text-xl font-bold text-gray-900'>{user.following.length}</span>
-                            <span className='text-xs sm:text-sm text-gray-500 ml-1.5'>Đang theo dõi</span>
-                        </div>
+                    <div className='mt-6 grid max-w-lg grid-cols-3 gap-3'>
+                        {[
+                            [posts.length, 'Bài viết'],
+                            [user.followers.length, 'Người theo dõi'],
+                            [user.following.length, 'Đang theo dõi']
+                        ].map(([value, label]) => (
+                            <div key={label} className='rounded-2xl bg-slate-50 px-4 py-3 text-center'>
+                                <p className='text-xl font-black text-slate-950'>{value}</p>
+                                <p className='mt-1 text-xs font-semibold text-slate-500'>{label}</p>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>

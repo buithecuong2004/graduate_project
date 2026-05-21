@@ -21,16 +21,16 @@ const Layout = () => {
     }
 
   return user ? (
-    <div className='w-full flex h-screen'>
+    <div className='w-full flex h-screen bg-slate-100'>
         <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}/>
-        <div className='flex-1 overflow-auto bg-slate-50 relative'>
+        <div className='flex-1 overflow-auto relative app-page'>
             <Outlet/>
         </div>
         {
             sidebarOpen ? 
-            <X className='absolute top-3 right-3 p-2 z-50 bg-white rounded-md shadow w-10 h-10 text-gray-600 sm:hidden' onClick={()=>setSidebarOpen(false)}/>
+            <X className='absolute top-4 right-4 p-2 z-50 bg-white rounded-full shadow-lg w-11 h-11 text-slate-700 sm:hidden' onClick={()=>setSidebarOpen(false)}/>
             :
-            <Menu className='absolute top-3 right-3 p-2 z-50 bg-white rounded-md shadow w-10 h-10 text-gray-600 sm:hidden' onClick={()=>setSidebarOpen(true)}/>
+            <Menu className='absolute top-4 right-4 p-2 z-50 bg-white rounded-full shadow-lg w-11 h-11 text-slate-700 sm:hidden' onClick={()=>setSidebarOpen(true)}/>
         }
         {viewStory && (
             <StoryViewer 

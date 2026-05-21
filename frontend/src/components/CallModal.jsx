@@ -210,7 +210,6 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
     }, [callType])
 
     const attachRemote = useCallback((remote) => {
-        console.log('🎥 Attaching remote stream, tracks:', remote.getTracks().map(t => `${t.kind}(enabled=${t.enabled})`))
         remoteStreamRef.current = remote
         if (callType === 'video' && remoteVideoRef.current) {
             remoteVideoRef.current.srcObject = remote
@@ -230,7 +229,6 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
     }, [setState, startTimer])
 
     const sendSignal = useCallback((signal) => {
-        console.log('Sending WebRTC signal:', signal.type || 'candidate')
         socketRef.current?.emit('webrtc-signal', {
             to: otherUserId,
             from: currentUser._id,
@@ -258,7 +256,6 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
 
         pcCreatePromiseRef.current = (async () => {
             const iceConfig = await loadIceConfig()
-            console.log('Creating RTCPeerConnection:', iceConfig)
 
             const pc = new RTCPeerConnection(iceConfig)
             pcRef.current = pc
@@ -288,14 +285,12 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             }
 
             pc.onconnectionstatechange = () => {
-                console.log('Peer connection state:', pc.connectionState)
                 if (pc.connectionState === 'connected') {
                     markActive()
                 }
             }
 
             pc.oniceconnectionstatechange = () => {
-                console.log('ICE state:', pc.iceConnectionState)
                 if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                     markActive()
                 }
@@ -351,7 +346,6 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
     const removeListeners = useCallback(() => {
         const h = handlersAttachedRef.current
         if (h && h.socket) {
-            console.log('🧹 Removing socket listeners')
             h.socket.off('call-accepted', h.onCallAccepted)
             h.socket.off('webrtc-signal', h.onWebRTCSignal)
             h.socket.off('call-rejected', h.onRejected)
@@ -365,11 +359,9 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         if (!socket || handlersAttachedRef.current) return
 
         handlersAttachedRef.current = true
-        console.log('🔧 Registering socket listeners, isIncoming:', isIncoming)
 
         const onCallAccepted = async (data) => {
             if (data?.from !== otherUserId || data?.to !== currentUser._id) return
-            console.log('✅ call-accepted received, isIncoming:', isIncoming, 'state:', callStateRef.current)
             if (isIncoming) return
             if (callStateRef.current !== 'outgoing') return
 
@@ -389,7 +381,6 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         const onWebRTCSignal = async (data) => {
             if (data?.from !== otherUserId || data?.to !== currentUser._id) return
             if (!data?.signal) return
-            console.log(`📶 Signal received: ${data.signal.type || 'candidate'}, hasPC: ${!!pcRef.current}`)
 
             try {
                 if (!localStreamRef.current) {
@@ -561,7 +552,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                     <div className="relative">
                         <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-indigo-400/50 shadow-2xl">
                             {otherAvatar ? <img src={otherAvatar} alt="" className="w-full h-full object-cover" />
-                                : <div className="w-full h-full bg-indigo-700 flex items-center justify-center text-white text-4xl font-bold">{otherName[0]}</div>}
+                                : <div className="w-full h-full bg-cyan-700 flex items-center justify-center text-white text-4xl font-bold">{otherName[0]}</div>}
                         </div>
                         <div className="absolute inset-0 rounded-full border-2 border-indigo-400/30 animate-ping scale-110" />
                     </div>
@@ -604,11 +595,11 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-6 px-10 py-12 rounded-3xl shadow-2xl"
-                    style={{ background: 'linear-gradient(135deg,#1e1b4b,#312e81,#4c1d95)', minWidth: 320 }}>
+                    style={{   background: 'linear-gradient(135deg, #083344, #0e7490, #06b6d4)', minWidth: 320 }}>
                     <div className="relative">
-                        <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-indigo-400/50 shadow-2xl">
+                        <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-cyan-400/50 shadow-2xl">
                             {otherAvatar ? <img src={otherAvatar} alt="" className="w-full h-full object-cover" />
-                                : <div className="w-full h-full bg-indigo-700 flex items-center justify-center text-white text-4xl font-bold">{otherName[0]}</div>}
+                                : <div className="w-full h-full bg-cyan-700 flex items-center justify-center text-white text-4xl font-bold">{otherName[0]}</div>}
                         </div>
                     </div>
                     <div className="text-center">

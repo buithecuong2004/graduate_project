@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Search } from 'lucide-react'
+import { Search, UserRoundSearch } from 'lucide-react'
 import UserCard from '../components/UserCard'
 import Loading from '../components/Loading'
 import api from '../api/axios'
@@ -16,7 +16,6 @@ const Discover = () => {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(false)
   const { getToken } = useAuth()
-
   const [hasSearched, setHasSearched] = useState(false)
 
   const fetchUsers = async (searchInput = '') => {
@@ -36,10 +35,8 @@ const Discover = () => {
 
   const handleSearch = async (e) => {
     if (e.key === 'Enter') {
-      if (!input.trim()) return
       setHasSearched(true)
       await fetchUsers(input.trim())
-      setInput('')
     }
   }
 
@@ -51,43 +48,43 @@ const Discover = () => {
   },[])
 
   return (
-    <div className='min-h-screen bg-linear-to-b from-slate-50 to-white'>
-      <div className='max-w-6xl mx-auto p-6'>
-        <div className='mb-8'>
-          <h1 className='text-3xl font-bold text-slate-900 mb-2'>Khám phá Mọi người</h1>
-          <p className='text-slate-600'>Kết bạn với những người tuyệt vời và phát triển mạng lưới của bạn</p>
-        </div>
+    <div className='app-page min-h-full'>
+      <div className='app-container'>
+        <section className='mb-8 rounded-[2rem] surface p-6'>
+          <p className='page-kicker'>Khám phá</p>
+          <h1 className='page-title mt-2'>Tìm người mới để kết nối</h1>
+          <p className='page-subtitle mt-3 max-w-2xl'>Tìm theo tên, username, tiểu sử hoặc vị trí. Nhấn Enter để tìm kiếm.</p>
 
-        <div className='mb-8 shadow-md rounded-md border border-slate-200/60 bg-white/80'>
-          <div className='p-6'>
-            <div className='relative'>
-              <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5'/>
-              <input type="text" name="" id="" placeholder='Tìm kiếm mọi người theo tên, người dùng, tiểu sử hoặc vị trí...'
-              className='pl-10 sm:pl-12 py-2 w-full border border-gray-300 rounded-md max-sm:text-sm'
-              onChange={(e)=>setInput(e.target.value)} value={input} onKeyUp={handleSearch}
-              />
-            </div>
+          <div className='relative mt-6'>
+            <Search className='absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400'/>
+            <input
+              type='text'
+              placeholder='Tìm kiếm mọi người...'
+              className='input-modern py-4 pl-12 pr-4 text-base'
+              onChange={(e)=>setInput(e.target.value)}
+              value={input}
+              onKeyUp={handleSearch}
+            />
           </div>
-        </div>
+        </section>
 
-        <div className='flex flex-wrap gap-6'>
-          {users.map((user)=>(
-            <UserCard user={user} key={user._id}/>
-          ))}
-        </div>
-
-        {!loading && hasSearched && users.length === 0 && (
-          <div className='flex flex-col items-center justify-center py-16 text-slate-400'>
-            <Search className='w-12 h-12 mb-3 opacity-30'/>
-            <p className='text-lg font-medium'>Không tìm thấy người dùng nào</p>
-            <p className='text-sm'>Thử tìm kiếm với tên, tên người dùng hoặc vị trí khác</p>
+        {loading ? (
+          <Loading height='50vh'/>
+        ) : (
+          <div className='grid gap-5 sm:grid-cols-2 xl:grid-cols-3'>
+            {users.map((user)=>(
+              <UserCard user={user} key={user._id}/>
+            ))}
           </div>
         )}
 
-        {
-          loading && (<Loading height='60vh'/>)
-        }
-
+        {!loading && hasSearched && users.length === 0 && (
+          <div className='surface mt-6 flex flex-col items-center justify-center rounded-[2rem] py-16 text-center text-slate-500'>
+            <UserRoundSearch className='w-12 h-12 mb-3 text-slate-300'/>
+            <p className='text-lg font-black text-slate-900'>Không tìm thấy người dùng nào</p>
+            <p className='mt-1 text-sm'>Thử tìm bằng tên, username hoặc vị trí khác.</p>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -20,7 +20,7 @@ export const deleteStoryAction = createAsyncThunk('stories/deleteStory', async (
         headers: { Authorization: `Bearer ${token}` }
     })
     if (data.success) {
-        toast.success('Story deleted successfully')
+        toast.success('Đã xoá tin thành công')
         dispatch(setViewStory(null))
         return storyId
     } else {
