@@ -80,6 +80,13 @@ const normalizeIceConfig = (config) => {
     return config
 }
 
+const hasTurnServer = (iceConfig = {}) => (
+    (iceConfig.iceServers || []).some((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+        return urls.some((url) => typeof url === 'string' && url.startsWith('turn'))
+    })
+)
+
 export default function CallModal({ callInfo, onClose, isIncoming }) {
     const { socketRef } = useSocket()
     const currentUser = useSelector(s => s.user.value)
@@ -90,6 +97,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
     const [isMuted, setIsMuted] = useState(false)
     const [isCamOff, setIsCamOff] = useState(false)
     const [duration, setDuration] = useState(0)
+    const [connectionWarning, setConnectionWarning] = useState('')
 
     const callType = callInfo.callType
     const otherUserId = isIncoming ? callInfo.from : callInfo.to
@@ -148,11 +156,21 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                     const { data } = await api.get('/api/call/ice-config', {
                         headers: { Authorization: `Bearer ${token}` }
                     })
-                    if (data?.success) return normalizeIceConfig(data.iceConfig)
+                    if (data?.success) {
+                        const iceConfig = normalizeIceConfig(data.iceConfig)
+                        if (!data.hasTurn && !hasTurnServer(iceConfig)) {
+                            console.warn('WebRTC is using STUN only. Calls may fail across different networks without a TURN server.')
+                        }
+                        return iceConfig
+                    }
                 } catch (error) {
                     console.warn('Could not load server ICE config, using client fallback:', error.message)
                 }
-                return buildClientIceConfig()
+                const fallbackConfig = buildClientIceConfig()
+                if (!hasTurnServer(fallbackConfig)) {
+                    console.warn('WebRTC fallback ICE config has no TURN server. Calls may fail across different networks.')
+                }
+                return fallbackConfig
             })()
         }
 
@@ -286,13 +304,21 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
 
             pc.onconnectionstatechange = () => {
                 if (pc.connectionState === 'connected') {
+                    setConnectionWarning('')
                     markActive()
+                }
+                if (pc.connectionState === 'failed') {
+                    setConnectionWarning('Không thể kết nối media giữa hai mạng. Hãy cấu hình TURN server cho cuộc gọi ngoài mạng LAN.')
                 }
             }
 
             pc.oniceconnectionstatechange = () => {
                 if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                    setConnectionWarning('')
                     markActive()
+                }
+                if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+                    setConnectionWarning('Kết nối cuộc gọi bị chặn bởi NAT/firewall. Cần TURN server để gọi khác mạng ổn định.')
                 }
             }
 
@@ -519,6 +545,11 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             style={{ background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)' }}>
 
             <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+            {connectionWarning && (
+                <div className="absolute top-5 left-1/2 z-20 max-w-md -translate-x-1/2 rounded-xl bg-amber-500/95 px-4 py-2 text-center text-sm font-semibold text-slate-950 shadow-lg">
+                    {connectionWarning}
+                </div>
+            )}
 
             {callState === 'active' && callType === 'video' ? (
                 <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">

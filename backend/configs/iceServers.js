@@ -34,6 +34,13 @@ const defaultStunUrls = [
     'stun:stun3.l.google.com:19302',
 ]
 
+export const hasTurnServer = (iceConfig = {}) => (
+    (iceConfig.iceServers || []).some((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+        return urls.some((url) => typeof url === 'string' && url.startsWith('turn'))
+    })
+)
+
 export const getIceConfig = () => {
     const envIceServers = parseIceServersJson(process.env.ICE_SERVERS_JSON)
     const stunUrls = splitList(process.env.STUN_URLS).length > 0
