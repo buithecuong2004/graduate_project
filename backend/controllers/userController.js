@@ -4,6 +4,27 @@ import Connection from "../models/Connection.js"
 import Post from "../models/Post.js"
 import User from "../models/User.js"
 import fs  from 'fs'
+import crypto from 'crypto'
+import { promisify } from 'util'
+
+const scryptAsync = promisify(crypto.scrypt)
+
+const hashPassword = async (password) => {
+    const salt = crypto.randomBytes(16).toString('hex')
+    const derivedKey = await scryptAsync(password, salt, 64)
+    return `${salt}:${derivedKey.toString('hex')}`
+}
+
+const verifyPassword = async (password, passwordHash = '') => {
+    const [salt, storedHash] = passwordHash.split(':')
+    if (!salt || !storedHash) return false
+
+    const derivedKey = await scryptAsync(password, salt, 64)
+    const storedBuffer = Buffer.from(storedHash, 'hex')
+    if (storedBuffer.length !== derivedKey.length) return false
+
+    return crypto.timingSafeEqual(storedBuffer, derivedKey)
+}
 
 export const getUserData = async (req,res) => {
     try {
@@ -123,6 +144,56 @@ export const updateUserData = async (req,res) => {
 
         res.json({success: true, user, message: 'Cập nhật hồ sơ thành công'})
 
+    } catch (error) {
+        console.log(error)
+        return res.json({success: false, message: error.message})
+    }
+}
+
+export const changePassword = async (req, res) => {
+    try {
+        const userId = req.userId
+        const currentPassword = req.body.currentPassword || ''
+        const newPassword = req.body.newPassword || ''
+        const confirmPassword = req.body.confirmPassword || ''
+
+        if (!currentPassword) {
+            return res.json({success: false, message: 'Vui lòng nhập mật khẩu hiện tại'})
+        }
+
+        if (newPassword.length < 6) {
+            return res.json({success: false, message: 'Mật khẩu mới phải có ít nhất 6 ký tự'})
+        }
+
+        if (newPassword !== confirmPassword) {
+            return res.json({success: false, message: 'Xác thực mật khẩu mới không khớp'})
+        }
+
+        if (currentPassword === newPassword) {
+            return res.json({success: false, message: 'Mật khẩu mới phải khác mật khẩu hiện tại'})
+        }
+
+        const user = await User.findById(userId).select('+password_hash')
+        if (!user) {
+            return res.json({success: false, message: 'User not found'})
+        }
+
+        if (!user.password_hash) {
+            return res.json({success: false, message: 'Tài khoản này chưa có mật khẩu để đổi'})
+        }
+
+        const isCurrentPasswordValid = await verifyPassword(currentPassword, user.password_hash)
+        if (!isCurrentPasswordValid) {
+            return res.json({success: false, message: 'Mật khẩu hiện tại không đúng'})
+        }
+
+        user.password_hash = await hashPassword(newPassword)
+        user.password_reset_otp_hash = undefined
+        user.password_reset_otp_expires_at = undefined
+        user.password_reset_otp_attempts = 0
+        await user.save()
+
+        return res.json({success: true, message: 'Đổi mật khẩu thành công'})
     } catch (error) {
         console.log(error)
         return res.json({success: false, message: error.message})

@@ -9,8 +9,12 @@ const userSchema = new mongoose.Schema({
     profile_picture: {type: String, default: ''},
     cover_photo: {type: String, default: ''},
     location: {type: String, default: ''},
-    provider: {type: String, enum: ['google', 'facebook'], required: true},
+    provider: {type: String, enum: ['google', 'facebook', 'local'], required: true},
     providerId: {type: String, required: true},
+    password_hash: {type: String, select: false},
+    password_reset_otp_hash: {type: String, select: false},
+    password_reset_otp_expires_at: {type: Date, select: false},
+    password_reset_otp_attempts: {type: Number, default: 0, select: false},
     followers: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
     following: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
     connections: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}]
