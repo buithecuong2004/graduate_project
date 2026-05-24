@@ -5,6 +5,7 @@ import UserProfileInfo from '../components/UserProfileInfo'
 import PostCard from '../components/PostCard'
 import moment from '../utils/moment'
 import ProfileModal from '../components/ProfileModal'
+import ChangePasswordModal from '../components/ChangePasswordModal'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
@@ -20,6 +21,7 @@ const Profile = () => {
   const [posts, setPosts] = useState([])
   const [activeTab, setActiveTab] = useState('bài viết')
   const [showEdit, setShowEdit] = useState(false)
+  const [showChangePassword, setShowChangePassword] = useState(false)
 
   const fetchUser = useCallback(async(targetProfileId) => {
     const token = await getToken()
@@ -69,7 +71,7 @@ const Profile = () => {
             {user.cover_photo && <img src={user.cover_photo} alt='' className='w-full h-full object-cover'/>}
           </div>
 
-          <UserProfileInfo user={user} posts={posts} profileId={profileId} setShowEdit={setShowEdit}/>
+          <UserProfileInfo user={user} posts={posts} profileId={profileId} setShowEdit={setShowEdit} setShowChangePassword={setShowChangePassword}/>
         </div>
 
         <div className='mt-6'>
@@ -107,6 +109,7 @@ const Profile = () => {
         </div>
       </div>
       {showEdit && <ProfileModal setShowEdit={setShowEdit} onUserUpdated={handleProfileUpdated}/>}
+      {showChangePassword && <ChangePasswordModal setShowChangePassword={setShowChangePassword}/>}
     </div>
   )
 }

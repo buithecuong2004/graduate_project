@@ -1,12 +1,12 @@
-import { Calendar, MapPin, PenBox, Verified } from 'lucide-react'
+import { Calendar, KeyRound, MapPin, PenBox, Verified } from 'lucide-react'
 import moment from '../utils/moment'
 import React from 'react'
 
-const UserProfileInfo = ({ user, posts, profileId, setShowEdit }) => {
+const UserProfileInfo = ({ user, posts, profileId, setShowEdit, setShowChangePassword }) => {
     return (
         <div className='relative bg-white px-5 pb-6 pt-4 sm:px-8'>
-            <div className='flex flex-col gap-6 md:flex-row md:items-end'>
-                <div className='-mt-20 size-32 sm:size-36 rounded-full bg-white p-1 shadow-xl'>
+            <div className='flex flex-col gap-6 md:flex-row md:items-start'>
+                <div className='-mt-20 size-32 rounded-full bg-white p-1 shadow-xl sm:size-36 md:-mt-16'>
                     <img src={user.profile_picture} alt='' className='h-full w-full rounded-full object-cover avatar-ring' />
                 </div>
 
@@ -19,11 +19,18 @@ const UserProfileInfo = ({ user, posts, profileId, setShowEdit }) => {
                             </div>
                             <p className='mt-1 text-slate-500'>{user.username ? `@${user.username}` : 'Thêm tên người dùng'}</p>
                         </div>
-                        {!profileId &&
-                            <button onClick={() => setShowEdit(true)} className='btn-muted px-4 py-2.5 cursor-pointer'>
-                                <PenBox className='w-4 h-4' />
-                                Chỉnh sửa
-                            </button>}
+                        {!profileId && (
+                            <div className='flex flex-wrap items-center gap-3'>
+                                <button onClick={() => setShowChangePassword(true)} className='btn-muted px-4 py-2.5 cursor-pointer'>
+                                    <KeyRound className='w-4 h-4' />
+                                    Đổi mật khẩu
+                                </button>
+                                <button onClick={() => setShowEdit(true)} className='btn-muted px-4 py-2.5 cursor-pointer'>
+                                    <PenBox className='w-4 h-4' />
+                                    Chỉnh sửa
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     <p className='mt-4 max-w-2xl text-sm leading-7 text-slate-700'>{user.bio}</p>

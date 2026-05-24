@@ -21,7 +21,7 @@ const ProfileModal = ({setShowEdit, onUserUpdated}) => {
     })
 
     const handleSaveProfile = async(e) => {
-        e.preventDefault()
+        e?.preventDefault()
         if(isSaving) return
 
         setIsSaving(true)
