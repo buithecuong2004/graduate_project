@@ -48,31 +48,64 @@ const deleteImageKitFile = async (fileId) => {
 // Helper: populate a single message object with user & reply_to data
 // ─────────────────────────────────────────────────────────────────
 const populateMessage = async (msgObj) => {
-    const senderUser = await User.findById(msgObj.from_user_id)
-    msgObj.from_user_id = senderUser
+    // Optimize population by batching user lookups instead of many individual queries.
+    const userIdsToFetch = new Set()
 
-    if (msgObj.media_url && (!msgObj.media_urls || msgObj.media_urls.length === 0)) {
-        msgObj.media_urls = [msgObj.media_url]
-        msgObj.message_type = 'images'
-    }
+    // from_user_id may be an id or already populated object
+    const fromId = msgObj.from_user_id && msgObj.from_user_id._id ? msgObj.from_user_id._id : msgObj.from_user_id
+    if (fromId) userIdsToFetch.add(String(fromId))
 
     if (msgObj.reply_to) {
+        // reply_to may be an id — fetch the reply message to find its sender
         const replyMsg = await Message.findById(msgObj.reply_to).lean()
         if (replyMsg) {
-            const replySender = await User.findById(replyMsg.from_user_id)
-            replyMsg.from_user_id = replySender
+            const replyFromId = replyMsg.from_user_id
+            if (replyFromId) userIdsToFetch.add(String(replyFromId))
+            // attach reply message (we will populate its from_user_id below)
             msgObj.reply_to = replyMsg
         }
     }
 
     if (msgObj.reactions && msgObj.reactions.length > 0) {
-        msgObj.reactions = await Promise.all(msgObj.reactions.map(async r => {
-            if (r.user && !r.user.full_name) {
-                const reactor = await User.findById(r.user).select('full_name username profile_picture _id').lean()
-                r.user = reactor || r.user
+        msgObj.reactions.forEach(r => {
+            const uid = r.user && r.user._id ? r.user._id : r.user
+            if (uid && !(typeof uid === 'object' && uid.full_name)) userIdsToFetch.add(String(uid))
+        })
+    }
+
+    // If there are users to fetch, perform a single query
+    let usersMap = {}
+    if (userIdsToFetch.size > 0) {
+        const users = await User.find({ _id: { $in: Array.from(userIdsToFetch) } }).select('full_name username profile_picture _id').lean()
+        usersMap = users.reduce((acc, u) => { acc[String(u._id)] = u; return acc }, {})
+    }
+
+    // Assign populated from_user_id
+    if (fromId) {
+        msgObj.from_user_id = usersMap[String(fromId)] || (await User.findById(fromId))
+    }
+
+    // Ensure media_urls/message_type compatibility
+    if (msgObj.media_url && (!msgObj.media_urls || msgObj.media_urls.length === 0)) {
+        msgObj.media_urls = [msgObj.media_url]
+        msgObj.message_type = 'images'
+    }
+
+    // Populate reply_to sender if present
+    if (msgObj.reply_to) {
+        const replyFromId = msgObj.reply_to.from_user_id
+        msgObj.reply_to.from_user_id = usersMap[String(replyFromId)] || (replyFromId ? await User.findById(replyFromId) : replyFromId)
+    }
+
+    // Populate reaction users using map where possible
+    if (msgObj.reactions && msgObj.reactions.length > 0) {
+        msgObj.reactions = msgObj.reactions.map(r => {
+            const uid = r.user && r.user._id ? r.user._id : r.user
+            if (uid && usersMap[String(uid)]) {
+                return { ...r, user: usersMap[String(uid)] }
             }
             return r
-        }))
+        })
     }
 
     return msgObj
@@ -83,6 +116,7 @@ const populateMessage = async (msgObj) => {
 // ─────────────────────────────────────────────────────────────────
 export const sendMessage = async (req, res) => {
     try {
+        const startTime = Date.now()
         const userId = req.userId
         const { to_user_id, shared_post_id, reply_to, is_forwarded, forwarded_type } = req.body
         let { text } = req.body
@@ -249,10 +283,14 @@ export const sendMessage = async (req, res) => {
         const populatedMsg = await populateMessage(msgObj)
 
         res.json({ success: true, message: populatedMsg })
+        console.log(`sendMessage: user=${userId} to=${to_user_id} saved in ${Date.now()-startTime}ms`)
 
         const io = req.app.locals.io
         if (io) {
-            io.to(`user-${to_user_id}`).emit('new-message', populatedMsg)
+            const recipientIds = new Set([to_user_id.toString(), userId.toString()])
+            recipientIds.forEach(recipientId => {
+                io.to(`user-${recipientId}`).emit('new-message', populatedMsg)
+            })
         }
     } catch (error) {
         console.error('❌ Error in sendMessage:', error)
@@ -265,24 +303,47 @@ export const sendMessage = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const getChatMessages = async (req, res) => {
     try {
+        const startTime = Date.now()
         const userId = req.userId
-        const { to_user_id } = req.body
+        const { to_user_id, limit = 30, before, mark_read = true } = req.body
 
-        let messages = await Message.find({
+        const query = {
             $or: [
                 { from_user_id: userId, to_user_id },
                 { from_user_id: to_user_id, to_user_id: userId }
             ]
-        }).sort({ createdAt: 1 }).lean()
+        }
+
+        // Cursor-based pagination: fetch messages older than `before`
+        if (before) {
+            query._id = { $lt: before }
+        }
+
+        const limitNum = Math.min(parseInt(limit) || 30, 50)
+
+        // Fetch one extra to determine if there are more messages
+        let messages = await Message.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limitNum + 1)
+            .lean()
+
+        const hasMore = messages.length > limitNum
+        if (hasMore) messages = messages.slice(0, limitNum)
+
+        // Reverse to return in chronological order (oldest → newest)
+        messages.reverse()
 
         messages = await Promise.all(messages.map(populateMessage))
 
-        await Message.updateMany(
-            { from_user_id: to_user_id, to_user_id: userId },
-            { isRead: true }
-        )
+        if (mark_read !== false && mark_read !== 'false') {
+            await Message.updateMany(
+                { from_user_id: to_user_id, to_user_id: userId },
+                { isRead: true }
+            )
+        }
 
-        res.json({ success: true, messages })
+        res.json({ success: true, messages, hasMore })
+        console.log(`getChatMessages: user=${userId} with=${to_user_id} returned ${messages.length} messages in ${Date.now()-startTime}ms`)
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -420,6 +481,7 @@ export const editMessage = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 export const reactMessage = async (req, res) => {
     try {
+        const startTime = Date.now()
         const userId = req.userId
         const { messageId, reactionType } = req.body
 
@@ -472,13 +534,17 @@ export const reactMessage = async (req, res) => {
         const populatedMsg = await populateMessage(msgObj)
 
         res.json({ success: true, message: 'Reaction updated', messageData: populatedMsg })
+        console.log(`reactMessage: user=${userId} message=${messageId} processed in ${Date.now()-startTime}ms`)
 
         const io = req.app.locals.io
         if (io) {
             const messageOwner = message.from_user_id.toString()
             const otherUser = messageOwner === userId ? message.to_user_id.toString() : messageOwner
 
+            // Emit reaction update to both participants so UI updates instantly
+            // for the message owner and the user who reacted.
             io.to(`user-${otherUser}`).emit('message-reaction-updated', { messageId, reactions: populatedMsg.reactions })
+            io.to(`user-${userId}`).emit('message-reaction-updated', { messageId, reactions: populatedMsg.reactions })
 
             if (isNewReaction && userId !== messageOwner) {
                 const reactor = await User.findById(userId)
@@ -498,6 +564,9 @@ export const reactMessage = async (req, res) => {
                     const populatedMsgAuto = await populateMessage(msgObjAuto)
 
                     io.to(`user-${messageOwner}`).emit('new-message', populatedMsgAuto)
+                    // Also notify the reacting user so their UI (mini chat / recent list)
+                    // updates immediately with the automated reaction message.
+                    io.to(`user-${userId}`).emit('new-message', populatedMsgAuto)
                 }
             }
         }

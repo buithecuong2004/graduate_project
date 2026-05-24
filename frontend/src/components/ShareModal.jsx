@@ -118,7 +118,9 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                 return
             }
 
-            if (data.post) dispatch(addPost(data.post))
+            if (data.post) {
+                dispatch(addPost(data.post))
+            }
             toast.success('Bài viết đã được chia sẻ')
             onShareAdded?.()
             onClose()

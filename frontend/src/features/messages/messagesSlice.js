@@ -1,4 +1,4 @@
-import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
+import { createAsyncThunk, createSlice, createSelector } from '@reduxjs/toolkit'
 import api from '../../api/axios'
 
 const initialState = {
@@ -21,6 +21,7 @@ const messagesSlice = createSlice({
             state.messages = action.payload
         },
         addMessages: (state, action) => {
+            if (state.messages.some(message => message._id === action.payload._id)) return
             state.messages = [...state.messages, action.payload]
         },
         resetMessages: (state) => {
@@ -74,3 +75,17 @@ export const {
 } = messagesSlice.actions
 
 export default messagesSlice.reducer
+
+// Memoized selector: select messages relevant to a chat with `userId`
+export const selectMessagesForChat = createSelector(
+    (state) => state.messages.messages,
+    (_, userId) => userId,
+    (messages, userId) => {
+        if (!messages || !userId) return []
+        return messages.filter((m) => {
+            const fromId = m.from_user_id?._id || m.from_user_id
+            const toId = m.to_user_id?._id || m.to_user_id
+            return String(fromId) === String(userId) || String(toId) === String(userId)
+        })
+    }
+)

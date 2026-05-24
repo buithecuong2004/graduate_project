@@ -4,13 +4,11 @@ import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import Feed from './pages/Feed'
 import Message from './pages/Message'
-import ChatBox from './pages/ChatBox'
 import Connections from './pages/Connections'
 import Discover from './pages/Discover'
 import Profile from './pages/Profile'
 import CreatePost from './pages/CreatePost'
 import PostDetail from './pages/PostDetail'
-import Notification from './components/Notification'
 import { useAuth } from './context/AuthContext'
 import Layout from './pages/Layout'
 import { Toaster } from 'react-hot-toast'
@@ -21,11 +19,12 @@ import { fetchConnections } from './features/connections/connectionsSlice'
 import { useRef } from 'react'
 import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal, updateMessageReactionsLocal } from './features/messages/messagesSlice'
 import { addNotification } from './features/notifications/notificationsSlice'
-import toast from 'react-hot-toast'
 import { Navigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { SocketProvider, useSocket } from './context/SocketContext'
 import CallModal from './components/CallModal'
+
+const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
 
 // ─── Inner App (needs SocketProvider to be parent) ───────────────────────────
 const AppInner = () => {
@@ -34,7 +33,7 @@ const AppInner = () => {
   const pathnameRef = useRef(pathname)
 
   // callAcceptedSignal đã được loại bỏ — CallModal tự lắng nghe socket trực tiếp
-  const { socketRef, incomingCall, setIncomingCall } = useSocket()
+  const { socketRef, setSocket, openChatFromMessage } = useSocket()
 
   const [activeCall, setActiveCall] = useState(null)
   const activeCallRef = useRef(null)
@@ -68,31 +67,48 @@ const AppInner = () => {
         })
 
         socketRef.current = socket
+        setSocket(socket)
 
         socket.on('connect', () => {
           socket.emit('user-connect', currentUser._id)
         })
 
-        // Listen for new messages
+        const refreshConnectionsFromSocket = async () => {
+          const token = await getToken()
+          if (token) dispatch(fetchConnections(token))
+        }
+
+        // Listen for new messages — dispatch to Redux so all components update instantly
         socket.on('new-message', (message) => {
-          if (pathnameRef.current === (`/messages/${message.from_user_id?._id}`)) {
-            dispatch(addMessages(message))
-          } else {
-            if (message.message_type !== 'reaction' && message.message_type !== 'call') {
-              toast.custom((t) => <Notification t={t} message={message} />, { position: "bottom-right" })
-            }
+          // Always add incoming message to Redux messages slice
+          dispatch(addMessages(message))
+
+          // If user is not currently viewing the chat, open mini chat preview
+          const currentId = getUserId(currentUser._id)
+          const fromId = getUserId(message.from_user_id)
+          const toId = getUserId(message.to_user_id)
+          const conversationId = fromId === currentId ? toId : fromId
+          if (pathnameRef.current !== (`/messages/${conversationId}`) && message.message_type !== 'reaction' && message.message_type !== 'call') {
+            openChatFromMessage(message, currentUser._id)
           }
+
+          // Trigger sidebar / recent messages update
           dispatch(setNewMessageTrigger(Date.now()))
         })
 
+        // Message edited
         socket.on('message-edited', ({ messageId, text }) => {
           dispatch(editMessageLocal({ messageId, text }))
+          dispatch(setNewMessageTrigger(Date.now()))
         })
 
+        // Message deleted
         socket.on('message-deleted', ({ messageId }) => {
           dispatch(deleteMessageLocal(messageId))
+          dispatch(setNewMessageTrigger(Date.now()))
         })
 
+        // Reaction updated
         socket.on('message-reaction-updated', ({ messageId, reactions }) => {
           dispatch(updateMessageReactionsLocal({ messageId, reactions }))
           dispatch(setNewMessageTrigger(Date.now()))
@@ -101,7 +117,9 @@ const AppInner = () => {
         // ── Incoming Call ─────────────────────────────────────────────
         socket.on('incoming-call', (data) => {
           if (activeCallRef.current) return
-          setIncomingCall(data)
+          const call = { ...data, isIncoming: true }
+          activeCallRef.current = call
+          setActiveCall(call)
         })
 
         // NOTE: 'call-accepted' KHÔNG được xử lý ở App level nữa.
@@ -110,10 +128,12 @@ const AppInner = () => {
         // Listen for friend requests
         socket.on('friend-request', (notification) => {
           dispatch(addNotification(notification))
+          refreshConnectionsFromSocket()
         })
 
         socket.on('connection-accepted', (notification) => {
           dispatch(addNotification(notification))
+          refreshConnectionsFromSocket()
         })
 
         socket.on('new-story', (notification) => {
@@ -162,19 +182,10 @@ const AppInner = () => {
       if (socketRef.current) {
         socketRef.current.disconnect()
         socketRef.current = null
+        setSocket(null)
       }
     }
-  }, [currentUser?._id, dispatch])
-
-  // When incomingCall arrives, open it if no active call
-  useEffect(() => {
-    if (incomingCall && !activeCallRef.current) {
-      const call = { ...incomingCall, isIncoming: true }
-      activeCallRef.current = call
-      setActiveCall(call)
-      setIncomingCall(null)
-    }
-  }, [incomingCall, setIncomingCall])
+  }, [currentUser?._id, dispatch, getToken, openChatFromMessage, setSocket, socketRef])
 
   const handleStartCall = useCallback((callData) => {
     activeCallRef.current = callData
@@ -203,8 +214,8 @@ const AppInner = () => {
         <Route path='/' element={isAuthenticated ? <Layout onStartCall={handleStartCall} /> : <Login />}>
           <Route index element={<Navigate to="/feed" replace />} />
           <Route path='feed' element={<Feed />} />
-          <Route path='messages' element={<Message />} />
-          <Route path='messages/:userId' element={<ChatBox onStartCall={handleStartCall} />} />
+          <Route path='messages' element={<Message onStartCall={handleStartCall} />} />
+          <Route path='messages/:userId' element={<Message onStartCall={handleStartCall} />} />
           <Route path='connections' element={<Connections />} />
           <Route path='discover' element={<Discover />} />
           <Route path='profile' element={<Profile />} />

@@ -242,7 +242,7 @@ export const unfollowUser = async (req,res) => {
        toUser.followers = toUser.followers.filter(fid => fid.toString() !== userId)
        await toUser.save()
        
-       res.json({success: true, message: 'Báº¡n khÃ´ng cÃ²n theo dÃµi ngÆ°á»i nÃ y'})
+       res.json({success: true, message: 'Đã bỏ theo dõi người này'})
 
     } catch (error) {
         console.log(error)
@@ -256,7 +256,7 @@ export const sendConnectionRequest = async (req, res) => {
         const {id} = req.body
 
         const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000)
-        const connectionRequests = await Connection.find({from_user_id: userId, created_at: { $gt: last24Hours }})
+        const connectionRequests = await Connection.find({from_user_id: userId, createdAt: { $gt: last24Hours }})
         if(connectionRequests.length >= 20) {
             return res.json({success: false, message: 'You have sent more 20 connection requests in the last 24 hours'})
         }
@@ -274,13 +274,13 @@ export const sendConnectionRequest = async (req, res) => {
                 to_user_id: id
             })
 
-            await inngest.send({ 
-                name: 'app/connection-request',
-                data: {connectionId: newConnection._id}
-            })
+            const [, , requesterUser] = await Promise.all([
+                User.findByIdAndUpdate(userId, { $addToSet: { following: id } }),
+                User.findByIdAndUpdate(id, { $addToSet: { followers: userId } }),
+                User.findById(userId)
+            ])
 
             // Send friend request notification via socket
-            const requesterUser = await User.findById(userId)
             const io = req.app.locals.io
             if(io && requesterUser) {
                 const requesterData = {
@@ -299,7 +299,15 @@ export const sendConnectionRequest = async (req, res) => {
                 io.to(`user-${id}`).emit('friend-request', friendRequestNotification)
             }
 
-            return res.json({success: true, message: 'Đã gửi lời mời kết bạn'})
+            res.json({success: true, message: 'Đã gửi lời mời kết bạn'})
+
+            inngest.send({
+                name: 'app/connection-request',
+                data: {connectionId: newConnection._id}
+            }).catch(error => {
+                console.log('Connection request reminder enqueue error:', error.message)
+            })
+            return
         }else if(connection && connection.status === 'accepted') {
             return res.json({success: false, message: 'Bạn đã kết bạn với người dùng này'})
         }

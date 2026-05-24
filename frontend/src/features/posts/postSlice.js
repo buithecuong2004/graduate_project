@@ -16,7 +16,7 @@ export const fetchPosts = createAsyncThunk('posts/fetchPosts', async ({ token, p
     })
     return {
         posts: data.success ? data.posts : [],
-        hasMore: data.hasMore !== false,
+        hasMore: data.success ? data.hasMore !== false : false,
         page,
         suggestedPosts: data.suggestedPosts || []
     }
@@ -58,11 +58,17 @@ const postSlice = createSlice({
                     state.posts = posts
                     state.suggestedPosts = suggestedPosts || []
                 } else {
-                    state.posts = [...state.posts, ...posts]
+                    const existingIds = new Set(state.posts.map(p => p._id))
+                    const uniqueNewPosts = posts.filter(p => !existingIds.has(p._id))
+                    state.posts = [...state.posts, ...uniqueNewPosts]
                 }
                 state.hasMore = hasMore
                 state.page = page
                 state.loading = false
+            })
+            .addCase(fetchPosts.rejected, (state) => {
+                state.loading = false
+                state.hasMore = false
             })
     }
 })

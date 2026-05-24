@@ -1,12 +1,13 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, PhoneCall, PhoneOff, PhoneMissed, PhoneIncoming, VideoIcon } from 'lucide-react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, VideoIcon } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { setViewStory } from '../features/stories/storiesSlice'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/axios'
-import { addMessages, fetchMessages, resetMessages, deleteMessageLocal, editMessageLocal, updateMessageReactionsLocal } from '../features/messages/messagesSlice'
+import { resetMessages, setMessages as setMessagesAction, setNewMessageTrigger } from '../features/messages/messagesSlice'
 import toast from 'react-hot-toast'
 import Loading from '../components/Loading'
 import moment from '../utils/moment'
@@ -17,25 +18,92 @@ import ReactionListModal from '../components/ReactionListModal'
 import localizeMessage from '../utils/localization'
 import { REACTION_ICONS } from '../utils/reactions'
 
-const ChatBox = ({ onStartCall }) => {
+const FLOATING_REACTION_WIDTH = 292
+const FLOATING_REACTION_HEIGHT = 64
+const FLOATING_MENU_WIDTH = 156
+const FLOATING_MENU_HEIGHT = 132
+const MESSAGE_PAGE_SIZE = 30
 
-  const { messages } = useSelector((state) => state.messages)
+const getMessageUserId = (value) => {
+  if (!value) return ''
+  if (typeof value === 'string') return value
+  if (value._id) return value._id.toString()
+  return value.toString?.() || ''
+}
+
+const updateMessagesValue = (currentMessages, updater) => (
+  typeof updater === 'function' ? updater(currentMessages) : updater
+)
+
+const getFloatingPanelPosition = (anchorRect, panelWidth, panelHeight, align = 'left') => {
+  if (typeof window === 'undefined') return { top: 0, left: 0 }
+
+  const margin = 10
+  const preferredTop = anchorRect.top - panelHeight - 8
+  const top = preferredTop < margin
+    ? anchorRect.bottom + 8
+    : preferredTop
+  const preferredLeft = align === 'right'
+    ? anchorRect.right - panelWidth
+    : anchorRect.left
+
+  return {
+    top: Math.max(margin, Math.min(top, window.innerHeight - panelHeight - margin)),
+    left: Math.max(margin, Math.min(preferredLeft, window.innerWidth - panelWidth - margin)),
+  }
+}
+
+const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
+
+  const { userId: routeUserId } = useParams()
+  const userId = chatUserId || routeUserId
+  const isMini = variant === 'mini'
+  const isEmbedded = variant === 'embedded'
+
   const currentUser = useSelector((state) => state.user.value)
-  const { userId } = useParams()
+  const reduxConnections = useSelector((state) => state.connections.connections)
+  const newMessageTrigger = useSelector((state) => state.messages.newMessageTrigger)
+  const [localMessages, setLocalMessages] = useState([])
+  const messages = localMessages
+  const currentUserId = getMessageUserId(currentUser)
+
   const { getToken } = useAuth()
   const navigate = useNavigate()
   const dispatch = useDispatch()
+  const { socketRef } = useSocket()
+
+  const [hasMoreMessages, setHasMoreMessages] = useState(true)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const prevScrollHeightRef = useRef(0)
+  const preserveScrollRef = useRef(false)
+  const messagesRef = useRef([])
+
+  useEffect(() => {
+    messagesRef.current = messages || []
+  }, [messages])
+
+  const setMessages = useCallback((updater) => {
+    const nextMessages = updateMessagesValue(messagesRef.current, updater)
+    messagesRef.current = nextMessages
+    setLocalMessages(nextMessages)
+    // Also dispatch to Redux for global socket listener updates
+    dispatch(setMessagesAction(nextMessages))
+  }, [dispatch])
 
   const [text, setText] = useState('')
   const [images, setImages] = useState([])
   const [videos, setVideos] = useState([])
   const [imagePreviews, setImagePreviews] = useState([])
   const [videoPreviews, setVideoPreviews] = useState([])
+  const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const shouldAutoScrollRef = useRef(true)
+  const isSendingMessageRef = useRef(false)
+  const isForwardingRef = useRef(false)
+  const miniReadMarkedRef = useRef(false)
   const messageRefs = useRef({})   // map of _id → DOM element for scroll-to
 
   // Voice recording states
@@ -59,12 +127,17 @@ const ChatBox = ({ onStartCall }) => {
   const [connections, setConnections] = useState([])
   const [forwardSelected, setForwardSelected] = useState([])
   const [forwardSearch, setForwardSearch] = useState('')
+  const [isForwarding, setIsForwarding] = useState(false)
 
   // Media Viewer and Reaction states
   const [mediaViewerOpen, setMediaViewerOpen] = useState(false)
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0)
   const [reactionMenuId, setReactionMenuId] = useState(null)
+  const [reactionMenuPosition, setReactionMenuPosition] = useState(null)
+  const [actionMenuPosition, setActionMenuPosition] = useState(null)
   const [showReactionListMsg, setShowReactionListMsg] = useState(null)
+  const imageInputId = `${variant}-images-${userId || 'chat'}`
+  const videoInputId = `${variant}-videos-${userId || 'chat'}`
 
   const handleStoryClick = async (storyId) => {
     if (!storyId) return toast.error('Tin không còn khả dụng')
@@ -84,7 +157,7 @@ const ChatBox = ({ onStartCall }) => {
 
   const allMedia = React.useMemo(() => {
     const mediaItems = []
-    const sortedMessages = [...messages].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    const sortedMessages = [...(messages || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
     sortedMessages.forEach(msg => {
       if (!msg.is_deleted && msg.message_type !== 'voice' && msg.forwarded_type !== 'story' && msg.media_urls && msg.media_urls.length > 0) {
         msg.media_urls.forEach(url => {
@@ -302,7 +375,12 @@ const ChatBox = ({ onStartCall }) => {
       if (data.success) {
         URL.revokeObjectURL(audioPreviewUrl)
         setAudioBlob(null); setAudioPreviewUrl(null); setRecordingTime(0)
-        dispatch(addMessages(data.message))
+        setMessages((prev) => (
+          prev.some((message) => message._id === data.message._id)
+            ? prev
+            : [...prev, data.message]
+        ))
+        dispatch(setNewMessageTrigger(Date.now()))
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
       } else throw new Error(data.message)
     } catch (error) { toast.error(localizeMessage(error.message)) }
@@ -327,42 +405,154 @@ const ChatBox = ({ onStartCall }) => {
   }
 
   const handleDelete = async (messageId) => {
+    const previousMessage = messages.find((message) => message._id === messageId)
+    closeMessageActions()
+    setMessages((prev) => prev.map(msg =>
+      msg._id === messageId
+        ? { ...msg, is_deleted: true, text: '', media_urls: [], media_ids: [] }
+        : msg
+    ))
+
     try {
       const token = await getToken()
       const { data } = await api.post('/api/message/delete', { messageId }, { headers: { Authorization: `Bearer ${token}` } })
-      if (data.success) dispatch(deleteMessageLocal(messageId))
-      else toast.error(localizeMessage(data.message))
-    } catch (e) { toast.error(localizeMessage(e.message)) }
-    setOpenMenuId(null)
+      if (!data.success) throw new Error(data.message)
+      dispatch(setNewMessageTrigger(Date.now()))
+    } catch (e) {
+      if (previousMessage) {
+        setMessages((prev) => prev.map((message) => (
+          message._id === messageId ? previousMessage : message
+        )))
+      }
+      toast.error(localizeMessage(e.message))
+    }
   }
 
   const handleEditSave = async () => {
-    if (!editingMsg || !editText.trim()) return
+    const nextText = editText.trim()
+    if (!editingMsg || !nextText) return
+
+    const messageId = editingMsg._id
+    const previousMessage = messages.find((message) => message._id === messageId)
+    setMessages((prev) => prev.map(msg =>
+      msg._id === messageId
+        ? { ...msg, text: nextText, is_edited: true }
+        : msg
+    ))
+    setEditingMsg(null)
+    setEditText('')
+    setText('')
+    closeMessageActions()
+
     try {
       const token = await getToken()
-      const { data } = await api.post('/api/message/edit', { messageId: editingMsg._id, text: editText }, { headers: { Authorization: `Bearer ${token}` } })
-      if (data.success) {
-        dispatch(editMessageLocal({ messageId: editingMsg._id, text: editText.trim() }))
-        setEditingMsg(null); setEditText(''); setText('')
-      } else toast.error(localizeMessage(data.message))
-    } catch (e) { toast.error(localizeMessage(e.message)) }
+      const { data } = await api.post('/api/message/edit', { messageId, text: nextText }, { headers: { Authorization: `Bearer ${token}` } })
+      if (!data.success) throw new Error(data.message)
+      dispatch(setNewMessageTrigger(Date.now()))
+    } catch (e) {
+      if (previousMessage) {
+        setMessages((prev) => prev.map((message) => (
+          message._id === messageId ? previousMessage : message
+        )))
+      }
+      toast.error(localizeMessage(e.message))
+    }
+  }
+
+  const closeMessageActions = () => {
+    setOpenMenuId(null)
+    setReactionMenuId(null)
+    setActionMenuPosition(null)
+    setReactionMenuPosition(null)
+  }
+
+  const openReactionPicker = (event, message, isOwn) => {
+    event.stopPropagation()
+    setOpenMenuId(null)
+    setActionMenuPosition(null)
+
+    if (reactionMenuId === message._id) {
+      setReactionMenuId(null)
+      setReactionMenuPosition(null)
+      return
+    }
+
+    setReactionMenuId(message._id)
+    setReactionMenuPosition(getFloatingPanelPosition(
+      event.currentTarget.getBoundingClientRect(),
+      FLOATING_REACTION_WIDTH,
+      FLOATING_REACTION_HEIGHT,
+      isOwn ? 'right' : 'left'
+    ))
+  }
+
+  const openActionMenu = (event, message, isOwn) => {
+    event.stopPropagation()
+    setReactionMenuId(null)
+    setReactionMenuPosition(null)
+
+    if (openMenuId === message._id) {
+      setOpenMenuId(null)
+      setActionMenuPosition(null)
+      return
+    }
+
+    setOpenMenuId(message._id)
+    setActionMenuPosition(getFloatingPanelPosition(
+      event.currentTarget.getBoundingClientRect(),
+      FLOATING_MENU_WIDTH,
+      FLOATING_MENU_HEIGHT,
+      isOwn ? 'right' : 'left'
+    ))
   }
 
   const handleReply = (message) => {
     setReplyingTo(message)
-    setOpenMenuId(null)
+    closeMessageActions()
   }
 
   const handleReactMessage = async (messageId, reactionType) => {
+    const previousMessage = messages.find((message) => message._id === messageId)
+    closeMessageActions()
+    setMessages((prev) => prev.map(msg => {
+      if (msg._id !== messageId) return msg
+
+      const reactions = msg.reactions || []
+      const currentReactionIndex = reactions.findIndex(r => (r.user?._id || r.user) === currentUser?._id)
+      let nextReactions = reactions
+
+      if (currentReactionIndex === -1) {
+        nextReactions = [...reactions, { user: currentUser, type: reactionType }]
+      } else if (reactions[currentReactionIndex].type === reactionType) {
+        nextReactions = reactions.filter((_, index) => index !== currentReactionIndex)
+      } else {
+        nextReactions = reactions.map((reaction, index) => (
+          index === currentReactionIndex ? { ...reaction, type: reactionType, user: reaction.user || currentUser } : reaction
+        ))
+      }
+
+      return { ...msg, reactions: nextReactions }
+    }))
+
     try {
       const token = await getToken()
       const { data } = await api.post('/api/message/react', { messageId, reactionType }, { headers: { Authorization: `Bearer ${token}` } })
       if (data.success) {
-        dispatch(updateMessageReactionsLocal({ messageId, reactions: data.messageData.reactions }))
-      } else toast.error(localizeMessage(data.message))
-    } catch (e) { toast.error(localizeMessage(e.message)) }
-    setReactionMenuId(null)
-    setOpenMenuId(null)
+        setMessages((prev) => prev.map(msg =>
+          msg._id === messageId
+            ? { ...msg, reactions: data.messageData.reactions }
+            : msg
+        ))
+        dispatch(setNewMessageTrigger(Date.now()))
+      } else throw new Error(data.message)
+    } catch (e) {
+      if (previousMessage) {
+        setMessages((prev) => prev.map((message) => (
+          message._id === messageId ? previousMessage : message
+        )))
+      }
+      toast.error(localizeMessage(e.message))
+    }
   }
 
   const handleForwardOpen = (message) => {
@@ -370,8 +560,9 @@ const ChatBox = ({ onStartCall }) => {
     setShowForwardModal(true)
     setForwardSelected([])
     setForwardSearch('')
-    fetchConnections()
-    setOpenMenuId(null)
+    setConnections(reduxConnections || [])
+    if (!reduxConnections?.length) fetchConnections()
+    closeMessageActions()
   }
 
   const closeForwardModal = () => {
@@ -384,25 +575,56 @@ const ChatBox = ({ onStartCall }) => {
   // ── FIX: forward media (images / videos / voice) by passing media_urls + message_type ──
   const handleForwardSend = async () => {
     if (forwardSelected.length === 0) return toast.error('Vui lòng chọn ít nhất một người')
+    if (isForwardingRef.current) return
+
+    const selectedIds = [...forwardSelected]
+    const messageToForward = forwardingMsg
+    if (!messageToForward) return
+
+    const shouldAppendToCurrentChat = selectedIds.includes(userId)
+    const tempMessageId = `temp-forward-${Date.now()}`
+    const isLink = messageToForward?.text && /https?:\/\/|\/post\//.test(messageToForward.text)
+
+    isForwardingRef.current = true
+    setIsForwarding(true)
+    closeForwardModal()
+
+    if (shouldAppendToCurrentChat && messageToForward) {
+      setMessages((prev) => [...prev, {
+        _id: tempMessageId,
+        from_user_id: currentUser,
+        to_user_id: userId,
+        text: messageToForward?.text || '',
+        media_urls: messageToForward?.forwarded_type === 'story' ? [] : (messageToForward?.media_urls || []),
+        message_type: messageToForward?.forwarded_type === 'story'
+          ? 'text'
+          : (messageToForward?.message_type || 'text'),
+        is_forwarded: true,
+        forwarded_type: isLink ? 'link' : 'message',
+        createdAt: new Date().toISOString(),
+        is_pending: true,
+      }])
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
+
     try {
       const token = await getToken()
-      const isLink = forwardingMsg?.text && /https?:\/\/|\/post\//.test(forwardingMsg.text)
 
       await Promise.all(
-        forwardSelected.map(async uid => {
+        selectedIds.map(async uid => {
           const formData = new FormData()
           formData.append('to_user_id', uid)
-          formData.append('text', forwardingMsg?.text || '')
+          formData.append('text', messageToForward?.text || '')
           formData.append('is_forwarded', 'true')
           formData.append('forwarded_type', isLink ? 'link' : 'message')
 
           // ✅ Pass pre-existing media URLs so the backend can attach them
           // DO NOT pass media if it's a story reply, as that media belongs to the story, not the reply message itself.
-          const isStoryReply = forwardingMsg?.forwarded_type === 'story'
-          const urls = isStoryReply ? [] : (forwardingMsg?.media_urls || [])
+          const isStoryReply = messageToForward?.forwarded_type === 'story'
+          const urls = isStoryReply ? [] : (messageToForward?.media_urls || [])
           if (urls.length > 0) {
             urls.forEach(url => formData.append('media_urls[]', url))
-            formData.append('message_type', forwardingMsg?.message_type || 'images')
+            formData.append('message_type', messageToForward?.message_type || 'images')
           } else if (isStoryReply) {
             formData.append('message_type', 'text')
           }
@@ -410,16 +632,34 @@ const ChatBox = ({ onStartCall }) => {
           const res = await api.post('/api/message/send', formData, {
             headers: { Authorization: `Bearer ${token}` }
           })
+          if (!res.data.success) throw new Error(res.data.message)
+
           if (uid === userId && res.data.success) {
-            dispatch(addMessages(res.data.message))
+            setMessages((prev) => {
+              if (prev.some((message) => message._id === res.data.message._id)) {
+                return prev.filter((message) => message._id !== tempMessageId)
+              }
+              if (prev.some((message) => message._id === tempMessageId)) {
+                return prev.map((message) => message._id === tempMessageId ? res.data.message : message)
+              }
+              return [...prev, res.data.message]
+            })
           }
           return res
         })
       )
       toast.success('Đã chuyển tiếp tin nhắn')
-      closeForwardModal()
+      dispatch(setNewMessageTrigger(Date.now()))
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-    } catch (e) { toast.error(localizeMessage(e.message)) }
+    } catch (e) {
+      if (shouldAppendToCurrentChat) {
+        setMessages((prev) => prev.filter((message) => message._id !== tempMessageId))
+      }
+      toast.error(localizeMessage(e.message))
+    } finally {
+      isForwardingRef.current = false
+      setIsForwarding(false)
+    }
   }
 
   // ── Scroll to a specific message by id ──────────────────────
@@ -453,29 +693,105 @@ const ChatBox = ({ onStartCall }) => {
     return diffMins >= 0 && diffMins <= 30
   }
 
-  const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
     try {
       const { data } = await api.post('/api/user/profiles', { profileId: userId })
       if (data.success) setUser(data.profile)
     } catch (error) { toast.error(localizeMessage(error.message)) }
     finally { setLoading(false) }
-  }
+  }, [userId])
 
-  const fetchUserMessages = async () => {
+  const fetchUserMessages = useCallback(async () => {
     try {
       const token = await getToken()
-      dispatch(fetchMessages({ token, userId }))
+      const { data } = await api.post('/api/message/get', {
+        to_user_id: userId,
+        limit: MESSAGE_PAGE_SIZE,
+        mark_read: !isMini,
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (data.success) {
+        setMessages(data.messages || [])
+        setHasMoreMessages(!!data.hasMore)
+      } else {
+        toast.error(localizeMessage(data.message))
+      }
     } catch (error) { toast.error(localizeMessage(error.message)) }
-  }
+  }, [getToken, isMini, setMessages, userId])
+
+  const fetchOlderMessages = useCallback(async () => {
+    if (loadingOlder || !hasMoreMessages || !userId) return
+
+    const currentMessages = messagesRef.current || []
+    const oldestMessage = currentMessages
+      .filter((message) => message?._id && !message._id.startsWith?.('temp-'))
+      .toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0]
+
+    if (!oldestMessage?._id) {
+      setHasMoreMessages(false)
+      return
+    }
+
+    const container = messagesContainerRef.current
+    if (container) prevScrollHeightRef.current = container.scrollHeight
+
+    setLoadingOlder(true)
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/message/get', {
+        to_user_id: userId,
+        limit: MESSAGE_PAGE_SIZE,
+        before: oldestMessage._id,
+        mark_read: !isMini,
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (!data.success) throw new Error(data.message)
+
+      const olderMessages = data.messages || []
+      if (olderMessages.length === 0) {
+        setHasMoreMessages(false)
+        return
+      }
+
+      preserveScrollRef.current = true
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((message) => message._id))
+        const uniqueOlderMessages = olderMessages.filter((message) => !existingIds.has(message._id))
+        return [...uniqueOlderMessages, ...prev]
+      })
+      setHasMoreMessages(!!data.hasMore)
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [getToken, hasMoreMessages, isMini, loadingOlder, setMessages, userId])
+
+  useLayoutEffect(() => {
+    if (preserveScrollRef.current && messagesContainerRef.current) {
+      const container = messagesContainerRef.current
+      container.scrollTop = container.scrollHeight - prevScrollHeightRef.current
+      preserveScrollRef.current = false
+    }
+  }, [messages])
+
 
   const sendMessage = async () => {
     if (editingMsg) { handleEditSave(); return }
+    if (isSendingMessageRef.current) return
     try {
-      if (!text && images.length === 0 && videos.length === 0) return
+      const messageText = text.trim()
+      if (!messageText && images.length === 0 && videos.length === 0) return
+      isSendingMessageRef.current = true
+      setIsSendingMessage(true)
       const token = await getToken()
       const formData = new FormData()
       formData.append('to_user_id', userId)
-      formData.append('text', text)
+      formData.append('text', messageText)
       if (replyingTo) formData.append('reply_to', replyingTo._id)
       images.forEach((img) => formData.append('images', img))
       videos.forEach((vid) => formData.append('videos', vid))
@@ -487,36 +803,120 @@ const ChatBox = ({ onStartCall }) => {
         imagePreviews.forEach(url => URL.revokeObjectURL(url))
         videoPreviews.forEach(url => URL.revokeObjectURL(url))
         setImages([]); setVideos([]); setImagePreviews([]); setVideoPreviews([])
-        dispatch(addMessages(data.message))
+        setMessages((prev) => (
+          prev.some((message) => message._id === data.message._id)
+            ? prev
+            : [...prev, data.message]
+        ))
+        dispatch(setNewMessageTrigger(Date.now()))
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
       } else throw new Error(data.message)
     } catch (error) { toast.error(localizeMessage(error.message)) }
+    finally {
+      isSendingMessageRef.current = false
+      setIsSendingMessage(false)
+    }
   }
 
-  const markMessagesAsRead = async () => {
+  const handleInputKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (isSendingMessageRef.current) return
+    editingMsg ? handleEditSave() : sendMessage()
+  }
+
+  const markMessagesAsRead = useCallback(async () => {
     try {
       const token = await getToken()
       await api.post('/api/user/mark-messages-read', { from_user_id: userId }, { headers: { Authorization: `Bearer ${token}` } })
     } catch (error) { console.error('mark-as-read error:', error) }
+  }, [getToken, userId])
+
+  const markMiniMessagesAsRead = () => {
+    if (!isMini || miniReadMarkedRef.current) return
+    miniReadMarkedRef.current = true
+    markMessagesAsRead()
+    dispatch(setNewMessageTrigger(Date.now()))
   }
 
+  // Socket listeners removed — App.jsx handles socket events and dispatches to Redux
+  // This approach (Redux only, no local socket listeners) is faster and prevents duplicate updates
+
+  // Local socket listeners (optimistic UI for this chat only)
   useEffect(() => {
+    const socket = socketRef?.current
+    if (!socket || !userId) return
+
+    const handleNewMessage = (message) => {
+      const fromId = getMessageUserId(message.from_user_id)
+      const toId = getMessageUserId(message.to_user_id)
+      // Only handle messages that belong to this chat (either sent to or from this user)
+      if (fromId !== userId && toId !== userId) return
+
+      // Append if not present
+      setMessages((prev) => (
+        prev.some((m) => m._id === message._id) ? prev : [...prev, message]
+      ))
+    }
+
+    const handleReactionUpdated = ({ messageId, reactions }) => {
+      setMessages((prev) => prev.map((m) => (
+        m._id === messageId ? { ...m, reactions } : m
+      )))
+    }
+
+    const handleEdited = ({ messageId, text }) => {
+      setMessages((prev) => prev.map((m) => (
+        m._id === messageId ? { ...m, text, is_edited: true } : m
+      )))
+    }
+
+    const handleDeleted = ({ messageId }) => {
+      setMessages((prev) => prev.map((m) => (
+        m._id === messageId ? { ...m, is_deleted: true, text: '', media_urls: [] } : m
+      )))
+    }
+
+    socket.on('new-message', handleNewMessage)
+    socket.on('message-reaction-updated', handleReactionUpdated)
+    socket.on('message-edited', handleEdited)
+    socket.on('message-deleted', handleDeleted)
+
+    return () => {
+      socket.off('new-message', handleNewMessage)
+      socket.off('message-reaction-updated', handleReactionUpdated)
+      socket.off('message-edited', handleEdited)
+      socket.off('message-deleted', handleDeleted)
+    }
+  }, [socketRef, userId, setMessages])
+
+  useEffect(() => {
+    if (!userId) return
+    miniReadMarkedRef.current = false
+    setHasMoreMessages(true)
+    setLoadingOlder(false)
     fetchUserData()
     fetchUserMessages()
-    markMessagesAsRead()
+    if (!isMini) markMessagesAsRead()
     return () => {
-      markMessagesAsRead()
-      dispatch(resetMessages())
+      if (!isMini) markMessagesAsRead()
+      // Only reset the global messages slice for full-page chat (not mini chat boxes)
+      if (!isMini) dispatch(resetMessages())
       imagePreviews.forEach(url => URL.revokeObjectURL(url))
       videoPreviews.forEach(url => URL.revokeObjectURL(url))
     }
-  }, [userId])
+  }, [fetchUserData, fetchUserMessages, isMini, markMessagesAsRead, userId, dispatch])
+
+  useEffect(() => {
+    if (!newMessageTrigger || !userId) return
+    if (!isMini) markMessagesAsRead()
+  }, [isMini, markMessagesAsRead, newMessageTrigger, userId])
 
   useEffect(() => {
     if (messages.length === 0) return
     const sorted = [...messages].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    if (sorted[0]?.from_user_id?._id === userId) markMessagesAsRead()
-  }, [messages.length])
+    if (!isMini && sorted[0]?.from_user_id?._id === userId) markMessagesAsRead()
+  }, [isMini, markMessagesAsRead, messages, userId])
 
   useEffect(() => {
     if (messages.length > 0 && shouldAutoScrollRef.current) {
@@ -524,10 +924,15 @@ const ChatBox = ({ onStartCall }) => {
     }
   }, [messages])
 
-  if (loading) return <Loading height='100vh' />
-
-  // ── Call helpers ─────────────────────────────────────────────────────────
-  const { socketRef } = useSocket()
+  if (loading) {
+    return isMini
+      ? (
+        <div className='flex h-[33rem] w-[25rem] items-center justify-center rounded-t-2xl border border-slate-200 bg-white shadow-2xl'>
+          <Loading height='10rem' />
+        </div>
+      )
+      : <Loading height={isEmbedded ? '100%' : '100vh'} />
+  }
 
   const startCall = (callType) => {
     if (!onStartCall || !socketRef.current || !user) return
@@ -554,15 +959,34 @@ const ChatBox = ({ onStartCall }) => {
     return ` · ${m}:${s}`
   }
 
+  const shellClass = isMini
+    ? 'flex h-[33rem] w-[25rem] flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl'
+    : isEmbedded
+      ? 'flex h-full min-h-0 flex-col bg-slate-100'
+      : 'flex h-screen flex-col bg-slate-100'
+  const floatingReactionMessage = reactionMenuId
+    ? messages.find((message) => message._id === reactionMenuId)
+    : null
+  const floatingActionMessage = openMenuId
+    ? messages.find((message) => message._id === openMenuId)
+    : null
+  const floatingReaction = floatingReactionMessage?.reactions?.find((reaction) => (
+    (reaction.user?._id || reaction.user) === currentUser?._id
+  ))?.type
+  const floatingActionIsOwn = getMessageUserId(floatingActionMessage?.from_user_id) === currentUserId
+  const canUsePortal = typeof document !== 'undefined'
+  const forwardConnections = connections.length > 0 ? connections : (reduxConnections || [])
+
   return user && (
-    <div className='flex h-screen flex-col bg-slate-100'>
+    <div className={shellClass} onFocusCapture={markMiniMessagesAsRead} onPointerDown={markMiniMessagesAsRead}>
       {/* ── Header ── */}
-      <div className='surface m-3 mb-0 flex items-center rounded-[1.4rem] px-4 py-3'>
-        <img src={user.profile_picture} alt="" className='size-11 rounded-full object-cover avatar-ring' />
-        <div className='ml-4 flex-1'>
-          <p className='font-black text-slate-900'>{user.full_name}</p>
-          <p className='text-sm text-slate-500'>@{user.username}</p>
+      <div className={isMini ? 'flex items-center border-b border-slate-200 bg-white px-3 py-2' : 'surface m-3 mb-0 flex items-center rounded-[1.4rem] px-4 py-3'}>
+        <img src={user.profile_picture} alt="" className={`${isMini ? 'size-9' : 'size-11 avatar-ring'} rounded-full object-cover`} />
+        <div className={`${isMini ? 'ml-2' : 'ml-4'} min-w-0 flex-1`}>
+          <p className={`${isMini ? 'text-sm' : ''} truncate font-black text-slate-900`}>{user.full_name}</p>
+          <p className='truncate text-sm text-slate-500'>@{user.username}</p>
         </div>
+        {/* Call buttons */}
         {/* Call buttons */}
         <div className='flex items-center gap-1'>
           <button
@@ -581,21 +1005,39 @@ const ChatBox = ({ onStartCall }) => {
           >
             <VideoIcon size={20} />
           </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              title='Đóng'
+              className='p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer'
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
       </div>
 
       {/* ── Messages area ── */}
       <div
-        className='px-3 md:px-6 h-full overflow-y-scroll bg-[radial-gradient(circle_at_top,rgba(6,182,212,0.08),transparent_30rem),#f8fafc]'
+        className={isMini ? 'min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-white px-4' : 'min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 md:px-6 bg-[radial-gradient(circle_at_top,rgba(6,182,212,0.08),transparent_30rem),#f8fafc]'}
         ref={messagesContainerRef}
         onScroll={() => {
+          if (openMenuId || reactionMenuId) closeMessageActions()
           if (messagesContainerRef.current) {
             const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current
             shouldAutoScrollRef.current = scrollHeight - scrollTop - clientHeight < 100
+            if (scrollTop < 100 && hasMoreMessages && !loadingOlder) {
+              fetchOlderMessages()
+            }
           }
         }}
       >
-        <div className='mx-auto max-w-4xl space-y-2 py-5' onClick={() => setOpenMenuId(null)}>
+        <div className={isMini ? 'space-y-2 py-3' : 'mx-auto max-w-4xl space-y-2 py-5'} onClick={closeMessageActions}>
+          {loadingOlder && (
+            <div className='flex justify-center py-2'>
+              <Loading height='2.5rem' />
+            </div>
+          )}
           {messages.toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).map((message, index) => {
             if (message.message_type === 'reaction') return null;
 
@@ -609,7 +1051,6 @@ const ChatBox = ({ onStartCall }) => {
               const isVideo = call_type === 'video'
               const isMissed = call_status === 'missed'
               const isRejected = call_status === 'rejected'
-              const isCompleted = call_status === 'completed'
               const callIcon = isMissed ? '📵' : isRejected ? '❌' : isVideo ? '📹' : '📞'
               const statusLabel = isMissed
                 ? (isOwn ? 'Đã bỏ lỡ cuộc gọi' : 'Đã bỏ lỡ cuộc gọi của bạn')
@@ -677,12 +1118,11 @@ const ChatBox = ({ onStartCall }) => {
               .sort((a, b) => b[1] - a[1])
               .slice(0, 3)
               .map(entry => entry[0])
-            const currentUserReaction = reactions.find(r => (r.user?._id || r.user) === currentUser?._id)?.type;
 
             // ── Inline action buttons (no pill, no border) ──────────
             const ActionButtons = ({ side }) => !message.is_deleted && (
               <div className={`
-                flex items-center gap-0.5 self-end mb-1
+                z-20 flex shrink-0 items-center gap-0.5 self-end mb-1
                 opacity-0 group-hover:opacity-100 transition-opacity duration-150
                 ${side === 'left' ? 'order-first' : 'order-last'}
               `}>
@@ -693,57 +1133,20 @@ const ChatBox = ({ onStartCall }) => {
                 >
                   <Reply size={15} />
                 </button>
-                <div className='relative'>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setReactionMenuId(reactionMenuOpen ? null : message._id); setOpenMenuId(null) }}
-                    className='p-1 text-gray-400 hover:text-cyan-600 transition-colors'
-                    title='Bày tỏ cảm xúc'
-                  >
-                    <SmilePlus size={15} />
-                  </button>
-                  {reactionMenuOpen && (
-                    <div className={`absolute ${isOwn ? 'right-0' : 'left-0'} bottom-8 z-50`} onClick={e => e.stopPropagation()}>
-                      <ReactionPicker onReact={(type) => handleReactMessage(message._id, type)} currentReaction={currentUserReaction} />
-                    </div>
-                  )}
-                </div>
-                <div className='relative'>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setOpenMenuId(menuOpen ? null : message._id) }}
-                    className='p-1 text-gray-400 hover:text-cyan-600 transition-colors'
-                  >
-                    <MoreVertical size={15} />
-                  </button>
-                  {menuOpen && (
-                    <div
-                      className={`absolute ${isOwn ? 'right-0' : 'left-0'} bottom-8 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50 min-w-[130px]`}
-                      onClick={e => e.stopPropagation()}
-                    >
-                      {isOwn && isEditable(message) && (
-                        <button
-                          onClick={() => { setEditingMsg(message); setEditText(message.text || ''); setText(message.text || ''); setOpenMenuId(null) }}
-                          className='w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50'
-                        >
-                          <Pencil size={13} /> Sửa
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleForwardOpen(message)}
-                        className='w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50'
-                      >
-                        <CornerUpRight size={13} /> Chuyển tiếp
-                      </button>
-                      {isOwn && (
-                        <button
-                          onClick={() => handleDelete(message._id)}
-                          className='w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50'
-                        >
-                          <Trash2 size={13} /> Xóa
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <button
+                  onClick={(event) => openReactionPicker(event, message, isOwn)}
+                  className={`p-1 transition-colors ${reactionMenuOpen ? 'text-cyan-600' : 'text-gray-400 hover:text-cyan-600'}`}
+                  title='Bày tỏ cảm xúc'
+                >
+                  <SmilePlus size={15} />
+                </button>
+                <button
+                  onClick={(event) => openActionMenu(event, message, isOwn)}
+                  className={`p-1 transition-colors ${menuOpen ? 'text-cyan-600' : 'text-gray-400 hover:text-cyan-600'}`}
+                  title='Tác vụ khác'
+                >
+                  <MoreVertical size={15} />
+                </button>
               </div>
             )
 
@@ -763,7 +1166,7 @@ const ChatBox = ({ onStartCall }) => {
                 {/* ── Message row: [actions-left] [bubble] [actions-right] ── */}
                 <div
                   className={`group flex items-end gap-1 ${isOwn ? 'justify-end' : 'justify-start'} mb-3 relative`}
-                  onClick={() => { setOpenMenuId(null); setReactionMenuId(null) }}
+                  onClick={closeMessageActions}
                 >
                   {/* Own messages: actions LEFT of bubble */}
                   {isOwn && <ActionButtons side='left' />}
@@ -772,7 +1175,7 @@ const ChatBox = ({ onStartCall }) => {
                     {/* ── Bubble ── */}
                     <div className={`
                     p-3 text-sm
-                    max-w-[70vw] md:max-w-lg lg:max-w-xl
+                    ${isMini ? 'max-w-[16.5rem]' : 'max-w-[70vw] md:max-w-lg lg:max-w-xl'}
                     rounded-[1.25rem] shadow-sm
                     ${message.is_deleted
                         ? 'bg-slate-100 text-slate-400 italic border border-dashed border-slate-300 rounded-br-none'
@@ -857,8 +1260,8 @@ const ChatBox = ({ onStartCall }) => {
                                 const isVideo = url.match(/\.(mp4|webm|mov|ogg)$/i) || message.message_type?.includes('video')
                                 return isVideo
                                   ? (
-                                    <div key={idx} onClick={() => openMediaViewer(url)} className="relative group cursor-pointer w-full max-w-sm rounded-lg overflow-hidden border border-gray-100">
-                                      <video src={url} className='w-full' />
+                                    <div key={idx} onClick={() => openMediaViewer(url)} className={`relative group cursor-pointer w-full ${isMini ? 'max-w-[13.5rem]' : 'max-w-[18rem]'} rounded-lg overflow-hidden border border-gray-100`}>
+                                      <video src={url} className='max-h-[14rem] w-full object-cover' />
                                       <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition">
                                         <div className="bg-white/80 p-3 rounded-full backdrop-blur-sm shadow-sm group-hover:scale-110 transition-transform">
                                           <div className="w-0 h-0 border-t-[6px] border-t-transparent border-l-[10px] border-l-gray-800 border-b-[6px] border-b-transparent ml-1"></div>
@@ -866,7 +1269,7 @@ const ChatBox = ({ onStartCall }) => {
                                       </div>
                                     </div>
                                   )
-                                  : <img key={idx} src={url} alt='sent-image' onClick={() => openMediaViewer(url)} className='cursor-pointer w-full max-w-sm rounded-lg hover:brightness-95 transition border border-gray-100' />
+                                  : <img key={idx} src={url} alt='sent-image' onClick={() => openMediaViewer(url)} className={`cursor-pointer w-full ${isMini ? 'max-w-[13.5rem]' : 'max-w-[18rem]'} max-h-[14rem] rounded-lg border border-gray-100 object-contain transition hover:brightness-95`} />
                               })}
                             </div>
                           )}
@@ -907,7 +1310,7 @@ const ChatBox = ({ onStartCall }) => {
       </div>
 
       {/* ── Input area ── */}
-      <div className='px-4 pb-5 pt-2 bg-slate-100'>
+      <div className={isMini ? 'border-t border-slate-100 bg-white px-3 pb-3 pt-2' : 'px-4 pb-5 pt-2 bg-slate-100'}>
         {/* Media previews */}
         {(imagePreviews.length > 0 || videoPreviews.length > 0) && (
           <div className='flex flex-wrap gap-2 mb-3 p-3 bg-white rounded-lg border border-gray-200 max-w-4xl mx-auto'>
@@ -1001,48 +1404,108 @@ const ChatBox = ({ onStartCall }) => {
         )}
 
         {/* Main input bar */}
-        <div className='surface flex items-center gap-3 pl-5 p-2 w-full max-w-2xl mx-auto rounded-full'>
+        <div className={isMini ? 'flex w-full items-center gap-2 rounded-full bg-slate-100 px-3 py-2' : 'surface flex items-center gap-3 pl-5 p-2 w-full max-w-2xl mx-auto rounded-full'}>
           <input
             type="text"
-            className='flex-1 outline-none text-slate-700 bg-transparent'
+            className='min-w-0 flex-1 bg-transparent text-slate-700 outline-none'
             placeholder={editingMsg ? 'Sửa tin nhắn...' : 'Nhập tin nhắn...'}
-            onKeyDown={e => e.key === 'Enter' && (editingMsg ? handleEditSave() : sendMessage())}
+            onKeyDown={handleInputKeyDown}
             onChange={(e) => { setText(e.target.value); if (editingMsg) setEditText(e.target.value) }}
             value={text}
           />
-          <label htmlFor="images" className='group relative cursor-pointer'>
-            <ImageIcon className='size-6 text-gray-400 hover:text-gray-600 transition' />
+          <label htmlFor={imageInputId} className='group relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-400 transition hover:bg-white hover:text-gray-600'>
+            <ImageIcon className='size-5' />
             <span className='pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
               Thêm ảnh
             </span>
-            <input type="file" id='images' accept='image/*' hidden multiple onChange={handleImagesChange} />
+            <input type="file" id={imageInputId} accept='image/*' hidden multiple onChange={handleImagesChange} />
           </label>
-          <label htmlFor="videos" className='group relative cursor-pointer'>
-            <Video className='size-6 text-gray-400 hover:text-gray-600 transition' />
+          <label htmlFor={videoInputId} className='group relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-gray-400 transition hover:bg-white hover:text-gray-600'>
+            <Video className='size-5' />
             <span className='pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
               Thêm video
             </span>
-            <input type="file" id='videos' accept='video/*' hidden multiple onChange={handleVideosChange} />
+            <input type="file" id={videoInputId} accept='video/*' hidden multiple onChange={handleVideosChange} />
           </label>
           <button
+            type='button'
             onClick={isRecording ? stopRecording : startRecording}
             disabled={!!audioBlob}
-            className={`group relative cursor-pointer transition p-1 rounded-full ${isRecording ? 'text-red-500 animate-pulse' : audioBlob ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-cyan-600'}`}
+            className={`group relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition ${isRecording ? 'text-red-500 animate-pulse' : audioBlob ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:bg-white hover:text-cyan-600'}`}
             title={isRecording ? 'Dừng ghi âm' : 'Bắt đầu ghi âm'}
           >
-            <Mic size={22} />
+            <Mic size={20} />
             <span className='pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
               {isRecording ? 'Dừng ghi âm' : audioBlob ? 'Đã có ghi âm' : 'Ghi âm'}
             </span>
           </button>
           <button
+            type='button'
             onClick={editingMsg ? handleEditSave : sendMessage}
-            className='btn-primary p-2 cursor-pointer'
+            disabled={isSendingMessage}
+            className='btn-primary size-9 shrink-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70'
+            title={editingMsg ? 'Lưu chỉnh sửa' : 'Gửi tin nhắn'}
           >
-            {editingMsg ? <Check size={18} /> : <SendHorizonal size={18} />}
+            {isSendingMessage
+              ? <span className='inline-block size-4 animate-spin rounded-full border-2 border-white border-t-transparent' />
+              : editingMsg ? <Check size={18} /> : <SendHorizonal size={18} />}
           </button>
         </div>
       </div>
+
+      {canUsePortal && floatingReactionMessage && reactionMenuPosition && createPortal(
+        <div
+          className='fixed z-[9999]'
+          style={{ top: reactionMenuPosition.top, left: reactionMenuPosition.left }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ReactionPicker
+            onReact={(type) => handleReactMessage(floatingReactionMessage._id, type)}
+            currentReaction={floatingReaction}
+          />
+        </div>,
+        document.body
+      )}
+
+      {canUsePortal && floatingActionMessage && actionMenuPosition && createPortal(
+        <div
+          className='fixed z-[9999] min-w-[140px] rounded-xl border border-gray-100 bg-white py-1 shadow-xl'
+          style={{ top: actionMenuPosition.top, left: actionMenuPosition.left }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {floatingActionIsOwn && isEditable(floatingActionMessage) && (
+            <button
+              type='button'
+              onClick={() => {
+                setEditingMsg(floatingActionMessage)
+                setEditText(floatingActionMessage.text || '')
+                setText(floatingActionMessage.text || '')
+                closeMessageActions()
+              }}
+              className='flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50'
+            >
+              <Pencil size={13} /> Sửa
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={() => handleForwardOpen(floatingActionMessage)}
+            className='flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50'
+          >
+            <CornerUpRight size={13} /> Chuyển tiếp
+          </button>
+          {floatingActionIsOwn && (
+            <button
+              type='button'
+              onClick={() => handleDelete(floatingActionMessage._id)}
+              className='flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-500 hover:bg-red-50'
+            >
+              <Trash2 size={13} /> Xóa
+            </button>
+          )}
+        </div>,
+        document.body
+      )}
 
       {/* ── Forward Modal ── */}
       {showForwardModal && (
@@ -1074,7 +1537,7 @@ const ChatBox = ({ onStartCall }) => {
               />
               {/* List */}
               <div className='max-h-52 overflow-y-auto space-y-1'>
-                {connections
+                {forwardConnections
                   .filter(c => c.full_name.toLowerCase().includes(forwardSearch.toLowerCase()) || c.username.toLowerCase().includes(forwardSearch.toLowerCase()))
                   .map(conn => (
                     <label key={conn._id} className='flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 cursor-pointer'>
@@ -1095,10 +1558,10 @@ const ChatBox = ({ onStartCall }) => {
               <button onClick={closeForwardModal} className='flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition'>Hủy</button>
               <button
                 onClick={handleForwardSend}
-                disabled={forwardSelected.length === 0}
+                disabled={forwardSelected.length === 0 || isForwarding}
                 className='flex-1 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-medium transition disabled:opacity-50'
               >
-                Gửi ({forwardSelected.length})
+                {isForwarding ? 'Đang gửi...' : `Gửi (${forwardSelected.length})`}
               </button>
             </div>
           </div>

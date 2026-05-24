@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Clock, Eye, MapPin, MessageCircle, Plus, UserPlus, X } from 'lucide-react'
+import { Clock, MapPin, MessageCircle, Plus, UserPlus, X } from 'lucide-react'
 import { useSelector, useDispatch } from 'react-redux'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
@@ -18,6 +18,23 @@ const UserCard = ({user}) => {
     const isConnected = connectionStatus === 'connected'
     const isPendingSent = connectionStatus === 'pending_sent'
     const isPendingReceived = connectionStatus === 'pending_received'
+
+    const openProfile = () => {
+        navigate('/profile/'+user._id)
+    }
+
+    const handleCardKeyDown = (event) => {
+        if (event.target !== event.currentTarget) return
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            openProfile()
+        }
+    }
+
+    const handleActionClick = (event, action) => {
+        event.stopPropagation()
+        action()
+    }
 
     const refreshUser = async () => {
         dispatch(fetchUser(await getToken()))
@@ -78,6 +95,8 @@ const UserCard = ({user}) => {
             if(data.success) {
                 toast.success(data.message)
                 setConnectionStatus('pending_sent')
+                setIsFollowing(true)
+                refreshUser()
             } else {
                 toast.error(data.message)
             }
@@ -128,10 +147,22 @@ const UserCard = ({user}) => {
     }
 
   return (
-    <article className='surface flex min-h-80 flex-col justify-between rounded-[1.6rem] p-5 transition hover:-translate-y-0.5 hover:shadow-xl'>
+    <article
+        role='button'
+        tabIndex={0}
+        onClick={openProfile}
+        onKeyDown={handleCardKeyDown}
+        className='surface flex min-h-80 flex-col justify-between rounded-[1.6rem] p-5 outline-none transition hover:-translate-y-0.5 hover:shadow-xl focus-visible:ring-4 focus-visible:ring-cyan-100 cursor-pointer'
+    >
         <div className='text-center'>
             <img src={user.profile_picture} alt='' className='rounded-full size-20 object-cover avatar-ring mx-auto'/>
-            <p className='mt-4 text-lg font-black text-slate-900'>{user.full_name}</p>
+            <button
+                type='button'
+                onClick={(event) => handleActionClick(event, openProfile)}
+                className='mx-auto mt-4 block max-w-full truncate text-lg font-black text-slate-900 transition hover:text-cyan-700'
+            >
+                {user.full_name}
+            </button>
             {user.username && <p className='text-sm text-slate-500'>@{user.username}</p>}
             {user.bio && <p className='mt-3 line-clamp-3 px-2 text-center text-sm leading-6 text-slate-600'>{user.bio}</p>}
         </div>
@@ -148,19 +179,16 @@ const UserCard = ({user}) => {
         </div>
 
         <div className='mt-5 flex flex-col gap-3'>
-            <button onClick={() => navigate('/profile/'+user._id)} disabled={loading} className='btn-muted w-full py-2.5 cursor-pointer disabled:opacity-50'>
-                <Eye className='w-4 h-4'/> Xem hồ sơ
-            </button>
-            <button onClick={isFollowing ? handleUnfollow : handleFollow} disabled={loading} className='btn-primary w-full py-2.5 cursor-pointer disabled:opacity-50'>
+            <button onClick={(event) => handleActionClick(event, isFollowing ? handleUnfollow : handleFollow)} disabled={loading} className='btn-primary w-full py-2.5 cursor-pointer disabled:opacity-50'>
                 <UserPlus className='w-4 h-4'/> {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
             </button>
             {connectionStatus === 'none' && (
-                <button onClick={handleConnectionRequest} disabled={loading} className='btn-muted w-full py-2.5 cursor-pointer disabled:opacity-50'>
+                <button onClick={(event) => handleActionClick(event, handleConnectionRequest)} disabled={loading} className='btn-muted w-full py-2.5 cursor-pointer disabled:opacity-50'>
                     <Plus className='w-4 h-4'/> Kết bạn
                 </button>
             )}
             {isPendingSent && (
-                <button onClick={handleCancelConnectionRequest} disabled={loading} className='flex w-full items-center justify-center gap-2 rounded-full border border-amber-200 bg-amber-50 py-2.5 font-bold text-amber-700 transition hover:bg-amber-100 active:scale-95 cursor-pointer disabled:opacity-50'>
+                <button onClick={(event) => handleActionClick(event, handleCancelConnectionRequest)} disabled={loading} className='flex w-full items-center justify-center gap-2 rounded-full border border-amber-200 bg-amber-50 py-2.5 font-bold text-amber-700 transition hover:bg-amber-100 active:scale-95 cursor-pointer disabled:opacity-50'>
                     <X className='w-4 h-4'/> Hủy lời mời
                 </button>
             )}
@@ -171,10 +199,10 @@ const UserCard = ({user}) => {
             )}
             {isConnected && (
                 <div className='flex gap-2'>
-                    <button onClick={() => navigate('/messages/'+user._id)} disabled={loading} className='btn-muted flex-1 py-2.5 cursor-pointer disabled:opacity-50'>
+                    <button onClick={(event) => handleActionClick(event, () => navigate('/messages/'+user._id))} disabled={loading} className='btn-muted flex-1 py-2.5 cursor-pointer disabled:opacity-50'>
                         <MessageCircle className='w-4 h-4'/> Tin nhắn
                     </button>
-                    <button onClick={handleUnconnect} disabled={loading} className='flex flex-1 items-center justify-center gap-2 rounded-full border border-red-200 bg-red-50 py-2.5 font-bold text-red-600 transition hover:bg-red-100 active:scale-95 cursor-pointer disabled:opacity-50'>
+                    <button onClick={(event) => handleActionClick(event, handleUnconnect)} disabled={loading} className='flex flex-1 items-center justify-center gap-2 rounded-full border border-red-200 bg-red-50 py-2.5 font-bold text-red-600 transition hover:bg-red-100 active:scale-95 cursor-pointer disabled:opacity-50'>
                         <X className='w-4 h-4'/> Hủy
                     </button>
                 </div>

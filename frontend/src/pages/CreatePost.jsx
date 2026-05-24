@@ -8,6 +8,8 @@ import api from '../api/axios'
 import { useLocation, useNavigate } from 'react-router-dom'
 import SharedPostPreview from '../components/SharedPostPreview'
 
+const MAX_CONTENT_LENGTH = 5000
+
 const CreatePost = () => {
   const navigate = useNavigate()
   const location = useLocation()
@@ -110,6 +112,10 @@ const CreatePost = () => {
       throw new Error('Vui lòng thêm nội dung, hình ảnh hoặc video.')
     }
 
+    if(trimmedContent.length > MAX_CONTENT_LENGTH) {
+      throw new Error(`Nội dung không được vượt quá ${MAX_CONTENT_LENGTH} ký tự.`)
+    }
+
     if(video && trimmedContent.length === 0) {
       throw new Error('Vui lòng thêm một số văn bản với video của bạn.')
     }
@@ -138,7 +144,7 @@ const CreatePost = () => {
         setImages([])
         setVideo(null)
         setSharedPost(null)
-        navigate('/feed')
+        navigate('/feed', { state: { refresh: true } })
         return
       }
 
@@ -184,12 +190,20 @@ const CreatePost = () => {
               </div>
             )}
 
-            <textarea
-              className='input-modern mt-5 min-h-44 resize-none p-4 text-base leading-7 placeholder-slate-400'
-              placeholder='Bạn đang nghĩ gì?'
-              onChange={(e)=>setContent(e.target.value)}
-              value={content}
-            />
+            <div className='mt-5'>
+              <textarea
+                className='input-modern min-h-44 resize-none p-4 text-base leading-7 placeholder-slate-400'
+                placeholder='Bạn đang nghĩ gì?'
+                onChange={(e)=>setContent(e.target.value)}
+                value={content}
+                maxLength={MAX_CONTENT_LENGTH}
+              />
+              <div className={`mt-2 text-right text-xs font-bold ${
+                content.length > MAX_CONTENT_LENGTH * 0.9 ? 'text-red-500' : 'text-slate-400'
+              }`}>
+                {content.length}/{MAX_CONTENT_LENGTH}
+              </div>
+            </div>
 
             {images.length > 0 && (
               <div className='mt-5'>

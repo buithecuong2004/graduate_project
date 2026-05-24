@@ -188,26 +188,25 @@ export const getFeedPosts = async (req, res) => {
     try {
         const userId = req.userId
         const { page = 1, limit = 10 } = req.query
-        const skip = (page - 1) * limit
-        const limitNum = parseInt(limit)
+        const pageNum = Math.max(parseInt(page, 10) || 1, 1)
+        const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50)
+        const skip = (pageNum - 1) * limitNum
 
         const user = await User.findById(userId)
+        if (!user) {
+            return res.json({ success: false, message: 'User not found' })
+        }
+
         const connectionIds = (user.connections || []).map(id => id.toString())
         const followingIds = (user.following || []).map(id => id.toString())
+        const networkIdSet = new Set([userId.toString(), ...connectionIds, ...followingIds])
 
-        // All user IDs in the social graph
-        const networkIds = [userId, ...connectionIds, ...followingIds]
-
-        // --- SCORING HELPER ---
         const scorePost = (post, commentCount) => {
             const reactions = (post.reactions || []).length
             const comments = commentCount || 0
             const shares = (post.shares_count || []).length
-
-            // Engagement score
             const engagementScore = reactions * 3 + comments * 2 + shares * 1.5
 
-            // Recency bonus (exponential time decay)
             const ageHours = (Date.now() - new Date(post.createdAt).getTime()) / (1000 * 60 * 60)
             let recencyBonus = 0
             if (ageHours < 1) recencyBonus = 50
@@ -215,8 +214,7 @@ export const getFeedPosts = async (req, res) => {
             else if (ageHours < 24) recencyBonus = 15
             else if (ageHours < 72) recencyBonus = 5
 
-            // Relationship bonus
-            const postUserId = (post.user._id || post.user).toString()
+            const postUserId = (post.user?._id || post.user)?.toString()
             let relationshipBonus = 0
             if (postUserId === userId.toString()) relationshipBonus = 25
             else if (connectionIds.includes(postUserId)) relationshipBonus = 20
@@ -225,12 +223,8 @@ export const getFeedPosts = async (req, res) => {
             return engagementScore + recencyBonus + relationshipBonus
         }
 
-        // --- FETCH NETWORK POSTS ---
-        const totalNetworkPosts = await Post.countDocuments({ user: { $in: networkIds } })
-
-        // Fetch a wider pool to allow scoring — fetch 3x page window for better ranking
-        const poolSize = Math.max(limitNum * 3, 30)
-        const networkPosts = await Post.find({ user: { $in: networkIds } })
+        const candidatePoolSize = Math.max(skip + limitNum * 5, 100)
+        const candidatePosts = await Post.find({})
             .populate('user')
             .populate({
                 path: 'shared_from',
@@ -238,55 +232,41 @@ export const getFeedPosts = async (req, res) => {
             })
             .populate('reactions.user', 'full_name username profile_picture _id')
             .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(poolSize)
+            .limit(candidatePoolSize)
 
-        // Attach comment counts and scores
-        const scoredPosts = await Promise.all(networkPosts.map(async (post) => {
-            const totalComments = await Comment.countDocuments({ post: post._id })
-            const postObj = { ...post.toObject(), total_comments_count: totalComments }
-            postObj._score = scorePost(postObj, totalComments)
-            return postObj
-        }))
-
-        // Sort by score descending, take the page slice
-        const sortedPosts = scoredPosts
-            .sort((a, b) => b._score - a._score)
-            .slice(0, limitNum)
-            .map(p => { const { _score, ...rest } = p; return rest })
-
-        const hasMore = skip + limitNum < totalNetworkPosts
-
-        // --- SUGGESTED POSTS (from outside user network, trending) ---
-        // Only fetch suggestions on page 1 to inject into feed
-        let suggestedPosts = []
-        if (parseInt(page) === 1) {
-            const ageThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // last 7 days
-            const trending = await Post.find({
-                user: { $nin: networkIds },
-                createdAt: { $gte: ageThreshold }
-            })
-                .populate('user')
-                .populate('reactions.user', 'full_name username profile_picture _id')
-                .sort({ createdAt: -1 })
-                .limit(50)
-
-            const scoredTrending = await Promise.all(trending.map(async (post) => {
+        const scoredPosts = await Promise.all(candidatePosts
+            .filter(post => post.user)
+            .map(async (post) => {
                 const totalComments = await Comment.countDocuments({ post: post._id })
-                const postObj = { ...post.toObject(), total_comments_count: totalComments, is_suggested: true }
-                const reactions = (post.reactions || []).length
-                const shares = (post.shares_count || []).length
-                postObj._score = reactions * 3 + totalComments * 2 + shares * 1.5
+                const postObj = { ...post.toObject(), total_comments_count: totalComments }
+                const postUserId = (postObj.user?._id || postObj.user)?.toString()
+                const isNetworkPost = networkIdSet.has(postUserId)
+
+                postObj.is_suggested = !isNetworkPost
+                postObj._rankGroup = isNetworkPost ? 0 : 1
+                postObj._score = isNetworkPost
+                    ? new Date(postObj.createdAt).getTime()
+                    : scorePost(postObj, totalComments)
                 return postObj
             }))
 
-            suggestedPosts = scoredTrending
-                .sort((a, b) => b._score - a._score)
-                .slice(0, 3)
-                .map(p => { const { _score, ...rest } = p; return rest })
-        }
+        const rankedPosts = scoredPosts
+            .sort((a, b) => a._rankGroup - b._rankGroup || b._score - a._score || new Date(b.createdAt) - new Date(a.createdAt))
 
-        res.json({ success: true, posts: sortedPosts, hasMore, page: parseInt(page), suggestedPosts })
+        const posts = rankedPosts
+            .slice(skip, skip + limitNum)
+            .map(p => { const { _score, _rankGroup, ...rest } = p; return rest })
+
+        const suggestedPosts = pageNum === 1
+            ? rankedPosts
+                .filter(post => post.is_suggested)
+                .slice(0, Math.max(3, Math.min(limitNum, 10)))
+                .map(p => { const { _score, _rankGroup, ...rest } = p; return rest })
+            : []
+
+        const hasMore = skip + posts.length < rankedPosts.length
+
+        res.json({ success: true, posts, hasMore, page: pageNum, suggestedPosts })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })

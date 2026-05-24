@@ -136,7 +136,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
             {post.image_urls && post.image_urls.length > 0 && (
                 <div className='grid grid-cols-2 gap-2'>
                     {post.image_urls.map((img, index) => (
-                        <img src={img} key={index} className={`w-full h-52 object-cover rounded-2xl ${post.image_urls.length === 1 && 'col-span-2 h-auto max-h-[34rem]'}`} alt='' />
+                        <img src={img} key={index} className={`w-full h-52 object-cover rounded-2xl ${post.image_urls.length === 1 && 'col-span-2 h-auto min-h-[300px] max-h-[34rem]'}`} alt='' />
                     ))}
                 </div>
             )}
@@ -160,7 +160,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                     {post.shared_from.image_urls && post.shared_from.image_urls.length > 0 && (
                         <div className='grid grid-cols-2 gap-2 mt-2'>
                             {post.shared_from.image_urls.map((img, index) => (
-                                <img src={img} key={index} className={`w-full h-32 object-cover rounded-xl ${post.shared_from.image_urls.length === 1 && 'col-span-2 h-auto'}`} alt='' />
+                                <img src={img} key={index} className={`w-full h-32 object-cover rounded-xl ${post.shared_from.image_urls.length === 1 && 'col-span-2 h-auto min-h-[200px]'}`} alt='' />
                             ))}
                         </div>
                     )}
