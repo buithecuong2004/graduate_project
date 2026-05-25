@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useDispatch } from 'react-redux'
 import toast from 'react-hot-toast'
 import { assets } from '../assets/assets'
 import { ArrowRight, CheckCircle2, KeyRound, Mail, ShieldCheck, UserRound, UsersRound } from 'lucide-react'
 import api from '../api/axios'
 import { useAuth } from '../context/AuthContext'
+import { clearUser, fetchUser, setUser } from '../features/user/userSlice'
 import localizeMessage from '../utils/localization'
 
 const GoogleIcon = () => (
@@ -26,6 +28,7 @@ const initialForm = {
 
 const Login = () => {
   const navigate = useNavigate()
+  const dispatch = useDispatch()
   const { login } = useAuth()
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState(initialForm)
@@ -166,9 +169,12 @@ const Login = () => {
         return
       }
 
+      dispatch(clearUser())
       login(data.token)
+      const user = data.user || await dispatch(fetchUser(data.token)).unwrap()
+      if (data.user) dispatch(setUser(data.user))
       toast.success(localizeMessage(data.message))
-      navigate('/feed', { replace: true })
+      navigate(user?.role === 'admin' ? '/admin' : '/feed', { replace: true })
     } catch (error) {
       toast.error(localizeMessage(error.response?.data?.message || error.message))
     } finally {

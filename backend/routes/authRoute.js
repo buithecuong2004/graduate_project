@@ -22,6 +22,16 @@ const generateToken = (user) => {
     )
 }
 
+const buildAuthUser = (user) => ({
+    _id: user._id,
+    email: user.email,
+    full_name: user.full_name,
+    username: user.username,
+    role: user.role,
+    account_status: user.account_status,
+    profile_picture: user.profile_picture
+})
+
 // ─── Google OAuth ───────────────────────────────────────────────────────────
 const normalizeEmail = (email = '') => email.trim().toLowerCase()
 
@@ -160,7 +170,7 @@ authRouter.post('/register', async (req, res) => {
         })
 
         const token = generateToken(user)
-        res.json({ success: true, message: 'Đăng ký thành công', token })
+        res.json({ success: true, message: 'Đăng ký thành công', token, user: buildAuthUser(user) })
     } catch (error) {
         console.error('Register error:', error)
         res.json({ success: false, message: error.message })
@@ -186,8 +196,12 @@ authRouter.post('/login', async (req, res) => {
             return res.json({ success: false, message: 'Email hoặc mật khẩu không đúng' })
         }
 
+        if (user.account_status === 'locked') {
+            return res.json({ success: false, message: 'Account is locked' })
+        }
+
         const token = generateToken(user)
-        res.json({ success: true, message: 'Đăng nhập thành công', token })
+        res.json({ success: true, message: 'Đăng nhập thành công', token, user: buildAuthUser(user) })
     } catch (error) {
         console.error('Login error:', error)
         res.json({ success: false, message: error.message })
@@ -303,6 +317,9 @@ authRouter.get('/google', passport.authenticate('google', {
 authRouter.get('/google/callback',
     passport.authenticate('google', { session: false, failureRedirect: getFrontendUrl('/?error=google_auth_failed') }),
     (req, res) => {
+        if (req.user?.account_status === 'locked') {
+            return res.redirect(getFrontendUrl('/?error=account_locked'))
+        }
         const token = generateToken(req.user)
         res.redirect(getFrontendUrl(`/auth/callback?token=${token}`))
     }
@@ -316,6 +333,9 @@ authRouter.get('/facebook', passport.authenticate('facebook', {
 authRouter.get('/facebook/callback',
     passport.authenticate('facebook', { session: false, failureRedirect: getFrontendUrl('/?error=facebook_auth_failed') }),
     (req, res) => {
+        if (req.user?.account_status === 'locked') {
+            return res.redirect(getFrontendUrl('/?error=account_locked'))
+        }
         const token = generateToken(req.user)
         res.redirect(getFrontendUrl(`/auth/callback?token=${token}`))
     }
@@ -332,7 +352,8 @@ authRouter.get('/me', async (req, res) => {
         const token = authHeader.split(' ')[1]
         const decoded = jwt.verify(token, process.env.JWT_SECRET)
 
-        res.json({ success: true, userId: decoded.userId })
+        const user = await User.findById(decoded.userId)
+        res.json({ success: true, userId: decoded.userId, user: user ? buildAuthUser(user) : null })
     } catch (error) {
         res.json({ success: false, message: 'Invalid or expired token' })
     }

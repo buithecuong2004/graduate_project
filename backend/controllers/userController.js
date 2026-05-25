@@ -637,7 +637,11 @@ export const getUserProfiles = async (req, res) =>{
         if(!profile) {
             return res.json({ success: false, message: "Profile not found" })
         }
-        const posts = await Post.find({user: profileId}).populate('user')
+        const viewer = req.userId ? await User.findById(req.userId).select('role') : null
+        const postFilter = viewer?.role === 'admin'
+            ? { user: profileId }
+            : { user: profileId, is_hidden: { $ne: true } }
+        const posts = await Post.find(postFilter).populate('user')
         res.json({success: true, profile, posts})
 
     } catch (error) {

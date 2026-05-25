@@ -1,4 +1,4 @@
-import { BadgeCheck, Heart, MessageCircle, Share2, Trash2 } from 'lucide-react'
+import { BadgeCheck, Flag, Heart, MessageCircle, Share2, Trash2 } from 'lucide-react'
 import moment from '../utils/moment'
 import React, { useCallback, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -18,6 +18,16 @@ import { REACTION_ICONS, REACTION_LABELS } from '../utils/reactions'
 
 const withHashtags = (content = '') => content.replace(/(#\w+)/g, '<span class="text-cyan-700 font-semibold">$1</span>')
 
+const REPORT_REASONS = [
+    { value: 'spam', label: 'Spam' },
+    { value: 'harassment', label: 'Quấy rối' },
+    { value: 'hate', label: 'Ngôn từ thù ghét' },
+    { value: 'violence', label: 'Bạo lực' },
+    { value: 'nudity', label: 'Nội dung nhạy cảm' },
+    { value: 'scam', label: 'Lừa đảo' },
+    { value: 'other', label: 'Khác' }
+]
+
 const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) => {
 
     const postWithHashtags = withHashtags(post.content)
@@ -30,6 +40,10 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     const [showCommentModal, setShowCommentModal] = useState(autoOpenComments || false)
     const [showShareModal, setShowShareModal] = useState(false)
     const [showReactionList, setShowReactionList] = useState(false)
+    const [showReportForm, setShowReportForm] = useState(false)
+    const [reportReason, setReportReason] = useState('spam')
+    const [reportDetails, setReportDetails] = useState('')
+    const [isReporting, setIsReporting] = useState(false)
     const onPostDeletedRef = useRef(onPostDeleted)
 
     useEffect(() => {
@@ -183,6 +197,33 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
         }
     }
 
+    const handleReportPost = async (e) => {
+        e.preventDefault()
+
+        try {
+            setIsReporting(true)
+            const token = await getToken()
+            const { data } = await api.post(
+                `/api/report/post/${post._id}`,
+                { reason: reportReason, details: reportDetails.trim() },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+
+            if (data.success) {
+                toast.success(data.message === 'Report already pending' ? 'Bạn đã báo cáo bài viết này' : 'Đã gửi báo cáo')
+                setShowReportForm(false)
+                setReportDetails('')
+                setReportReason('spam')
+            } else {
+                toast.error(localizeMessage(data.message))
+            }
+        } catch (error) {
+            toast.error(localizeMessage(error.message))
+        } finally {
+            setIsReporting(false)
+        }
+    }
+
     return (
         <article className='surface w-full max-w-2xl rounded-[1.6rem] p-4 space-y-4 sm:p-5'>
             <div className='flex items-center justify-between'>
@@ -196,7 +237,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                         <div className='text-slate-500 text-sm truncate'>@{post.user.username} · {moment(post.createdAt).fromNow()}</div>
                     </div>
                 </div>
-                {isOwner && (
+                {isOwner ? (
                     <button
                         onClick={() => setShowDeleteConfirm(true)}
                         disabled={isDeleting}
@@ -204,6 +245,14 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                         title='Xóa bài viết'
                     >
                         <Trash2 className='w-5 h-5' />
+                    </button>
+                ) : (
+                    <button
+                        onClick={() => setShowReportForm((value) => !value)}
+                        className='text-slate-400 hover:text-amber-600 transition cursor-pointer'
+                        title='Báo cáo vi phạm'
+                    >
+                        <Flag className='w-5 h-5' />
                     </button>
                 )}
             </div>
@@ -246,6 +295,37 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                         </div>
                     )}
                 </div>
+            )}
+
+            {showReportForm && (
+                <form onSubmit={handleReportPost} className='border-t border-slate-200 pt-4'>
+                    <div className='grid gap-3 sm:grid-cols-[12rem_1fr_auto] sm:items-start'>
+                        <select
+                            value={reportReason}
+                            onChange={(e) => setReportReason(e.target.value)}
+                            className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none'
+                            disabled={isReporting}
+                        >
+                            {REPORT_REASONS.map((reason) => (
+                                <option key={reason.value} value={reason.value}>{reason.label}</option>
+                            ))}
+                        </select>
+                        <textarea
+                            value={reportDetails}
+                            onChange={(e) => setReportDetails(e.target.value)}
+                            className='input-modern min-h-11 resize-none px-4 py-3 text-sm'
+                            placeholder='Mô tả thêm nếu cần'
+                            disabled={isReporting}
+                        />
+                        <div className='flex gap-2'>
+                            <button type='button' onClick={() => setShowReportForm(false)} className='btn-muted px-4 py-2.5 text-sm cursor-pointer' disabled={isReporting}>Hủy</button>
+                            <button type='submit' className='btn-primary px-4 py-2.5 text-sm cursor-pointer disabled:opacity-50' disabled={isReporting}>
+                                <Flag className='size-4' />
+                                Gửi
+                            </button>
+                        </div>
+                    </div>
+                </form>
             )}
 
             <div className='flex items-center justify-between text-slate-600 text-sm pt-3 border-t border-slate-200'>

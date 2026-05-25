@@ -237,7 +237,7 @@ export const getFeedPosts = async (req, res) => {
         }
 
         const candidatePoolSize = Math.max(skip + limitNum * 5, 100)
-        const candidatePosts = await Post.find({})
+        const candidatePosts = await Post.find({ is_hidden: { $ne: true } })
             .populate('user')
             .populate({
                 path: 'shared_from',
@@ -290,12 +290,19 @@ export const getPostById = async (req, res) => {
     try {
         const { postId } = req.params
         
-        const post = await Post.findById(postId).populate('user').populate({
+        const [viewer, post] = await Promise.all([
+            User.findById(req.userId).select('role'),
+            Post.findById(postId).populate('user').populate({
             path: 'shared_from',
             populate: { path: 'user' }
         }).populate('reactions.user', 'full_name username profile_picture _id')
+        ])
         
         if (!post) {
+            return res.json({ success: false, message: 'Post not found' })
+        }
+
+        if (post.is_hidden && viewer?.role !== 'admin') {
             return res.json({ success: false, message: 'Post not found' })
         }
 

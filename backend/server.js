@@ -34,6 +34,8 @@ const { default: postRouter } = await import('./routes/postRoute.js')
 const { default: storyRouter } = await import('./routes/storyRoute.js')
 const { default: messageRouter } = await import('./routes/messageRoute.js')
 const { default: callRouter } = await import('./routes/callRoute.js')
+const { default: adminRouter } = await import('./routes/adminRoute.js')
+const { default: reportRouter } = await import('./routes/reportRoute.js')
 const { createServer } = await import('http')
 const { setupSocket } = await import('./configs/socket.js')
 
@@ -98,6 +100,8 @@ app.use('/api/post', postRouter)
 app.use('/api/story', storyRouter)
 app.use('/api/message', messageRouter)
 app.use('/api/call', callRouter)
+app.use('/api/admin', adminRouter)
+app.use('/api/report', reportRouter)
 
 const PORT = process.env.PORT || 4000
 

@@ -16,6 +16,10 @@ const postSchema = new mongoose.Schema({
     shares_count: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
     comments: [{type: mongoose.Schema.Types.ObjectId, ref: 'Comment'}],
     shared_from: {type: mongoose.Schema.Types.ObjectId, ref: 'Post'}, // Reference to original post if this is a repost
+    is_hidden: {type: Boolean, default: false},
+    hidden_at: {type: Date},
+    hidden_by: {type: mongoose.Schema.Types.ObjectId, ref: 'User'},
+    hidden_reason: {type: String, default: ''},
 }, {timestamps: true, minimize: false})
 
 const Post = mongoose.model('Post', postSchema)

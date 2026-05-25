@@ -1,12 +1,19 @@
 import React from 'react'
 import { menuItemsData } from '../assets/assets'
+import { ShieldCheck } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 
 const MenuItems = ({ setSidebarOpen }) => {
+  const currentUser = useSelector((state) => state.user.value)
+  const menuItems = currentUser?.role === 'admin'
+    ? [...menuItemsData, { to: '/admin', label: 'Admin', Icon: ShieldCheck }]
+    : menuItemsData
+
   return (
     <div className='px-4 text-slate-600 space-y-1.5 font-semibold'>
       {
-        menuItemsData.map((item) => {
+        menuItems.map((item) => {
           const MenuIcon = item.Icon
           return (
             <NavLink

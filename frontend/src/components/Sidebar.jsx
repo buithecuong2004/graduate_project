@@ -5,12 +5,14 @@ import MenuItems from './MenuItems'
 import NotificationBell from './NotificationBell'
 import { CirclePlus, Home, LogOut, UserCheck, UserPlus, UserRoundPen, Users } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { useSelector } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
+import { clearUser } from '../features/user/userSlice'
 
 const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
   const navigate = useNavigate()
   const location = useLocation()
   const user = useSelector((state) => state.user.value)
+  const dispatch = useDispatch()
   const { connections, pendingConnections, followers, following } = useSelector((state) => state.connections)
   const { logout } = useAuth()
   const isConnectionsPage = location.pathname === '/connections'
@@ -26,6 +28,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
 
   const handleLogout = () => {
     logout()
+    dispatch(clearUser())
     navigate('/')
   }
 

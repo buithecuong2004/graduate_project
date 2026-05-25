@@ -21,7 +21,7 @@ userRouter.post('/block-status', protect, getUserBlockStatus)
 userRouter.post('/block', protect, blockUser)
 userRouter.post('/unblock', protect, unblockUser)
 userRouter.get('/connections', protect, getUserConnections)
-userRouter.post('/profiles',getUserProfiles)
+userRouter.post('/profiles', protect, getUserProfiles)
 userRouter.get('/recent-messages', protect, getUserRecentMessages)
 userRouter.post('/mark-messages-read', protect, markMessagesAsRead)
 

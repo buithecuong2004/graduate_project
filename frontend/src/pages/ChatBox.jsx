@@ -780,11 +780,15 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
 
   const fetchUserData = useCallback(async () => {
     try {
-      const { data } = await api.post('/api/user/profiles', { profileId: userId })
+      const token = await getToken()
+      const { data } = await api.post('/api/user/profiles', { profileId: userId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
       if (data.success) setUser(data.profile)
+      else toast.error(localizeMessage(data.message))
     } catch (error) { toast.error(localizeMessage(error.message)) }
     finally { setLoading(false) }
-  }, [userId])
+  }, [getToken, userId])
 
   const fetchBlockStatus = useCallback(async () => {
     try {

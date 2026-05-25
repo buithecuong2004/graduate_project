@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react'
-import { Route, Routes, useLocation } from 'react-router-dom'
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
 import Feed from './pages/Feed'
@@ -9,12 +9,13 @@ import Discover from './pages/Discover'
 import Profile from './pages/Profile'
 import CreatePost from './pages/CreatePost'
 import PostDetail from './pages/PostDetail'
+import Admin from './pages/Admin'
 import { useAuth } from './context/AuthContext'
 import Layout from './pages/Layout'
 import toast, { Toaster } from 'react-hot-toast'
 import { useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { fetchUser } from './features/user/userSlice'
+import { clearUser, fetchUser } from './features/user/userSlice'
 import { fetchConnections, updateUserPresence } from './features/connections/connectionsSlice'
 import { useRef } from 'react'
 import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal, updateMessageReactionsLocal } from './features/messages/messagesSlice'
@@ -25,6 +26,7 @@ import { Navigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { SocketProvider, useSocket } from './context/SocketContext'
 import CallModal from './components/CallModal'
+import Loading from './components/Loading'
 import api from './api/axios'
 
 const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
@@ -59,10 +61,21 @@ const buildRealtimeStoryFromNotification = (notification) => {
   }
 }
 
+const HomeRedirect = ({ currentUser }) => {
+  if (!currentUser) return <Loading />
+  return <Navigate to={currentUser.role === 'admin' ? '/admin' : '/feed'} replace />
+}
+
+const AdminRoute = ({ currentUser }) => {
+  if (!currentUser) return <Loading />
+  return currentUser.role === 'admin' ? <Admin /> : <Navigate to="/feed" replace />
+}
+
 // ─── Inner App (needs SocketProvider to be parent) ───────────────────────────
 const AppInner = () => {
   const { isAuthenticated, getToken, loading } = useAuth()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const pathnameRef = useRef(pathname)
 
   // callAcceptedSignal đã được loại bỏ — CallModal tự lắng nghe socket trực tiếp
@@ -79,6 +92,8 @@ const AppInner = () => {
         const token = await getToken()
         dispatch(fetchUser(token))
         dispatch(fetchConnections(token))
+      } else {
+        dispatch(clearUser())
       }
     }
     fetchData()
@@ -87,6 +102,12 @@ const AppInner = () => {
   useEffect(() => {
     pathnameRef.current = pathname
   }, [pathname])
+
+  useEffect(() => {
+    if (isAuthenticated && currentUser?.role === 'admin' && pathname !== '/admin' && !pathname.startsWith('/auth/')) {
+      navigate('/admin', { replace: true })
+    }
+  }, [currentUser?.role, isAuthenticated, navigate, pathname])
 
   // Initialize Socket.IO connection
   useEffect(() => {
@@ -273,6 +294,10 @@ const AppInner = () => {
           dispatch(deletePost(postId))
         })
 
+        socket.on('post-visibility-updated', ({ postId, is_hidden }) => {
+          if (is_hidden) dispatch(deletePost(postId))
+        })
+
         socket.on('new-comment-notification', (notification) => {
           dispatch(addNotification(notification))
         })
@@ -340,8 +365,9 @@ const AppInner = () => {
       <Toaster />
       <Routes>
         <Route path='/auth/callback' element={<AuthCallback />} />
+        <Route path='/admin' element={isAuthenticated ? <AdminRoute currentUser={currentUser} /> : <Login />} />
         <Route path='/' element={isAuthenticated ? <Layout onStartCall={handleStartCall} /> : <Login />}>
-          <Route index element={<Navigate to="/feed" replace />} />
+          <Route index element={<HomeRedirect currentUser={currentUser} />} />
           <Route path='feed' element={<Feed />} />
           <Route path='messages' element={<Message onStartCall={handleStartCall} />} />
           <Route path='messages/:userId' element={<Message onStartCall={handleStartCall} />} />

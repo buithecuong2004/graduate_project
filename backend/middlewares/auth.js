@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken'
+import User from '../models/User.js'
 
 export const protect = async (req, res, next) => {
     try {
@@ -12,6 +13,15 @@ export const protect = async (req, res, next) => {
 
         if (!decoded.userId) {
             return res.json({ success: false, message: "Invalid token" })
+        }
+
+        const user = await User.findById(decoded.userId).select('account_status')
+        if (!user) {
+            return res.json({ success: false, message: "User not found" })
+        }
+
+        if (user.account_status === 'locked') {
+            return res.status(403).json({ success: false, message: "Account is locked" })
         }
 
         // Attach userId to request for controllers to use
