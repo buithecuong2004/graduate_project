@@ -1,6 +1,8 @@
 import express from 'express'
 import {
     getChatMessages,
+    getMessagesAround,
+    searchMessages,
     sendMessage,
     getUserRecentMessages,
     markMessagesAsRead,
@@ -21,6 +23,8 @@ messageRouter.post('/send', upload.fields([
   { name: 'voice', maxCount: 1 }
 ]), protect, sendMessage)
 messageRouter.post('/get', protect, getChatMessages)
+messageRouter.post('/get-around', protect, getMessagesAround)
+messageRouter.post('/search', protect, searchMessages)
 messageRouter.post('/get-recent', protect, getUserRecentMessages)
 messageRouter.post('/mark-as-read', protect, markMessagesAsRead)
 messageRouter.post('/delete', protect, deleteMessage)

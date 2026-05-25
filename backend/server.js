@@ -22,6 +22,8 @@ const { default: express } = await import('express')
 const { default: cors } = await import('cors')
 const { default: connectDB } = await import('./configs/db.js')
 const { default: User } = await import('./models/User.js')
+const { default: Message, buildMessageSearchIndex } = await import('./models/Message.js')
+const { getDefaultProfilePictureUrl } = await import('./utils/defaultProfilePicture.js')
 const { inngest, functions } = await import('./inngest/index.js')
 const { serve } = await import('inngest/express')
 const { default: passport } = await import('./configs/passport.js')
@@ -42,6 +44,36 @@ const { io, connectedUsers } = setupSocket(server);
 try {
     await connectDB();
     await User.updateMany({ isOnline: true }, { $set: { isOnline: false, lastSeen: new Date() } });
+    const defaultProfilePictureUrl = await getDefaultProfilePictureUrl();
+    await User.updateMany(
+        {
+            $or: [
+                { profile_picture: '' },
+                { profile_picture: { $exists: false } },
+                { profile_picture: { $regex: '/assets/default\\.jpg(?:$|\\?)', $options: 'i' } }
+            ]
+        },
+        { $set: { profile_picture: defaultProfilePictureUrl } }
+    );
+
+    while (true) {
+        const messages = await Message.find({
+            text: { $type: 'string', $ne: '' },
+            $or: [
+                { searchText: { $exists: false } },
+                { searchTokens: { $exists: false } }
+            ]
+        }).select('text').limit(500).lean();
+
+        if (messages.length === 0) break;
+
+        await Message.bulkWrite(messages.map((message) => ({
+            updateOne: {
+                filter: { _id: message._id },
+                update: { $set: buildMessageSearchIndex(message.text) }
+            }
+        })));
+    }
 } catch (error) {
     console.error('Failed to connect to database. Server will not start.')
     process.exit(1)

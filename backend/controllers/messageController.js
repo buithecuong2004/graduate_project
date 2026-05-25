@@ -1,6 +1,6 @@
 import fs from "fs"
 import imagekit from "../configs/imageKit.js";
-import Message from "../models/Message.js";
+import Message, { buildMessageSearchIndex, normalizeMessageSearchText } from "../models/Message.js";
 import User from "../models/User.js";
 import { isConversationBlocked } from "../utils/blocking.js";
 
@@ -41,6 +41,12 @@ const cleanupUploadedFiles = (files = {}) => {
     })
 }
 
+const getMessageUserId = (value) => value?._id?.toString?.() || value?.toString?.() || ''
+
+const getOtherParticipant = (message, currentUserId) => (
+    getMessageUserId(message.from_user_id) === currentUserId ? message.to_user_id : message.from_user_id
+)
+
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
     try {
@@ -64,7 +70,9 @@ const populateMessage = async (msgObj) => {
 
     // from_user_id may be an id or already populated object
     const fromId = msgObj.from_user_id && msgObj.from_user_id._id ? msgObj.from_user_id._id : msgObj.from_user_id
+    const toId = msgObj.to_user_id && msgObj.to_user_id._id ? msgObj.to_user_id._id : msgObj.to_user_id
     if (fromId) userIdsToFetch.add(String(fromId))
+    if (toId) userIdsToFetch.add(String(toId))
 
     if (msgObj.reply_to) {
         // reply_to may be an id — fetch the reply message to find its sender
@@ -94,6 +102,10 @@ const populateMessage = async (msgObj) => {
     // Assign populated from_user_id
     if (fromId) {
         msgObj.from_user_id = usersMap[String(fromId)] || (await User.findById(fromId))
+    }
+
+    if (toId) {
+        msgObj.to_user_id = usersMap[String(toId)] || (await User.findById(toId))
     }
 
     // Ensure media_urls/message_type compatibility
@@ -148,6 +160,11 @@ export const sendMessage = async (req, res) => {
         // Allow an empty text when media URLs are being forwarded
         if (!text && images.length === 0 && videos.length === 0 && voiceFiles.length === 0 && bodyMediaUrls.length === 0) {
             return res.json({ success: false, message: 'Message cannot be empty' })
+        }
+
+        if (to_user_id?.toString?.() === userId.toString()) {
+            cleanupUploadedFiles(req.files)
+            return res.json({ success: false, message: 'Không thể nhắn tin với chính bạn' })
         }
 
         if (await isConversationBlocked(userId, to_user_id)) {
@@ -323,6 +340,10 @@ export const getChatMessages = async (req, res) => {
         const userId = req.userId
         const { to_user_id, limit = 30, before, mark_read = true } = req.body
 
+        if (to_user_id?.toString?.() === userId.toString()) {
+            return res.json({ success: true, messages: [], hasMore: false })
+        }
+
         const query = {
             $or: [
                 { from_user_id: userId, to_user_id },
@@ -367,6 +388,131 @@ export const getChatMessages = async (req, res) => {
     }
 }
 
+export const getMessagesAround = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { to_user_id, messageId, limit = 30 } = req.body
+
+        if (!to_user_id || !messageId) {
+            return res.json({ success: false, message: 'Missing message target' })
+        }
+
+        if (to_user_id?.toString?.() === userId.toString()) {
+            return res.json({ success: true, messages: [], hasMore: false })
+        }
+
+        const conversationQuery = {
+            $or: [
+                { from_user_id: userId, to_user_id },
+                { from_user_id: to_user_id, to_user_id: userId }
+            ],
+            deletedFor: { $ne: userId },
+            message_type: { $ne: 'reaction' }
+        }
+
+        const targetMessage = await Message.findOne({ _id: messageId, ...conversationQuery }).lean()
+        if (!targetMessage) {
+            return res.json({ success: false, message: 'Message not found' })
+        }
+
+        const limitNum = Math.min(parseInt(limit) || 30, 60)
+        const sideLimit = Math.max(1, Math.floor((limitNum - 1) / 2))
+
+        const [olderMessages, newerMessages, olderCount] = await Promise.all([
+            Message.find({ ...conversationQuery, createdAt: { $lt: targetMessage.createdAt } })
+                .sort({ createdAt: -1 })
+                .limit(sideLimit)
+                .lean(),
+            Message.find({ ...conversationQuery, createdAt: { $gt: targetMessage.createdAt } })
+                .sort({ createdAt: 1 })
+                .limit(sideLimit)
+                .lean(),
+            Message.countDocuments({ ...conversationQuery, createdAt: { $lt: targetMessage.createdAt } })
+        ])
+
+        let messages = [...olderMessages.reverse(), targetMessage, ...newerMessages]
+        messages = await Promise.all(messages.map(populateMessage))
+
+        res.json({ success: true, messages, hasMore: olderCount > olderMessages.length })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+export const searchMessages = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { query = '', to_user_id, limit = 200 } = req.body
+        const keyword = query.trim()
+
+        if (!keyword || to_user_id?.toString?.() === userId.toString()) {
+            return res.json({ success: true, groups: [], messages: [] })
+        }
+
+        const participantQuery = to_user_id
+            ? {
+                $or: [
+                    { from_user_id: userId, to_user_id },
+                    { from_user_id: to_user_id, to_user_id: userId }
+                ]
+            }
+            : {
+                $or: [
+                    { from_user_id: userId },
+                    { to_user_id: userId }
+                ],
+                $expr: { $ne: ['$from_user_id', '$to_user_id'] }
+            }
+
+        const limitNum = Math.min(parseInt(limit) || 200, 300)
+        const { searchText, searchTokens } = buildMessageSearchIndex(keyword)
+        if (!searchText || searchTokens.length === 0) {
+            return res.json({ success: true, groups: [], messages: [] })
+        }
+
+        const searchQuery = {
+            ...participantQuery,
+            searchTokens: { $all: searchTokens },
+            is_deleted: { $ne: true },
+            message_type: { $nin: ['reaction', 'call'] },
+            deletedFor: { $ne: userId }
+        }
+
+        let messages = await Message.find(searchQuery)
+            .sort({ createdAt: -1 })
+            .limit(limitNum)
+            .populate('from_user_id', 'full_name username profile_picture')
+            .populate('to_user_id', 'full_name username profile_picture')
+            .lean()
+
+        messages = messages.filter((message) => normalizeMessageSearchText(message.text).includes(searchText))
+
+        const groupMap = new Map()
+        messages.forEach((message) => {
+            const otherUser = getOtherParticipant(message, userId)
+            const otherUserId = getMessageUserId(otherUser)
+            if (!otherUserId || otherUserId === userId) return
+
+            const current = groupMap.get(otherUserId)
+            groupMap.set(otherUserId, {
+                user: current?.user || otherUser,
+                count: (current?.count || 0) + 1,
+                latestMessage: current?.latestMessage || message
+            })
+        })
+
+        res.json({
+            success: true,
+            groups: Array.from(groupMap.values()),
+            messages
+        })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Get Recent Messages
 // ─────────────────────────────────────────────────────────────────
@@ -379,7 +525,8 @@ export const getUserRecentMessages = async (req, res) => {
                 { from_user_id: userId },
                 { to_user_id: userId }
             ],
-            deletedFor: { $ne: userId }
+            deletedFor: { $ne: userId },
+            $expr: { $ne: ['$from_user_id', '$to_user_id'] }
         }).sort({ createdAt: -1 }).lean()
 
         messages = await Promise.all(
@@ -642,6 +789,10 @@ export const saveCall = async (req, res) => {
 
         if (!to_user_id || !call_type || !call_status) {
             return res.json({ success: false, message: 'Missing required call fields' })
+        }
+
+        if (to_user_id?.toString?.() === userId.toString()) {
+            return res.json({ success: false, message: 'Không thể gọi cho chính bạn' })
         }
 
         if (await isConversationBlocked(userId, to_user_id)) {

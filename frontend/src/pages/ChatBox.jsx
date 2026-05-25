@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, VideoIcon, ChevronDown, UserRound, Ban, Flag } from 'lucide-react'
+import { ArrowLeft, ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, VideoIcon, ChevronDown, UserRound, Ban, Flag, Search } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { setViewStory } from '../features/stories/storiesSlice'
@@ -25,7 +25,7 @@ const FLOATING_REACTION_HEIGHT = 64
 const FLOATING_MENU_WIDTH = 156
 const FLOATING_MENU_HEIGHT = 132
 const PROFILE_MENU_WIDTH = 260
-const PROFILE_MENU_HEIGHT = 224
+const PROFILE_MENU_HEIGHT = 272
 const MESSAGE_PAGE_SIZE = 30
 
 const getMessageUserId = (value) => {
@@ -57,7 +57,7 @@ const getFloatingPanelPosition = (anchorRect, panelWidth, panelHeight, align = '
   }
 }
 
-const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
+const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToMessageId, onScrolledToMessage }) => {
 
   const { userId: routeUserId } = useParams()
   const userId = chatUserId || routeUserId
@@ -113,6 +113,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const isForwardingRef = useRef(false)
   const miniReadMarkedRef = useRef(false)
   const messageRefs = useRef({})   // map of _id → DOM element for scroll-to
+  const scrollToMessageIdRef = useRef('')
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false)
@@ -146,6 +147,10 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileMenuPosition, setProfileMenuPosition] = useState(null)
   const [showReactionListMsg, setShowReactionListMsg] = useState(null)
+  const [chatSearchOpen, setChatSearchOpen] = useState(false)
+  const [chatSearchTerm, setChatSearchTerm] = useState('')
+  const [chatSearchMessages, setChatSearchMessages] = useState([])
+  const [chatSearchLoading, setChatSearchLoading] = useState(false)
   const imageInputId = `${variant}-images-${userId || 'chat'}`
   const videoInputId = `${variant}-videos-${userId || 'chat'}`
   const isBlockedByMe = !!blockStatus.isBlockedByMe
@@ -694,12 +699,61 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   }
 
   // ── Scroll to a specific message by id ──────────────────────
-  const scrollToMessage = (msgId) => {
+  const scrollToMessage = useCallback((msgId) => {
     const el = messageRefs.current[msgId]
-    if (!el) return
+    if (!el) return false
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     el.classList.add('msg-highlight')
     setTimeout(() => el.classList.remove('msg-highlight'), 1400)
+    return true
+  }, [])
+
+  const fetchMessagesAround = useCallback(async (messageId) => {
+    if (!messageId || !userId) return false
+
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/message/get-around', {
+        to_user_id: userId,
+        messageId,
+        limit: MESSAGE_PAGE_SIZE,
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (!data.success) throw new Error(data.message)
+      shouldAutoScrollRef.current = false
+      setMessages(data.messages || [])
+      setHasMoreMessages(!!data.hasMore)
+      return true
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+      return false
+    }
+  }, [getToken, setMessages, userId])
+
+  const jumpToMessage = useCallback(async (messageId) => {
+    if (!messageId) return false
+    if (scrollToMessage(messageId)) return true
+
+    const loaded = await fetchMessagesAround(messageId)
+    if (!loaded) return false
+
+    window.setTimeout(() => scrollToMessage(messageId), 80)
+    return true
+  }, [fetchMessagesAround, scrollToMessage])
+
+  const getChatSearchSender = (message) => (
+    getMessageUserId(message?.from_user_id) === currentUserId ? currentUser : message?.from_user_id
+  )
+
+  const getChatSearchSenderName = (message) => (
+    getMessageUserId(message?.from_user_id) === currentUserId ? 'Bạn' : (message?.from_user_id?.full_name || user?.full_name || 'Người dùng Tarous')
+  )
+
+  const getChatSearchAvatar = (message) => {
+    const sender = getChatSearchSender(message)
+    return sender?.profile_picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(getChatSearchSenderName(message))}&background=0891b2&color=fff`
   }
 
   // ── Human-readable label for a message (used in reply bars) ──
@@ -904,6 +958,23 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
     if (isMini) onClose?.()
   }
 
+  const openChatSearch = () => {
+    setProfileMenuOpen(false)
+    setChatSearchOpen(true)
+  }
+
+  const closeChatSearch = () => {
+    setChatSearchOpen(false)
+    setChatSearchTerm('')
+    setChatSearchMessages([])
+    setChatSearchLoading(false)
+  }
+
+  const handleChatSearchMessageClick = async (messageId) => {
+    closeChatSearch()
+    await jumpToMessage(messageId)
+  }
+
   const openProfileMenu = (event) => {
     event.stopPropagation()
     closeMessageActions()
@@ -1084,15 +1155,25 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   }, [currentUserId, socketRef, userId, setMessages])
 
   useEffect(() => {
+    scrollToMessageIdRef.current = scrollToMessageId || ''
+  }, [scrollToMessageId])
+
+  useEffect(() => {
     if (!userId) return
+    const initialScrollTarget = scrollToMessageIdRef.current
     miniReadMarkedRef.current = false
     setHasMoreMessages(true)
     setLoadingOlder(false)
     setProfileMenuOpen(false)
+    setChatSearchOpen(false)
+    setChatSearchTerm('')
+    setChatSearchMessages([])
+    setChatSearchLoading(false)
     setBlockStatus({ isBlockedByMe: false, hasBlockedMe: false })
     fetchUserData()
     fetchBlockStatus()
-    fetchUserMessages()
+    if (initialScrollTarget) fetchMessagesAround(initialScrollTarget)
+    else fetchUserMessages()
     if (!isMini) markMessagesAsRead()
     return () => {
       if (!isMini) markMessagesAsRead()
@@ -1101,7 +1182,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
       imagePreviews.forEach(url => URL.revokeObjectURL(url))
       videoPreviews.forEach(url => URL.revokeObjectURL(url))
     }
-  }, [fetchBlockStatus, fetchUserData, fetchUserMessages, isMini, markMessagesAsRead, userId, dispatch])
+  }, [fetchBlockStatus, fetchMessagesAround, fetchUserData, fetchUserMessages, isMini, markMessagesAsRead, userId, dispatch])
 
   useEffect(() => {
     if (!newMessageTrigger || !userId) return
@@ -1119,6 +1200,59 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }
   }, [messages])
+
+  useEffect(() => {
+    const keyword = chatSearchTerm.trim()
+    if (!chatSearchOpen || !keyword || !userId) {
+      setChatSearchMessages([])
+      setChatSearchLoading(false)
+      return undefined
+    }
+
+    let cancelled = false
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setChatSearchLoading(true)
+        const token = await getToken()
+        const { data } = await api.post('/api/message/search', {
+          query: keyword,
+          to_user_id: userId,
+          limit: 120,
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+
+        if (cancelled) return
+        if (!data.success) throw new Error(data.message)
+        setChatSearchMessages(data.messages || [])
+      } catch (error) {
+        if (!cancelled) {
+          setChatSearchMessages([])
+          toast.error(localizeMessage(error.message))
+        }
+      } finally {
+        if (!cancelled) setChatSearchLoading(false)
+      }
+    }, 300)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [chatSearchOpen, chatSearchTerm, getToken, userId])
+
+  useEffect(() => {
+    if (!scrollToMessageId || !userId || loading) return undefined
+
+    let cancelled = false
+    const run = async () => {
+      await jumpToMessage(scrollToMessageId)
+      if (!cancelled) onScrolledToMessage?.()
+    }
+
+    run()
+    return () => { cancelled = true }
+  }, [jumpToMessage, loading, onScrolledToMessage, scrollToMessageId, userId])
 
   if (loading) {
     return isMini
@@ -1262,6 +1396,81 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
           )}
         </div>
       </div>
+
+      {chatSearchOpen && (
+        <div className={isMini ? 'border-b border-slate-100 bg-white px-3 py-3' : 'border-b border-slate-200 bg-white/90 px-4 py-3'}>
+          <div className={isMini ? 'space-y-3' : 'mx-auto max-w-4xl space-y-3'}>
+            <div className='flex items-center gap-2'>
+              <button
+                type='button'
+                onClick={closeChatSearch}
+                className='flex size-9 shrink-0 items-center justify-center rounded-full text-slate-600 transition hover:bg-slate-100'
+                title='Quay lại'
+              >
+                <ArrowLeft className='size-5' />
+              </button>
+              <div className='relative min-w-0 flex-1'>
+                <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400' />
+                <input
+                  type='text'
+                  value={chatSearchTerm}
+                  onChange={(event) => setChatSearchTerm(event.target.value)}
+                  placeholder='Tìm kiếm tin nhắn trong đoạn chat'
+                  autoFocus
+                  className='w-full rounded-full border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-cyan-200 focus:bg-white focus:ring-4 focus:ring-cyan-50'
+                />
+              </div>
+            </div>
+
+            <div className={isMini ? 'max-h-40 overflow-y-auto' : 'max-h-56 overflow-y-auto'}>
+              {!chatSearchTerm.trim() ? (
+                <div className='px-4 py-5 text-center text-sm font-bold text-slate-400'>
+                  Nhập nội dung tin nhắn cần tìm.
+                </div>
+              ) : chatSearchLoading ? (
+                <div className='px-4 py-5 text-center text-sm font-bold text-slate-400'>
+                  Đang tìm tin nhắn...
+                </div>
+              ) : chatSearchMessages.length === 0 ? (
+                <div className='px-4 py-5 text-center text-sm text-slate-500'>
+                  Không tìm thấy tin nhắn trùng khớp.
+                </div>
+              ) : (
+                <div className='space-y-1'>
+                  <p className='px-3 pb-1 text-xs font-black uppercase tracking-wide text-slate-400'>
+                    {chatSearchMessages.length} tin nhắn trùng khớp
+                  </p>
+                  {chatSearchMessages.map((message) => (
+                    <button
+                      type='button'
+                      key={message._id}
+                      onClick={() => handleChatSearchMessageClick(message._id)}
+                      className='flex w-full items-start gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-slate-100'
+                    >
+                      <img
+                        src={getChatSearchAvatar(message)}
+                        alt=''
+                        className='size-10 shrink-0 rounded-full object-cover'
+                      />
+                      <div className='min-w-0 flex-1'>
+                        <div className='flex items-start gap-2'>
+                          <p className='min-w-0 flex-1 truncate text-sm font-black text-slate-900'>
+                            {getChatSearchSenderName(message)}
+                          </p>
+                          <span className='shrink-0 text-[11px] text-slate-400'>{moment(message.createdAt).fromNow()}</span>
+                        </div>
+                        <p className='mt-1 line-clamp-2 text-sm leading-5 text-slate-500'>
+                          {message.text || 'Tin nhắn'}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Messages area ── */}
       <div
@@ -1733,6 +1942,14 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
           >
             <UserRound className='size-5 text-slate-700' />
             Xem trang cá nhân
+          </button>
+          <button
+            type='button'
+            onClick={openChatSearch}
+            className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-800 hover:bg-slate-50'
+          >
+            <Search className='size-5 text-slate-700' />
+            Tìm kiếm tin nhắn
           </button>
           <button
             type='button'

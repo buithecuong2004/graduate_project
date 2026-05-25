@@ -65,6 +65,10 @@ export const setupSocket = (server) => {
             // data: { to, from, callType, callerName, callerAvatar, offer }
             const from = socket.data.userId || data.from;
             if (!from || !data?.to) return;
+            if (from.toString() === data.to.toString()) {
+                socket.emit('call-blocked', { to: data.to });
+                return;
+            }
 
             try {
                 if (await isConversationBlocked(from, data.to)) {

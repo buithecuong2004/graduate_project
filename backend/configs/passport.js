@@ -2,6 +2,7 @@ import passport from 'passport'
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import { Strategy as FacebookStrategy } from 'passport-facebook'
 import User from '../models/User.js'
+import { getDefaultProfilePictureUrl } from '../utils/defaultProfilePicture.js'
 
 // ─── Google OAuth Strategy ──────────────────────────────────────────────────
 passport.use(new GoogleStrategy({
@@ -13,7 +14,8 @@ passport.use(new GoogleStrategy({
     try {
         const email = profile.emails?.[0]?.value || ''
         const fullName = profile.displayName || ''
-        const profilePicture = profile.photos?.[0]?.value || ''
+        const defaultProfilePicture = await getDefaultProfilePictureUrl()
+        const profilePicture = profile.photos?.[0]?.value || defaultProfilePicture
 
         // Find existing user by provider + providerId
         let user = await User.findOne({ provider: 'google', providerId: profile.id })
@@ -64,7 +66,8 @@ passport.use(new FacebookStrategy({
     try {
         const email = profile.emails?.[0]?.value || ''
         const fullName = profile.displayName || ''
-        const profilePicture = profile.photos?.[0]?.value || ''
+        const defaultProfilePicture = await getDefaultProfilePictureUrl()
+        const profilePicture = profile.photos?.[0]?.value || defaultProfilePicture
 
         // Find existing user by provider + providerId
         let user = await User.findOne({ provider: 'facebook', providerId: profile.id })

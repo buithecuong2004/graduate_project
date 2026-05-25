@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Ellipsis, MessageCircle, MessageSquare, PenLine, Search, UsersRound } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, Ellipsis, MessageCircle, MessageSquare, PenLine, Search, UsersRound } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import toast from 'react-hot-toast'
@@ -12,6 +12,8 @@ import ChatBox from './ChatBox'
 const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
 
 const getDisplayName = (user) => user?.full_name || user?.username || 'Người dùng Tarous'
+const isUserRecord = (user) => Boolean(user && typeof user === 'object')
+const hasUserIdentity = (user) => Boolean(isUserRecord(user) && (user.full_name || user.username || user.profile_picture))
 
 const getAvatarUrl = (user) => (
   user?.profile_picture ||
@@ -21,6 +23,55 @@ const getAvatarUrl = (user) => (
 const getOtherParticipant = (message, currentUserId) => (
   getUserId(message.from_user_id) === currentUserId ? message.to_user_id : message.from_user_id
 )
+
+const getPreferredUser = (currentUser, nextUser) => (
+  hasUserIdentity(currentUser) ? currentUser : (hasUserIdentity(nextUser) ? nextUser : currentUser || nextUser)
+)
+
+const resolveKnownUser = (userOrId, currentUser, messages, knownUsersById) => {
+  if (hasUserIdentity(userOrId)) return userOrId
+
+  const userId = getUserId(userOrId)
+  if (!userId) return userOrId
+  if (userId === getUserId(currentUser)) return currentUser
+
+  const knownUser = knownUsersById.get(userId)
+  if (knownUser) return knownUser
+
+  for (const message of messages) {
+    if (getUserId(message.from_user_id) === userId && hasUserIdentity(message.from_user_id)) return message.from_user_id
+    if (getUserId(message.to_user_id) === userId && hasUserIdentity(message.to_user_id)) return message.to_user_id
+  }
+
+  return userOrId
+}
+
+const hydrateMessageUsers = (message, currentUser, messages, knownUsersById) => ({
+  ...message,
+  from_user_id: resolveKnownUser(message.from_user_id, currentUser, messages, knownUsersById),
+  to_user_id: resolveKnownUser(message.to_user_id, currentUser, messages, knownUsersById)
+})
+
+const isSelfMessage = (message, currentUserId) => (
+  currentUserId &&
+  getUserId(message.from_user_id) === currentUserId &&
+  getUserId(message.to_user_id) === currentUserId
+)
+
+const formatSidebarTime = (value) => {
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return ''
+  if (timestamp > Date.now()) return 'vừa xong'
+  return moment(value).fromNow()
+}
+
+const getSearchResultContact = (message, currentUserId) => getOtherParticipant(message, currentUserId)
+
+const getSearchResultSenderLabel = (message, currentUserId) => (
+  getUserId(message.from_user_id) === currentUserId ? 'Bạn' : getDisplayName(message.from_user_id)
+)
+
+const getSearchResultText = (message) => message?.text || 'Tin nhắn'
 
 const getMessagePreview = (message, currentUserId) => {
   if (!message) return 'Bắt đầu cuộc trò chuyện'
@@ -58,29 +109,33 @@ const buildRecentConversations = (messages, currentUserId) => {
 
     const otherUser = getOtherParticipant(message, currentUserId)
     const otherUserId = getUserId(otherUser)
-    if (!otherUserId) return
+    if (!otherUserId || otherUserId === currentUserId) return
 
     const current = conversations.get(otherUserId)
     const isNewer = !current || new Date(message.createdAt) > new Date(current.lastMessage.createdAt)
     const isUnread = !message.isRead && getUserId(message.to_user_id) === currentUserId
 
     conversations.set(otherUserId, {
-      user: current?.user || otherUser,
+      user: getPreferredUser(current?.user, otherUser),
       lastMessage: isNewer ? message : current.lastMessage,
       unreadCount: (current?.unreadCount || 0) + (isUnread ? 1 : 0)
     })
   })
 
   return Array.from(conversations.values())
+    .filter((conversation) => hasUserIdentity(conversation.user))
     .sort((a, b) => new Date(b.lastMessage.createdAt) - new Date(a.lastMessage.createdAt))
 }
 
-const mergeUniqueUsers = (...groups) => {
+const mergeUniqueUsers = (excludedUserId, ...groups) => {
   const userMap = new Map()
 
   groups.flat().forEach((user) => {
     const id = getUserId(user)
-    if (id && !userMap.has(id)) userMap.set(id, user)
+    if (!id || id === excludedUserId || !hasUserIdentity(user)) return
+
+    const current = userMap.get(id)
+    userMap.set(id, getPreferredUser(current, user))
   })
 
   return Array.from(userMap.values())
@@ -99,6 +154,75 @@ const Message = ({ onStartCall }) => {
   const [recentMessages, setRecentMessages] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
+  const [conversationFilter, setConversationFilter] = useState('all')
+  const [messageSearch, setMessageSearch] = useState({ groups: [], messages: [], loading: false })
+  const [selectedSearchUserId, setSelectedSearchUserId] = useState('')
+  const [highlightTarget, setHighlightTarget] = useState(null)
+  const knownUsersByIdRef = useRef(new Map())
+
+  const knownUsersById = useMemo(() => {
+    const userMap = new Map()
+    const addUser = (user) => {
+      const userId = getUserId(user)
+      if (userId && hasUserIdentity(user)) userMap.set(userId, user)
+    }
+
+    addUser(currentUser)
+    ;[connections, followers, following].flat().forEach(addUser)
+    recentMessages.forEach((message) => {
+      addUser(message.from_user_id)
+      addUser(message.to_user_id)
+    })
+
+    return userMap
+  }, [connections, currentUser, followers, following, recentMessages])
+
+  useEffect(() => {
+    knownUsersByIdRef.current = knownUsersById
+  }, [knownUsersById])
+
+  useEffect(() => {
+    const keyword = searchTerm.trim()
+    if (!selectedUserId || !keyword) {
+      setMessageSearch({ groups: [], messages: [], loading: false })
+      setSelectedSearchUserId('')
+      return undefined
+    }
+
+    let cancelled = false
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setMessageSearch((current) => ({ ...current, loading: true }))
+        const token = await getToken()
+        const { data } = await api.post('/api/message/search', { query: keyword }, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (cancelled) return
+        if (!data.success) throw new Error(data.message)
+        setMessageSearch({
+          groups: data.groups || [],
+          messages: data.messages || [],
+          loading: false
+        })
+      } catch (error) {
+        if (!cancelled) {
+          setMessageSearch({ groups: [], messages: [], loading: false })
+          toast.error(error.message)
+        }
+      }
+    }, 300)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [getToken, searchTerm, selectedUserId])
+
+  useEffect(() => {
+    if (selectedUserId && currentUserId && selectedUserId === currentUserId) {
+      navigate('/messages', { replace: true })
+    }
+  }, [currentUserId, navigate, selectedUserId])
 
   useEffect(() => {
     if (!currentUser?._id) return undefined
@@ -112,7 +236,11 @@ const Message = ({ onStartCall }) => {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (cancelled) return
-        data.success ? setRecentMessages(data.messages || []) : toast.error(data.message)
+        data.success
+          ? setRecentMessages((data.messages || [])
+            .filter((message) => !isSelfMessage(message, currentUserId))
+            .map((message) => hydrateMessageUsers(message, currentUser, [], knownUsersByIdRef.current)))
+          : toast.error(data.message)
       } catch (error) {
         if (!cancelled) toast.error(error.message)
       } finally {
@@ -122,7 +250,7 @@ const Message = ({ onStartCall }) => {
 
     fetchRecentMessages()
     return () => { cancelled = true }
-  }, [currentUser?._id, getToken, newMessageTrigger])
+  }, [currentUser, currentUserId, getToken, newMessageTrigger])
 
   useEffect(() => {
     const activeSocket = socket || socketRef?.current
@@ -132,15 +260,17 @@ const Message = ({ onStartCall }) => {
       const fromId = getUserId(message.from_user_id)
       const toId = getUserId(message.to_user_id)
       if (fromId !== currentUserId && toId !== currentUserId) return
+      if (isSelfMessage(message, currentUserId)) return
 
-      const shouldStayUnread = toId === currentUserId && fromId !== selectedUserId
-      const nextMessage = shouldStayUnread ? { ...message, isRead: false } : message
+      setRecentMessages((messages) => {
+        const hydratedMessage = hydrateMessageUsers(message, currentUser, messages, knownUsersByIdRef.current)
+        const shouldStayUnread = toId === currentUserId && fromId !== selectedUserId
+        const nextMessage = shouldStayUnread ? { ...hydratedMessage, isRead: false } : hydratedMessage
 
-      setRecentMessages((messages) => (
-        messages.some((item) => item._id === nextMessage._id)
+        return messages.some((item) => item._id === nextMessage._id)
           ? messages.map((item) => item._id === nextMessage._id ? { ...item, ...nextMessage } : item)
           : [nextMessage, ...messages]
-      ))
+      })
     }
 
     const handleEditedMessage = ({ messageId, text }) => {
@@ -172,7 +302,7 @@ const Message = ({ onStartCall }) => {
       activeSocket.off('message-deleted', handleDeletedMessage)
       activeSocket.off('message-reaction-updated', handleReactionUpdated)
     }
-  }, [currentUserId, selectedUserId, socket, socketRef])
+  }, [currentUser, currentUserId, selectedUserId, socket, socketRef])
 
   const recentConversations = useMemo(() => (
     buildRecentConversations(recentMessages, currentUserId)
@@ -180,18 +310,18 @@ const Message = ({ onStartCall }) => {
 
   const cardUsers = useMemo(() => {
     const recentUsers = recentConversations.map((conversation) => conversation.user)
-    return mergeUniqueUsers(recentUsers, connections, followers, following)
-  }, [connections, followers, following, recentConversations])
+    return mergeUniqueUsers(currentUserId, recentUsers, connections, followers, following)
+  }, [connections, currentUserId, followers, following, recentConversations])
 
   const conversationsForSidebar = useMemo(() => {
-    if (!selectedUserId) return recentConversations
+    if (!selectedUserId || selectedUserId === currentUserId) return recentConversations
     if (recentConversations.some((conversation) => getUserId(conversation.user) === selectedUserId)) return recentConversations
 
     const selectedUser = cardUsers.find((user) => getUserId(user) === selectedUserId)
     return selectedUser
       ? [{ user: selectedUser, lastMessage: null, unreadCount: 0 }, ...recentConversations]
       : recentConversations
-  }, [cardUsers, recentConversations, selectedUserId])
+  }, [cardUsers, currentUserId, recentConversations, selectedUserId])
 
   const filteredCards = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase()
@@ -205,15 +335,25 @@ const Message = ({ onStartCall }) => {
   }, [cardUsers, searchTerm])
 
   const filteredConversations = useMemo(() => {
-    const keyword = searchTerm.trim().toLowerCase()
-    if (!keyword) return conversationsForSidebar
+    const baseConversations = conversationFilter === 'unread'
+      ? conversationsForSidebar.filter((conversation) => conversation.unreadCount > 0)
+      : conversationsForSidebar
 
-    return conversationsForSidebar.filter(({ user, lastMessage }) => (
+    const keyword = searchTerm.trim().toLowerCase()
+    if (!keyword || selectedUserId) return baseConversations
+
+    return baseConversations.filter(({ user, lastMessage }) => (
       getDisplayName(user).toLowerCase().includes(keyword) ||
       (user?.username || '').toLowerCase().includes(keyword) ||
       getMessagePreview(lastMessage, getUserId(currentUser)).toLowerCase().includes(keyword)
     ))
-  }, [conversationsForSidebar, currentUser, searchTerm])
+  }, [conversationFilter, conversationsForSidebar, currentUser, searchTerm, selectedUserId])
+
+  const selectedSearchMessages = useMemo(() => (
+    messageSearch.messages.filter((message) => (
+      getUserId(getSearchResultContact(message, currentUserId)) === selectedSearchUserId
+    ))
+  ), [currentUserId, messageSearch.messages, selectedSearchUserId])
 
   const markConversationAsRead = async (contactId) => {
     try {
@@ -243,6 +383,113 @@ const Message = ({ onStartCall }) => {
     const contactId = getUserId(conversation.user)
     openConversationInCurrentWindow(contactId)
     if (conversation.unreadCount > 0) markConversationAsRead(contactId)
+  }
+
+  const clearSidebarSearch = () => {
+    setSearchTerm('')
+    setSelectedSearchUserId('')
+    setMessageSearch({ groups: [], messages: [], loading: false })
+  }
+
+  const openSearchMessage = (message) => {
+    const contactId = getUserId(getSearchResultContact(message, currentUserId))
+    if (!contactId) return
+
+    setHighlightTarget({ userId: contactId, messageId: message._id, nonce: Date.now() })
+    openConversationInCurrentWindow(contactId)
+  }
+
+  const clearHighlightTarget = useCallback(() => {
+    setHighlightTarget(null)
+  }, [])
+
+  const renderSidebarSearch = () => {
+    const keyword = searchTerm.trim()
+    if (!keyword) return null
+
+    if (messageSearch.loading) {
+      return (
+        <div className='flex h-full items-center justify-center px-6 text-center text-sm font-bold text-slate-400'>
+          Đang tìm tin nhắn...
+        </div>
+      )
+    }
+
+    if (selectedSearchUserId) {
+      const selectedGroup = messageSearch.groups.find((group) => getUserId(group.user) === selectedSearchUserId)
+
+      return (
+        <div className='space-y-2'>
+          <button
+            type='button'
+            onClick={() => setSelectedSearchUserId('')}
+            className='mb-2 flex items-center gap-2 rounded-full px-3 py-2 text-sm font-black text-slate-700 transition hover:bg-slate-100'
+          >
+            <ArrowLeft className='size-4' />
+            Quay lại kết quả
+          </button>
+
+          {selectedSearchMessages.length === 0 ? (
+            <div className='px-4 py-8 text-center text-sm text-slate-500'>Không còn tin nhắn trùng khớp.</div>
+          ) : selectedSearchMessages.map((message) => (
+            <button
+              type='button'
+              key={message._id}
+              onClick={() => openSearchMessage(message)}
+              className='flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-slate-100'
+            >
+              <img
+                src={getAvatarUrl(selectedGroup?.user || getSearchResultContact(message, currentUserId))}
+                alt=''
+                className='size-11 shrink-0 rounded-full object-cover'
+              />
+              <div className='min-w-0 flex-1'>
+                <div className='flex items-start gap-2'>
+                  <p className='min-w-0 flex-1 truncate text-sm font-black text-slate-950'>
+                    {getDisplayName(selectedGroup?.user || getSearchResultContact(message, currentUserId))}
+                  </p>
+                  <span className='shrink-0 text-xs text-slate-400'>{formatSidebarTime(message.createdAt)}</span>
+                </div>
+                <p className='mt-1 line-clamp-2 text-sm leading-5 text-slate-500'>
+                  <span className='font-bold text-slate-700'>{getSearchResultSenderLabel(message, currentUserId)}: </span>
+                  {getSearchResultText(message)}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )
+    }
+
+    return (
+      <div className='space-y-2'>
+        <button
+          type='button'
+          onClick={clearSidebarSearch}
+          className='mb-2 flex items-center gap-2 rounded-full px-3 py-2 text-sm font-black text-slate-700 transition hover:bg-slate-100'
+        >
+          <ArrowLeft className='size-4' />
+          Quay lại đoạn chat
+        </button>
+
+        {messageSearch.groups.length === 0 ? (
+          <div className='px-4 py-8 text-center text-sm text-slate-500'>Không tìm thấy tin nhắn trùng khớp.</div>
+        ) : messageSearch.groups.map((group) => (
+          <button
+            type='button'
+            key={getUserId(group.user)}
+            onClick={() => setSelectedSearchUserId(getUserId(group.user))}
+            className='flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-slate-100'
+          >
+            <img src={getAvatarUrl(group.user)} alt='' className='size-12 shrink-0 rounded-full object-cover' />
+            <div className='min-w-0 flex-1'>
+              <p className='truncate font-black text-slate-950'>{getDisplayName(group.user)}</p>
+              <p className='mt-1 truncate text-sm text-slate-500'>{group.count} tin nhắn trùng khớp</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    )
   }
 
   if (!selectedUserId) {
@@ -289,7 +536,7 @@ const Message = ({ onStartCall }) => {
           ) : (
             <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-3'>
               {filteredCards.map((user) => (
-                <article key={getUserId(user)} className='surface rounded-[1.5rem] p-5 transition hover:-translate-y-0.5 hover:shadow-xl'>
+                <article key={getUserId(user)} className='surface flex h-full flex-col rounded-[1.5rem] p-5 transition hover:-translate-y-0.5 hover:shadow-xl'>
                   <div className='flex items-start gap-4'>
                     <img
                       src={getAvatarUrl(user)}
@@ -302,14 +549,16 @@ const Message = ({ onStartCall }) => {
                     <div className='min-w-0 flex-1'>
                       <p className='truncate text-lg font-black text-slate-900'>{getDisplayName(user)}</p>
                       {user.username && <p className='text-sm text-slate-500'>@{user.username}</p>}
-                      {user.bio && <p className='mt-2 line-clamp-2 text-sm leading-6 text-slate-600'>{user.bio}</p>}
+                      <p className='mt-2 min-h-12 overflow-hidden text-sm leading-6 text-slate-600 [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]'>
+                        {user.bio || ''}
+                      </p>
                     </div>
                   </div>
 
                   <button
                     type='button'
                     onClick={() => openMessengerWindow(getUserId(user))}
-                    className='btn-primary mt-5 w-full px-4 py-3 cursor-pointer'
+                    className='btn-primary mt-auto w-full px-4 py-3 cursor-pointer'
                   >
                     <MessageSquare className='h-4 w-4' />
                     Nhắn tin
@@ -330,14 +579,6 @@ const Message = ({ onStartCall }) => {
           <div className='border-b border-slate-200 px-5 py-5'>
             <div className='flex items-center justify-between'>
               <h1 className='text-2xl font-black text-slate-950'>Đoạn chat</h1>
-              <div className='flex items-center gap-2'>
-                <button className='flex size-11 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200' type='button'>
-                  <Ellipsis className='h-5 w-5' />
-                </button>
-                <button className='flex size-11 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200' type='button'>
-                  <PenLine className='h-5 w-5' />
-                </button>
-              </div>
             </div>
 
             <div className='relative mt-5'>
@@ -346,24 +587,49 @@ const Message = ({ onStartCall }) => {
                 type='text'
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder='Tìm kiếm trên Messenger'
+                placeholder='Tìm kiếm tin nhắn'
                 className='w-full rounded-full border border-transparent bg-slate-100 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-cyan-200 focus:bg-white focus:ring-4 focus:ring-cyan-50'
               />
             </div>
 
             <div className='mt-5 flex items-center gap-3 text-sm font-black'>
-              <span className='rounded-full bg-cyan-50 px-4 py-2 text-cyan-700'>Tất cả</span>
-              <span className='rounded-full px-4 py-2 text-slate-700'>Chưa đọc</span>
-              <span className='rounded-full px-4 py-2 text-slate-700'>Nhóm</span>
+              <button
+                type='button'
+                onClick={() => setConversationFilter('all')}
+                className={`rounded-full px-4 py-2 transition ${
+                  conversationFilter === 'all'
+                    ? 'bg-cyan-50 text-cyan-700'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                Tất cả
+              </button>
+              <button
+                type='button'
+                onClick={() => setConversationFilter('unread')}
+                className={`rounded-full px-4 py-2 transition ${
+                  conversationFilter === 'unread'
+                    ? 'bg-cyan-50 text-cyan-700'
+                    : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                Chưa đọc
+              </button>
             </div>
           </div>
 
           <div className='min-h-0 flex-1 overflow-y-auto px-3 py-3'>
-            {filteredConversations.length === 0 ? (
+            {searchTerm.trim() ? renderSidebarSearch() : filteredConversations.length === 0 ? (
               <div className='flex h-full flex-col items-center justify-center px-6 text-center text-slate-500'>
                 <UsersRound className='mb-3 h-10 w-10 text-slate-300' />
-                <p className='font-black text-slate-950'>Chưa có đoạn chat</p>
-                <p className='mt-1 text-sm'>Những người đã nhắn tin sẽ xuất hiện ở đây.</p>
+                <p className='font-black text-slate-950'>
+                  {conversationFilter === 'unread' ? 'Không có tin nhắn chưa đọc' : 'Chưa có đoạn chat'}
+                </p>
+                <p className='mt-1 text-sm'>
+                  {conversationFilter === 'unread'
+                    ? 'Các đoạn chat chưa đọc sẽ xuất hiện ở đây.'
+                    : 'Những người đã nhắn tin sẽ xuất hiện ở đây.'}
+                </p>
               </div>
             ) : (
               filteredConversations.map((conversation) => {
@@ -393,7 +659,7 @@ const Message = ({ onStartCall }) => {
                         </p>
                         {conversation.lastMessage?.createdAt && (
                           <span className='shrink-0 text-xs text-slate-400'>
-                            {moment(conversation.lastMessage.createdAt).fromNow()}
+                            {formatSidebarTime(conversation.lastMessage.createdAt)}
                           </span>
                         )}
                       </div>
@@ -416,7 +682,12 @@ const Message = ({ onStartCall }) => {
         </aside>
 
         <main className='min-w-0 flex-1'>
-          <ChatBox onStartCall={onStartCall} variant='embedded' />
+          <ChatBox
+            onStartCall={onStartCall}
+            variant='embedded'
+            scrollToMessageId={highlightTarget?.userId === selectedUserId ? highlightTarget.messageId : ''}
+            onScrolledToMessage={clearHighlightTarget}
+          />
         </main>
       </div>
     </div>

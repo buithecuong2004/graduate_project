@@ -425,13 +425,14 @@ export const getUserConnections = async (req, res) => {
         if(!user) return res.json({success: true, connections: [], followers: [], following: [], pendingConnections: []})
 
         // Filter out null values from arrays (can happen when a referenced user was deleted)
-        const connections = (user.connections || []).filter(Boolean)
-        const followers = (user.followers || []).filter(Boolean)
-        const following = (user.following || []).filter(Boolean)
+        const isNotCurrentUser = (item) => item && item._id?.toString?.() !== userId
+        const connections = (user.connections || []).filter(isNotCurrentUser)
+        const followers = (user.followers || []).filter(isNotCurrentUser)
+        const following = (user.following || []).filter(isNotCurrentUser)
 
         const pendingConnections = (await Connection.find({to_user_id: userId, status: 'pending'}).populate('from_user_id'))
             .map(connection => connection.from_user_id)
-            .filter(Boolean)
+            .filter(isNotCurrentUser)
 
         res.json({success: true, connections, followers, following, pendingConnections})
 

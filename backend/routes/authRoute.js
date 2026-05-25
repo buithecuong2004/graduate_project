@@ -6,12 +6,12 @@ import { promisify } from 'util'
 import User from '../models/User.js'
 import sendEmail from '../configs/nodeMailer.js'
 import { getFrontendUrl } from '../utils/appUrl.js'
+import { getDefaultProfilePictureUrl } from '../utils/defaultProfilePicture.js'
 
 const authRouter = express.Router()
 const scryptAsync = promisify(crypto.scrypt)
 const RESET_OTP_EXPIRY_MS = 10 * 60 * 1000
 const MAX_RESET_OTP_ATTEMPTS = 5
-const DEFAULT_PROFILE_PICTURE_PATH = '/assets/default.jpg'
 
 // Helper: generate JWT token
 const generateToken = (user) => {
@@ -105,8 +105,6 @@ const getUsernameBase = (fullName, email) => {
     return base || `user${Date.now()}`
 }
 
-const getDefaultProfilePicture = () => getFrontendUrl(DEFAULT_PROFILE_PICTURE_PATH)
-
 const generateUniqueUsername = async (fullName, email) => {
     const base = getUsernameBase(fullName, email)
     let username = base
@@ -150,13 +148,14 @@ authRouter.post('/register', async (req, res) => {
 
         const passwordHash = await hashPassword(password)
         const username = await generateUniqueUsername(fullName, email)
+        const profilePicture = await getDefaultProfilePictureUrl()
         const user = await User.create({
             email,
             full_name: fullName,
             username,
             provider: 'local',
             providerId: `local:${email}`,
-            profile_picture: getDefaultProfilePicture(),
+            profile_picture: profilePicture,
             password_hash: passwordHash,
         })
 

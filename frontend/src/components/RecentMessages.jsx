@@ -28,12 +28,16 @@ const ContactAvatar = ({ contact, now }) => {
 
 const RecentMessages = () => {
     const { connections } = useSelector((state) => state.connections)
+    const currentUser = useSelector((state) => state.user.value)
     const { openChat } = useSocket()
     const [now, setNow] = useState(() => Date.now())
+    const currentUserId = currentUser?._id?.toString?.() || ''
 
     const contacts = useMemo(() => (
-        [...connections].sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b), 'vi'))
-    ), [connections])
+        [...connections]
+            .filter((contact) => contact?._id?.toString?.() !== currentUserId)
+            .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b), 'vi'))
+    ), [connections, currentUserId])
 
     useEffect(() => {
         const intervalId = window.setInterval(() => setNow(Date.now()), 60 * 1000)
