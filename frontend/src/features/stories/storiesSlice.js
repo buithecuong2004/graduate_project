@@ -49,7 +49,22 @@ const storiesSlice = createSlice({
             state.viewStory = action.payload
         },
         addStoryLocal: (state, action) => {
-            state.stories = [action.payload, ...state.stories]
+            const story = action.payload
+            if (!story?._id) return
+            state.stories = [story, ...state.stories.filter(s => s._id !== story._id)]
+        },
+        deleteStoryLocal: (state, action) => {
+            const storyId = action.payload
+            state.stories = state.stories.filter(s => s._id !== storyId)
+            if (state.viewStory?._id === storyId) state.viewStory = null
+        },
+        updateStoryReactionsLocal: (state, action) => {
+            const { storyId, reactions } = action.payload
+            const update = (story) => {
+                if (story && Array.isArray(reactions)) story.reactions = reactions
+            }
+            update(state.stories.find(s => s._id === storyId))
+            update(state.viewStory?._id === storyId ? state.viewStory : null)
         }
     },
     extraReducers: (builder) => {
@@ -65,10 +80,10 @@ const storiesSlice = createSlice({
                 state.loading = false
             })
             .addCase(deleteStoryAction.fulfilled, (state, action) => {
-                state.stories = state.stories.filter(s => s._id !== action.payload)
+                storiesSlice.caseReducers.deleteStoryLocal(state, action)
             })
     }
 })
 
-export const { setViewStory, addStoryLocal } = storiesSlice.actions
+export const { setViewStory, addStoryLocal, deleteStoryLocal, updateStoryReactionsLocal } = storiesSlice.actions
 export default storiesSlice.reducer

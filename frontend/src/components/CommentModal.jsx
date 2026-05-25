@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronUp, MessageCircle, SendHorizonal, SmilePlus, Trash2, X } from 'lucide-react'
 import moment from '../utils/moment'
 import { useSelector } from 'react-redux'
 import { useAuth } from '../context/AuthContext'
+import { useSocket } from '../context/SocketContext'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
@@ -24,6 +25,16 @@ const getReactionSummary = (reactions = []) => {
         .map(([type]) => type)
 }
 
+const getId = (value) => value?._id?.toString?.() || value?.toString?.() || ''
+
+const prependUniqueById = (items = [], item) => {
+    const itemId = getId(item)
+    if (!itemId) return items
+    return items.some((currentItem) => getId(currentItem) === itemId)
+        ? items
+        : [item, ...items]
+}
+
 const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onTotalCount, onCountChange }) => {
     const [comments, setComments] = useState([])
     const [newComment, setNewComment] = useState('')
@@ -42,9 +53,10 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
 
     const currentUser = useSelector((state) => state.user.value)
     const { getToken } = useAuth()
+    const { socketRef, socket } = useSocket()
     const navigate = useNavigate()
 
-    const fetchComments = async (pageNum = 1) => {
+    const fetchComments = useCallback(async (pageNum = 1) => {
         try {
             if (pageNum === 1) setIsLoadingComments(true)
             else setIsLoadingMore(true)
@@ -59,8 +71,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 setComments(pageNum === 1 ? data.comments : (prev) => [...prev, ...data.comments])
                 setHasMoreComments(data.hasMore !== false)
                 setCommentPage(pageNum)
-                const total = data.comments.reduce((sum, c) => sum + 1 + (c.replies?.length || 0), 0)
-                onTotalCount?.(total)
+                if (Number.isFinite(data.totalCommentsCount)) onTotalCount?.(data.totalCommentsCount)
             }
         } catch {
             toast.error('Không thể tải bình luận')
@@ -68,7 +79,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             setIsLoadingComments(false)
             setIsLoadingMore(false)
         }
-    }
+    }, [getToken, onTotalCount, post?._id])
 
     useEffect(() => {
         if (isOpen && post?._id) {
@@ -77,7 +88,111 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             setHasMoreComments(true)
             fetchComments()
         }
-    }, [isOpen, post?._id])
+    }, [fetchComments, isOpen, post?._id])
+
+    useEffect(() => {
+        const activeSocket = socket || socketRef?.current
+        if (!isOpen || !activeSocket || !post?._id) return undefined
+
+        const postId = post._id.toString()
+
+        const isCurrentPost = (payload) => payload?.postId?.toString?.() === postId || payload?.postId === postId
+        const isOwnAction = (payload) => getId(payload?.actorId) === getId(currentUser)
+
+        const handleCommentCreated = (payload) => {
+            if (!isCurrentPost(payload) || !payload.comment) return
+
+            setComments((prev) => prependUniqueById(prev, payload.comment))
+
+            if (!isOwnAction(payload)) onCountChange?.(1)
+            if (Number.isFinite(payload.totalCommentsCount)) onTotalCount?.(payload.totalCommentsCount)
+        }
+
+        const handleReplyCreated = (payload) => {
+            if (!isCurrentPost(payload) || !payload.reply || !payload.parentCommentId) return
+
+            setComments((prev) => prev.map((comment) => {
+                if (getId(comment) !== getId(payload.parentCommentId)) return comment
+                const currentReplies = comment.replies || []
+                const nextReplies = prependUniqueById(currentReplies, payload.reply)
+                return nextReplies === currentReplies ? comment : { ...comment, replies: nextReplies }
+            }))
+
+            setReplies((prev) => {
+                const currentReplies = prev[payload.parentCommentId] || []
+                const nextReplies = prependUniqueById(currentReplies, payload.reply)
+                if (nextReplies === currentReplies) return prev
+                return {
+                    ...prev,
+                    [payload.parentCommentId]: nextReplies
+                }
+            })
+
+            if (!isOwnAction(payload)) onCountChange?.(1)
+            if (Number.isFinite(payload.totalCommentsCount)) onTotalCount?.(payload.totalCommentsCount)
+        }
+
+        const handleCommentDeleted = (payload) => {
+            if (!isCurrentPost(payload)) return
+
+            setComments((prev) => prev.filter((comment) => getId(comment) !== getId(payload.commentId)))
+            setReplies((prev) => {
+                const next = { ...prev }
+                delete next[payload.commentId]
+                return next
+            })
+
+            if (Number.isFinite(payload.totalCommentsCount)) onTotalCount?.(payload.totalCommentsCount)
+        }
+
+        const handleReplyDeleted = (payload) => {
+            if (!isCurrentPost(payload) || !payload.parentCommentId) return
+
+            setReplies((prev) => ({
+                ...prev,
+                [payload.parentCommentId]: (prev[payload.parentCommentId] || []).filter((reply) => getId(reply) !== getId(payload.replyId))
+            }))
+            setComments((prev) => prev.map((comment) => (
+                getId(comment) === getId(payload.parentCommentId)
+                    ? { ...comment, replies: (comment.replies || []).filter((reply) => getId(reply) !== getId(payload.replyId)) }
+                    : comment
+            )))
+
+            if (Number.isFinite(payload.totalCommentsCount)) onTotalCount?.(payload.totalCommentsCount)
+        }
+
+        const handleCommentReactionUpdated = (payload) => {
+            if (!isCurrentPost(payload) || !payload.commentId) return
+
+            if (payload.parentCommentId) {
+                setReplies((prev) => ({
+                    ...prev,
+                    [payload.parentCommentId]: (prev[payload.parentCommentId] || []).map((reply) => (
+                        getId(reply) === getId(payload.commentId) ? { ...reply, reactions: payload.reactions || [] } : reply
+                    ))
+                }))
+                return
+            }
+
+            setComments((prev) => prev.map((comment) => (
+                getId(comment) === getId(payload.commentId) ? { ...comment, reactions: payload.reactions || [] } : comment
+            )))
+        }
+
+        activeSocket.on('post-comment-created', handleCommentCreated)
+        activeSocket.on('post-reply-created', handleReplyCreated)
+        activeSocket.on('post-comment-deleted', handleCommentDeleted)
+        activeSocket.on('post-reply-deleted', handleReplyDeleted)
+        activeSocket.on('comment-reaction-updated', handleCommentReactionUpdated)
+
+        return () => {
+            activeSocket.off('post-comment-created', handleCommentCreated)
+            activeSocket.off('post-reply-created', handleReplyCreated)
+            activeSocket.off('post-comment-deleted', handleCommentDeleted)
+            activeSocket.off('post-reply-deleted', handleReplyDeleted)
+            activeSocket.off('comment-reaction-updated', handleCommentReactionUpdated)
+        }
+    }, [currentUser, isOpen, onCountChange, onTotalCount, post?._id, socket, socketRef])
 
     const fetchReplies = async (commentId) => {
         if (replies[commentId]) return
@@ -121,10 +236,11 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             )
 
             if (data.success) {
-                setComments([data.comment, ...comments])
+                setComments((prev) => prependUniqueById(prev, data.comment))
                 setNewComment('')
                 toast.success('Bình luận đã được thêm')
-                onCommentAdded?.()
+                if (Number.isFinite(data.totalCommentsCount)) onTotalCount?.(data.totalCommentsCount)
+                else onCommentAdded?.()
             }
         } catch {
             toast.error('Không thể thêm bình luận')
@@ -147,21 +263,26 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
             )
 
             if (data.success) {
-                setReplies(prev => ({
-                    ...prev,
-                    [commentId]: [data.reply, ...(prev[commentId] || [])]
-                }))
+                setReplies(prev => {
+                    const currentReplies = prev[commentId] || []
+                    const nextReplies = prependUniqueById(currentReplies, data.reply)
+                    if (nextReplies === currentReplies) return prev
+                    return {
+                        ...prev,
+                        [commentId]: nextReplies
+                    }
+                })
                 setComments(prev => prev.map(c => (
-                    c._id === commentId
-                        ? { ...c, replies: [data.reply, ...(c.replies || [])] }
+                    getId(c) === getId(commentId)
+                        ? { ...c, replies: prependUniqueById(c.replies || [], data.reply) }
                         : c
                 )))
                 setExpandedReplies(prev => ({ ...prev, [commentId]: true }))
                 setReplyCommentId(null)
                 setReplyText('')
                 toast.success('Phản hồi đã được thêm')
-                onReplyAdded?.()
-                onCountChange?.(1)
+                if (Number.isFinite(data.totalCommentsCount)) onTotalCount?.(data.totalCommentsCount)
+                else onReplyAdded?.()
             }
         } catch {
             toast.error('Không thể thêm phản hồi')

@@ -141,7 +141,7 @@ export const sendMessage = async (req, res) => {
     try {
         const startTime = Date.now()
         const userId = req.userId
-        const { to_user_id, shared_post_id, reply_to, is_forwarded, forwarded_type } = req.body
+        const { to_user_id, shared_post_id, reply_to, is_forwarded, forwarded_type, client_message_id } = req.body
         let { text } = req.body
 
         const images = req.files?.images || []
@@ -302,6 +302,7 @@ export const sendMessage = async (req, res) => {
         const message = await Message.create({
             from_user_id: userId,
             to_user_id,
+            client_message_id: client_message_id || undefined,
             text: text || '',
             message_type,
             media_urls,

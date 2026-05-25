@@ -1,10 +1,11 @@
 import { BadgeCheck, Heart, MessageCircle, Share2, Trash2 } from 'lucide-react'
 import moment from '../utils/moment'
-import React, { useState, useEffect } from 'react'
+import React, { useCallback, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
 import { updateCommentCount } from '../features/posts/postSlice'
 import { useAuth } from '../context/AuthContext'
+import { useSocket } from '../context/SocketContext'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 import localizeMessage from '../utils/localization'
@@ -23,23 +24,103 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     const [likes, setLikes] = useState(Array.isArray(post.likes_count) ? post.likes_count : [])
     const [reactions, setReactions] = useState(post.reactions || [])
     const [shares, setShares] = useState(post.shares_count || [])
+    const [commentCount, setCommentCount] = useState(post.total_comments_count ?? post.comments?.length ?? 0)
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [showCommentModal, setShowCommentModal] = useState(autoOpenComments || false)
     const [showShareModal, setShowShareModal] = useState(false)
     const [showReactionList, setShowReactionList] = useState(false)
+    const onPostDeletedRef = useRef(onPostDeleted)
 
     useEffect(() => {
         if (autoOpenComments) setShowCommentModal(true)
     }, [autoOpenComments])
 
-    const commentCount = post.total_comments_count ?? post.comments?.length ?? 0
     const currentUser = useSelector((state) => state.user.value)
     const dispatch = useDispatch()
 
     const { getToken } = useAuth()
+    const { socketRef, socket } = useSocket()
     const navigate = useNavigate()
     const isOwner = post.user._id === currentUser._id
+
+    useEffect(() => {
+        onPostDeletedRef.current = onPostDeleted
+    }, [onPostDeleted])
+
+    const setSyncedCommentCount = useCallback((count) => {
+        const nextCount = Math.max(0, count)
+        setCommentCount(nextCount)
+        dispatch(updateCommentCount({ postId: post._id, count: nextCount }))
+    }, [dispatch, post._id])
+
+    const incrementSyncedCommentCount = useCallback((delta = 1) => {
+        setCommentCount((currentCount) => {
+            const nextCount = Math.max(0, currentCount + delta)
+            dispatch(updateCommentCount({ postId: post._id, count: nextCount }))
+            return nextCount
+        })
+    }, [dispatch, post._id])
+
+    const handleCommentAdded = useCallback(() => {
+        incrementSyncedCommentCount(1)
+    }, [incrementSyncedCommentCount])
+
+    useEffect(() => {
+        setLikes(Array.isArray(post.likes_count) ? post.likes_count : [])
+        setReactions(post.reactions || [])
+        setShares(post.shares_count || [])
+        setCommentCount(post.total_comments_count ?? post.comments?.length ?? 0)
+    }, [post._id, post.likes_count, post.reactions, post.shares_count, post.total_comments_count, post.comments?.length])
+
+    useEffect(() => {
+        const activeSocket = socket || socketRef?.current
+        if (!activeSocket || !post?._id) return undefined
+
+        const postId = post._id.toString()
+        activeSocket.emit('join-post', postId)
+
+        const isCurrentPost = (payload) => payload?.postId?.toString?.() === postId || payload?.postId === postId
+
+        const handleReactionUpdated = (payload) => {
+            if (!isCurrentPost(payload)) return
+            if (Array.isArray(payload.reactions)) setReactions(payload.reactions)
+            if (Array.isArray(payload.likes_count)) setLikes(payload.likes_count)
+        }
+
+        const handleCommentCountUpdated = (payload) => {
+            if (!isCurrentPost(payload) || !Number.isFinite(payload.totalCommentsCount)) return
+            setSyncedCommentCount(payload.totalCommentsCount)
+        }
+
+        const handleShareUpdated = (payload) => {
+            if (!isCurrentPost(payload) || !Array.isArray(payload.shares_count)) return
+            setShares(payload.shares_count)
+        }
+
+        const handlePostDeleted = (payload) => {
+            if (isCurrentPost(payload)) onPostDeletedRef.current?.(postId)
+        }
+
+        activeSocket.on('post-reaction-updated', handleReactionUpdated)
+        activeSocket.on('post-comment-created', handleCommentCountUpdated)
+        activeSocket.on('post-reply-created', handleCommentCountUpdated)
+        activeSocket.on('post-comment-deleted', handleCommentCountUpdated)
+        activeSocket.on('post-reply-deleted', handleCommentCountUpdated)
+        activeSocket.on('post-share-updated', handleShareUpdated)
+        activeSocket.on('post-deleted', handlePostDeleted)
+
+        return () => {
+            activeSocket.emit('leave-post', postId)
+            activeSocket.off('post-reaction-updated', handleReactionUpdated)
+            activeSocket.off('post-comment-created', handleCommentCountUpdated)
+            activeSocket.off('post-reply-created', handleCommentCountUpdated)
+            activeSocket.off('post-comment-deleted', handleCommentCountUpdated)
+            activeSocket.off('post-reply-deleted', handleCommentCountUpdated)
+            activeSocket.off('post-share-updated', handleShareUpdated)
+            activeSocket.off('post-deleted', handlePostDeleted)
+        }
+    }, [post?._id, setSyncedCommentCount, socket, socketRef])
 
     const handleReact = async (reactionType) => {
         try {
@@ -227,10 +308,10 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                     onClose={() => setShowCommentModal(false)}
                     post={post}
                     targetCommentId={targetCommentId}
-                    onCommentAdded={() => dispatch(updateCommentCount({ postId: post._id, count: commentCount + 1 }))}
-                    onReplyAdded={() => dispatch(updateCommentCount({ postId: post._id, count: commentCount + 1 }))}
-                    onTotalCount={(total) => dispatch(updateCommentCount({ postId: post._id, count: total }))}
-                    onCountChange={(delta) => dispatch(updateCommentCount({ postId: post._id, count: commentCount + delta }))}
+                    onCommentAdded={handleCommentAdded}
+                    onReplyAdded={handleCommentAdded}
+                    onTotalCount={setSyncedCommentCount}
+                    onCountChange={incrementSyncedCommentCount}
                 />
             )}
 

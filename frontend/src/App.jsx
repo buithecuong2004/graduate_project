@@ -19,12 +19,45 @@ import { fetchConnections, updateUserPresence } from './features/connections/con
 import { useRef } from 'react'
 import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal, updateMessageReactionsLocal } from './features/messages/messagesSlice'
 import { addNotification } from './features/notifications/notificationsSlice'
+import { deletePost, updateCommentCount, updatePostReactions, updatePostShares, upsertPost } from './features/posts/postSlice'
+import { addStoryLocal, deleteStoryLocal, updateStoryReactionsLocal } from './features/stories/storiesSlice'
 import { Navigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { SocketProvider, useSocket } from './context/SocketContext'
 import CallModal from './components/CallModal'
+import api from './api/axios'
 
 const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
+
+const buildRealtimePostFromNotification = (notification) => {
+  const post = notification?.data?.post
+  const user = notification?.data?.user
+  if (!post?._id || !user?._id) return null
+
+  return {
+    likes_count: [],
+    reactions: [],
+    shares_count: [],
+    comments: [],
+    total_comments_count: 0,
+    createdAt: new Date().toISOString(),
+    ...post,
+    user: post.user || user
+  }
+}
+
+const buildRealtimeStoryFromNotification = (notification) => {
+  const story = notification?.data?.story
+  const user = notification?.data?.user
+  if (!story?._id || !user?._id) return null
+
+  return {
+    reactions: [],
+    createdAt: new Date().toISOString(),
+    ...story,
+    user: story.user || user
+  }
+}
 
 // ─── Inner App (needs SocketProvider to be parent) ───────────────────────────
 const AppInner = () => {
@@ -80,6 +113,36 @@ const AppInner = () => {
         const refreshConnectionsFromSocket = async () => {
           const token = await getToken()
           if (token) dispatch(fetchConnections(token))
+        }
+
+        const fetchRealtimePost = async (postId, fallbackPost = null) => {
+          if (fallbackPost) dispatch(upsertPost(fallbackPost))
+          if (!postId) return
+
+          try {
+            const token = await getToken()
+            const { data } = await api.get(`/api/post/${postId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            if (data.success && data.post) dispatch(upsertPost(data.post))
+          } catch (error) {
+            console.error('post realtime fetch error:', error)
+          }
+        }
+
+        const fetchRealtimeStory = async (storyId, fallbackStory = null) => {
+          if (fallbackStory) dispatch(addStoryLocal(fallbackStory))
+          if (!storyId) return
+
+          try {
+            const token = await getToken()
+            const { data } = await api.get(`/api/story/${storyId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            if (data.success && data.story) dispatch(addStoryLocal(data.story))
+          } catch (error) {
+            console.error('story realtime fetch error:', error)
+          }
         }
 
         // Listen for new messages — dispatch to Redux so all components update instantly
@@ -148,10 +211,66 @@ const AppInner = () => {
 
         socket.on('new-story', (notification) => {
           dispatch(addNotification(notification))
+          const story = buildRealtimeStoryFromNotification(notification)
+          fetchRealtimeStory(notification?.data?.story_id || story?._id, story)
+        })
+
+        socket.on('story-created', (story) => {
+          fetchRealtimeStory(story?._id, story)
+        })
+
+        socket.on('story-deleted', ({ storyId }) => {
+          dispatch(deleteStoryLocal(storyId))
+        })
+
+        socket.on('story-reaction-updated', ({ storyId, reactions }) => {
+          dispatch(updateStoryReactionsLocal({ storyId, reactions }))
         })
 
         socket.on('new-post-notification', (notification) => {
           dispatch(addNotification(notification))
+          const post = buildRealtimePostFromNotification(notification)
+          fetchRealtimePost(notification?.data?.post_id || post?._id, post)
+        })
+
+        socket.on('post-created', (post) => {
+          fetchRealtimePost(post?._id, post)
+        })
+
+        socket.on('post-reaction-updated', ({ postId, reactions, likes_count }) => {
+          dispatch(updatePostReactions({ postId, reactions, likes_count }))
+        })
+
+        socket.on('post-comment-created', ({ postId, totalCommentsCount }) => {
+          if (Number.isFinite(totalCommentsCount)) {
+            dispatch(updateCommentCount({ postId, count: totalCommentsCount }))
+          }
+        })
+
+        socket.on('post-reply-created', ({ postId, totalCommentsCount }) => {
+          if (Number.isFinite(totalCommentsCount)) {
+            dispatch(updateCommentCount({ postId, count: totalCommentsCount }))
+          }
+        })
+
+        socket.on('post-comment-deleted', ({ postId, totalCommentsCount }) => {
+          if (Number.isFinite(totalCommentsCount)) {
+            dispatch(updateCommentCount({ postId, count: totalCommentsCount }))
+          }
+        })
+
+        socket.on('post-reply-deleted', ({ postId, totalCommentsCount }) => {
+          if (Number.isFinite(totalCommentsCount)) {
+            dispatch(updateCommentCount({ postId, count: totalCommentsCount }))
+          }
+        })
+
+        socket.on('post-share-updated', ({ postId, shares_count }) => {
+          dispatch(updatePostShares({ postId, shares_count }))
+        })
+
+        socket.on('post-deleted', ({ postId }) => {
+          dispatch(deletePost(postId))
         })
 
         socket.on('new-comment-notification', (notification) => {

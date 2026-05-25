@@ -6,6 +6,18 @@ import User from "../models/User.js";
 import axios from "axios";
 import { getUniqueNotificationRecipientIds } from "../utils/notificationRecipients.js";
 
+const getPostCommentCount = (postId) => Comment.countDocuments({ post: postId })
+
+const emitPostRoomEvent = (req, postId, event, payload = {}) => {
+    const io = req.app.locals.io
+    if (!io || !postId) return
+
+    io.to(`post-${postId}`).emit(event, {
+        postId: postId.toString(),
+        ...payload
+    })
+}
+
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
     try {
@@ -174,6 +186,7 @@ export const addPost = async (req, res) => {
         if(io && postUser) {
             recipientIds.forEach(recipientId => {
                 console.log('📖 Broadcasting new post to:', recipientId, 'from:', postUser.full_name)
+                io.to(`user-${recipientId}`).emit('post-created', populatedPost)
                 io.to(`user-${recipientId}`).emit('new-post-notification', newPostNotification)
             })
         }
@@ -308,6 +321,10 @@ export const likePost = async (req, res) => {
             post.likes_count.push(userId)
             await post.save()
             res.json({ success: true, message: 'Post liked' })
+            emitPostRoomEvent(req, postId, 'post-reaction-updated', {
+                reactions: post.reactions || [],
+                likes_count: post.likes_count || []
+            })
 
             // Send like notification via socket to post owner (only if not self-like)
             const postOwner = post.user
@@ -339,6 +356,10 @@ export const likePost = async (req, res) => {
             post.likes_count = post.likes_count.filter(user => user.toString() !== userId)
             await post.save()
             res.json({ success: true, message: 'Post unliked' })
+            emitPostRoomEvent(req, postId, 'post-reaction-updated', {
+                reactions: post.reactions || [],
+                likes_count: post.likes_count || []
+            })
         }
 
     } catch (error) {
@@ -373,8 +394,14 @@ export const addComment = async (req, res) => {
         const post = await Post.findById(postId)
         post.comments.push(comment._id)
         await post.save()
+        const totalCommentsCount = await getPostCommentCount(postId)
 
-        res.json({ success: true, message: 'Comment added', comment: commentWithUser })
+        res.json({ success: true, message: 'Comment added', comment: commentWithUser, totalCommentsCount })
+        emitPostRoomEvent(req, postId, 'post-comment-created', {
+            comment: commentWithUser,
+            totalCommentsCount,
+            actorId: userId
+        })
 
         // Send comment notification via socket to post owner (only if not self-comment)
         const io = req.app.locals.io
@@ -428,8 +455,9 @@ export const getComments = async (req, res) => {
         )
 
         const hasMore = skip + parseInt(limit) < totalComments
+        const totalCommentsCount = await getPostCommentCount(postId)
 
-        res.json({ success: true, comments, hasMore, page: parseInt(page) })
+        res.json({ success: true, comments, hasMore, page: parseInt(page), totalCommentsCount })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -449,14 +477,22 @@ export const deleteComment = async (req, res) => {
         }
 
         // Xoa comment va tat ca reply con cua no
+        const replyIds = await Comment.find({ parent_comment_id: commentId }).select('_id').lean()
         await Comment.deleteMany({ parent_comment_id: commentId })
         await Comment.findByIdAndDelete(commentId)
 
         const post = await Post.findById(comment.post)
         post.comments = post.comments.filter(c => c.toString() !== commentId)
         await post.save()
+        const totalCommentsCount = await getPostCommentCount(comment.post)
 
         res.json({ success: true, message: 'Comment deleted' })
+        emitPostRoomEvent(req, comment.post, 'post-comment-deleted', {
+            commentId,
+            replyIds: replyIds.map((reply) => reply._id.toString()),
+            totalCommentsCount,
+            actorId: userId
+        })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -475,6 +511,12 @@ export const likeComment = async (req, res) => {
             comment.likes_count.push(userId)
             await comment.save()
             res.json({ success: true, message: 'Comment liked' })
+            emitPostRoomEvent(req, comment.post, 'comment-reaction-updated', {
+                commentId: comment._id.toString(),
+                parentCommentId: comment.parent_comment_id?.toString?.() || null,
+                reactions: comment.reactions || [],
+                likes_count: comment.likes_count || []
+            })
 
             // Send like notification via socket to comment author (only if not self-like)
             const commentAuthor = comment.user
@@ -504,6 +546,12 @@ export const likeComment = async (req, res) => {
             comment.likes_count = comment.likes_count.filter(user => user.toString() !== userId)
             await comment.save()
             res.json({ success: true, message: 'Comment unliked' })
+            emitPostRoomEvent(req, comment.post, 'comment-reaction-updated', {
+                commentId: comment._id.toString(),
+                parentCommentId: comment.parent_comment_id?.toString?.() || null,
+                reactions: comment.reactions || [],
+                likes_count: comment.likes_count || []
+            })
         }
 
     } catch (error) {
@@ -550,6 +598,12 @@ export const reactComment = async (req, res) => {
         })
 
         res.json({ success: true, message: 'Reaction updated', reactions: comment.reactions })
+        emitPostRoomEvent(req, comment.post, 'comment-reaction-updated', {
+            commentId,
+            parentCommentId: comment.parent_comment_id?.toString?.() || null,
+            reactions: comment.reactions,
+            likes_count: comment.likes_count || []
+        })
 
         const commentAuthor = comment.user
         if(isNewReaction && userId !== commentAuthor.toString()) {
@@ -613,6 +667,7 @@ export const deletePost = async (req, res) => {
         await Post.findByIdAndDelete(postId)
 
         res.json({ success: true, message: 'Post deleted successfully' })
+        emitPostRoomEvent(req, postId, 'post-deleted', { actorId: userId })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -653,8 +708,15 @@ export const addReply = async (req, res) => {
                 profile_picture: replyUser.profile_picture
             } : null
         }
+        const totalCommentsCount = await getPostCommentCount(parentComment.post)
 
-        res.json({ success: true, message: 'Reply added', reply: replyWithUser })
+        res.json({ success: true, message: 'Reply added', reply: replyWithUser, totalCommentsCount })
+        emitPostRoomEvent(req, parentComment.post, 'post-reply-created', {
+            parentCommentId: commentId,
+            reply: replyWithUser,
+            totalCommentsCount,
+            actorId: userId
+        })
 
         // Send reply notification via socket to post owner and comment author
         const post = await Post.findById(parentComment.post)
@@ -738,10 +800,12 @@ export const sharePost = async (req, res) => {
             post.shares_count.push(userId)
             await post.save()
             res.json({ success: true, message: 'Post shared', shares_count: post.shares_count })
+            emitPostRoomEvent(req, postId, 'post-share-updated', { shares_count: post.shares_count })
         } else {
             post.shares_count = post.shares_count.filter(user => user.toString() !== userId)
             await post.save()
             res.json({ success: true, message: 'Share removed', shares_count: post.shares_count })
+            emitPostRoomEvent(req, postId, 'post-share-updated', { shares_count: post.shares_count })
         }
 
     } catch (error) {
@@ -763,6 +827,8 @@ export const deleteReply = async (req, res) => {
         }
 
         // Remove from parent comment's replies array
+        const parentCommentId = reply.parent_comment_id
+        const postId = reply.post
         if (reply.parent_comment_id) {
             await Comment.findByIdAndUpdate(
                 reply.parent_comment_id,
@@ -771,8 +837,15 @@ export const deleteReply = async (req, res) => {
         }
 
         await Comment.findByIdAndDelete(replyId)
+        const totalCommentsCount = await getPostCommentCount(postId)
 
         res.json({ success: true, message: 'Reply deleted' })
+        emitPostRoomEvent(req, postId, 'post-reply-deleted', {
+            replyId,
+            parentCommentId: parentCommentId?.toString?.() || null,
+            totalCommentsCount,
+            actorId: userId
+        })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -824,6 +897,10 @@ export const reactPost = async (req, res) => {
         })
 
         res.json({ success: true, message: 'Reaction updated', reactions: post.reactions })
+        emitPostRoomEvent(req, postId, 'post-reaction-updated', {
+            reactions: post.reactions,
+            likes_count: post.likes_count || []
+        })
 
         // Notification
         const postOwner = post.user.toString()

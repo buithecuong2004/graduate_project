@@ -108,6 +108,7 @@ export const addUserStory = async (req, res) => {
 
             recipientIds.forEach(recipientId => {
                 console.log('📖 Sending new story notification to:', recipientId, 'from:', storyUser.full_name)
+                io.to(`user-${recipientId}`).emit('story-created', storyWithUser)
                 io.to(`user-${recipientId}`).emit('new-story', newStoryNotification)
             })
         }
@@ -194,6 +195,11 @@ export const deleteStory = async (req, res) => {
         await Story.findByIdAndDelete(storyId)
 
         res.json({ success: true, message: 'Story deleted successfully' })
+
+        const io = req.app.locals.io
+        if (io) {
+            io.emit('story-deleted', { storyId })
+        }
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -241,6 +247,11 @@ export const reactStory = async (req, res) => {
 
         const io = req.app.locals.io
         if (io) {
+            io.to(`user-${story.user}`).emit('story-reaction-updated', {
+                storyId,
+                reactions: story.reactions
+            })
+
             const storyOwner = story.user.toString()
             if (isNewReaction && userId !== storyOwner) {
                 const reactor = await User.findById(userId)

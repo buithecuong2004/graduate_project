@@ -74,7 +74,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
   const { getToken } = useAuth()
   const navigate = useNavigate()
   const dispatch = useDispatch()
-  const { socketRef } = useSocket()
+  const { socketRef, socket } = useSocket()
 
   const [hasMoreMessages, setHasMoreMessages] = useState(true)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -1085,19 +1085,26 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
 
   // Local socket listeners (optimistic UI for this chat only)
   useEffect(() => {
-    const socket = socketRef?.current
-    if (!socket || !userId) return
+    const activeSocket = socket || socketRef?.current
+    if (!activeSocket || !userId || !currentUserId) return
 
     const handleNewMessage = (message) => {
       const fromId = getMessageUserId(message.from_user_id)
       const toId = getMessageUserId(message.to_user_id)
-      // Only handle messages that belong to this chat (either sent to or from this user)
-      if (fromId !== userId && toId !== userId) return
+      const belongsToCurrentChat = (
+        (fromId === userId && toId === currentUserId) ||
+        (fromId === currentUserId && toId === userId)
+      )
+      if (!belongsToCurrentChat) return
 
-      // Append if not present
       setMessages((prev) => (
         prev.some((m) => m._id === message._id) ? prev : [...prev, message]
       ))
+
+      if (!isMini && fromId === userId) {
+        markMessagesAsRead()
+        dispatch(setNewMessageTrigger(Date.now()))
+      }
     }
 
     const handleReactionUpdated = ({ messageId, reactions }) => {
@@ -1137,22 +1144,22 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
       }
     }
 
-    socket.on('new-message', handleNewMessage)
-    socket.on('message-reaction-updated', handleReactionUpdated)
-    socket.on('message-edited', handleEdited)
-    socket.on('message-deleted', handleDeleted)
-    socket.on('conversation-deleted', handleConversationDeleted)
-    socket.on('user-block-status-changed', handleBlockStatusChanged)
+    activeSocket.on('new-message', handleNewMessage)
+    activeSocket.on('message-reaction-updated', handleReactionUpdated)
+    activeSocket.on('message-edited', handleEdited)
+    activeSocket.on('message-deleted', handleDeleted)
+    activeSocket.on('conversation-deleted', handleConversationDeleted)
+    activeSocket.on('user-block-status-changed', handleBlockStatusChanged)
 
     return () => {
-      socket.off('new-message', handleNewMessage)
-      socket.off('message-reaction-updated', handleReactionUpdated)
-      socket.off('message-edited', handleEdited)
-      socket.off('message-deleted', handleDeleted)
-      socket.off('conversation-deleted', handleConversationDeleted)
-      socket.off('user-block-status-changed', handleBlockStatusChanged)
+      activeSocket.off('new-message', handleNewMessage)
+      activeSocket.off('message-reaction-updated', handleReactionUpdated)
+      activeSocket.off('message-edited', handleEdited)
+      activeSocket.off('message-deleted', handleDeleted)
+      activeSocket.off('conversation-deleted', handleConversationDeleted)
+      activeSocket.off('user-block-status-changed', handleBlockStatusChanged)
     }
-  }, [currentUserId, socketRef, userId, setMessages])
+  }, [currentUserId, dispatch, isMini, markMessagesAsRead, setMessages, socket, socketRef, userId])
 
   useEffect(() => {
     scrollToMessageIdRef.current = scrollToMessageId || ''
