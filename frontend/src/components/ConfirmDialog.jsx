@@ -2,7 +2,17 @@ import React from 'react'
 import { createPortal } from 'react-dom'
 import { AlertCircle } from 'lucide-react'
 
-const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel, isLoading = false, isDangerous = false }) => {
+const ConfirmDialog = ({
+    isOpen,
+    title,
+    message,
+    onConfirm,
+    onCancel,
+    isLoading = false,
+    isDangerous = false,
+    confirmLabel = 'Xóa',
+    loadingLabel = 'Đang xóa...'
+}) => {
     if (!isOpen) return null
 
     return createPortal(
@@ -37,7 +47,7 @@ const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel, isLoading 
                                 : 'bg-cyan-700 hover:bg-cyan-800'
                         }`}
                     >
-                        {isLoading ? 'Đang xóa...' : 'Xóa'}
+                        {isLoading ? loadingLabel : confirmLabel}
                     </button>
                 </div>
             </div>

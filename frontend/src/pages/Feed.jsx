@@ -146,7 +146,7 @@ const Feed = () => {
             </div>
           </main>
 
-          <aside className='max-xl:hidden sticky top-6 space-y-5'>
+          <aside className='max-xl:hidden sticky top-6 max-h-[calc(100vh-3rem)] space-y-5 overflow-y-auto pb-6 pr-1'>
             <div className='surface overflow-hidden rounded-[1.5rem] p-4 text-sm text-slate-700'>
               <div className='mb-3 flex items-center justify-between'>
                 <h3 className='font-black text-slate-900'>Được tài trợ</h3>

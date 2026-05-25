@@ -15,9 +15,12 @@ const userSchema = new mongoose.Schema({
     password_reset_otp_hash: {type: String, select: false},
     password_reset_otp_expires_at: {type: Date, select: false},
     password_reset_otp_attempts: {type: Number, default: 0, select: false},
+    isOnline: {type: Boolean, default: false},
+    lastSeen: {type: Date},
     followers: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
     following: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
-    connections: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}]
+    connections: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
+    blockedUsers: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}]
 }, {timestamps: true, minimize: false})
 
 // Compound unique index: same provider + providerId combo must be unique

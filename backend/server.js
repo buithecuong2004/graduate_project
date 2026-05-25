@@ -21,6 +21,7 @@ if (shouldLoadLocalEnv && fs.existsSync('.env.local')) {
 const { default: express } = await import('express')
 const { default: cors } = await import('cors')
 const { default: connectDB } = await import('./configs/db.js')
+const { default: User } = await import('./models/User.js')
 const { inngest, functions } = await import('./inngest/index.js')
 const { serve } = await import('inngest/express')
 const { default: passport } = await import('./configs/passport.js')
@@ -40,6 +41,7 @@ const { io, connectedUsers } = setupSocket(server);
 
 try {
     await connectDB();
+    await User.updateMany({ isOnline: true }, { $set: { isOnline: false, lastSeen: new Date() } });
 } catch (error) {
     console.error('Failed to connect to database. Server will not start.')
     process.exit(1)

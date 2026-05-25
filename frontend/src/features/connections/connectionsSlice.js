@@ -31,7 +31,24 @@ const connectionsSlice = createSlice({
     name: 'connections',
     initialState,
     reducers: {
+        updateUserPresence: (state, action) => {
+            const { userId, isOnline, lastSeen } = action.payload
+            if (!userId) return
 
+            const updateGroup = (group = []) => {
+                group.forEach((user) => {
+                    if (user?._id?.toString?.() === userId.toString()) {
+                        user.isOnline = isOnline
+                        user.lastSeen = lastSeen
+                    }
+                })
+            }
+
+            updateGroup(state.connections)
+            updateGroup(state.pendingConnections)
+            updateGroup(state.followers)
+            updateGroup(state.following)
+        }
     },
     extraReducers: (builder) => {
         builder
@@ -49,4 +66,5 @@ const connectionsSlice = createSlice({
     }
 })
 
+export const { updateUserPresence } = connectionsSlice.actions
 export default connectionsSlice.reducer

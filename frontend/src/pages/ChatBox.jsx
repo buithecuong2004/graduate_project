@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, VideoIcon } from 'lucide-react'
+import { ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, VideoIcon, ChevronDown, UserRound, Ban, Flag } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { setViewStory } from '../features/stories/storiesSlice'
@@ -15,13 +15,17 @@ import ChatMediaViewer from '../components/ChatMediaViewer'
 import { SmilePlus } from 'lucide-react'
 import ReactionPicker from '../components/ReactionPicker'
 import ReactionListModal from '../components/ReactionListModal'
+import ConfirmDialog from '../components/ConfirmDialog'
 import localizeMessage from '../utils/localization'
 import { REACTION_ICONS } from '../utils/reactions'
+import { fetchUser } from '../features/user/userSlice'
 
 const FLOATING_REACTION_WIDTH = 292
 const FLOATING_REACTION_HEIGHT = 64
 const FLOATING_MENU_WIDTH = 156
 const FLOATING_MENU_HEIGHT = 132
+const PROFILE_MENU_WIDTH = 260
+const PROFILE_MENU_HEIGHT = 224
 const MESSAGE_PAGE_SIZE = 30
 
 const getMessageUserId = (value) => {
@@ -98,8 +102,12 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [blockStatus, setBlockStatus] = useState({ isBlockedByMe: false, hasBlockedMe: false })
+  const [pendingDialog, setPendingDialog] = useState(null)
+  const [isDialogLoading, setIsDialogLoading] = useState(false)
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
+  const profileMenuAnchorRef = useRef(null)
   const shouldAutoScrollRef = useRef(true)
   const isSendingMessageRef = useRef(false)
   const isForwardingRef = useRef(false)
@@ -135,9 +143,14 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const [reactionMenuId, setReactionMenuId] = useState(null)
   const [reactionMenuPosition, setReactionMenuPosition] = useState(null)
   const [actionMenuPosition, setActionMenuPosition] = useState(null)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [profileMenuPosition, setProfileMenuPosition] = useState(null)
   const [showReactionListMsg, setShowReactionListMsg] = useState(null)
   const imageInputId = `${variant}-images-${userId || 'chat'}`
   const videoInputId = `${variant}-videos-${userId || 'chat'}`
+  const isBlockedByMe = !!blockStatus.isBlockedByMe
+  const hasBlockedMe = !!blockStatus.hasBlockedMe
+  const isChatBlocked = isBlockedByMe || hasBlockedMe
 
   const handleStoryClick = async (storyId) => {
     if (!storyId) return toast.error('Tin không còn khả dụng')
@@ -364,6 +377,10 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
 
   const sendVoiceMessage = async () => {
     if (!audioBlob) return
+    if (isChatBlocked) {
+      toast.error('Bạn không thể gửi tin nhắn trong đoạn chat này')
+      return
+    }
     try {
       setIsSendingVoice(true)
       const token = await getToken()
@@ -431,6 +448,10 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const handleEditSave = async () => {
     const nextText = editText.trim()
     if (!editingMsg || !nextText) return
+    if (isChatBlocked) {
+      toast.error('Bạn không thể chỉnh sửa trong đoạn chat này')
+      return
+    }
 
     const messageId = editingMsg._id
     const previousMessage = messages.find((message) => message._id === messageId)
@@ -464,6 +485,8 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
     setReactionMenuId(null)
     setActionMenuPosition(null)
     setReactionMenuPosition(null)
+    setProfileMenuOpen(false)
+    setProfileMenuPosition(null)
   }
 
   const openReactionPicker = (event, message, isOwn) => {
@@ -512,6 +535,11 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   }
 
   const handleReactMessage = async (messageId, reactionType) => {
+    if (isChatBlocked) {
+      toast.error('Bạn không thể tương tác trong đoạn chat này')
+      return
+    }
+
     const previousMessage = messages.find((message) => message._id === messageId)
     closeMessageActions()
     setMessages((prev) => prev.map(msg => {
@@ -576,6 +604,9 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const handleForwardSend = async () => {
     if (forwardSelected.length === 0) return toast.error('Vui lòng chọn ít nhất một người')
     if (isForwardingRef.current) return
+    if (isChatBlocked && forwardSelected.includes(userId)) {
+      return toast.error('Bạn không thể chuyển tiếp vào đoạn chat này')
+    }
 
     const selectedIds = [...forwardSelected]
     const messageToForward = forwardingMsg
@@ -701,6 +732,29 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
     finally { setLoading(false) }
   }, [userId])
 
+  const fetchBlockStatus = useCallback(async () => {
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/user/block-status', { id: userId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (data.success) {
+        const nextStatus = {
+          isBlockedByMe: !!data.isBlockedByMe,
+          hasBlockedMe: !!data.hasBlockedMe
+        }
+        setBlockStatus({
+          isBlockedByMe: !!data.isBlockedByMe,
+          hasBlockedMe: !!data.hasBlockedMe
+        })
+        return nextStatus
+      }
+    } catch (error) {
+      console.error('block-status error:', error)
+    }
+    return null
+  }, [getToken, userId])
+
   const fetchUserMessages = useCallback(async () => {
     try {
       const token = await getToken()
@@ -783,6 +837,10 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const sendMessage = async () => {
     if (editingMsg) { handleEditSave(); return }
     if (isSendingMessageRef.current) return
+    if (isChatBlocked) {
+      toast.error('Bạn không thể gửi tin nhắn trong đoạn chat này')
+      return
+    }
     try {
       const messageText = text.trim()
       if (!messageText && images.length === 0 && videos.length === 0) return
@@ -839,6 +897,118 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
     dispatch(setNewMessageTrigger(Date.now()))
   }
 
+  const openUserProfile = () => {
+    if (!userId) return
+    setProfileMenuOpen(false)
+    navigate(`/profile/${userId}`)
+    if (isMini) onClose?.()
+  }
+
+  const openProfileMenu = (event) => {
+    event.stopPropagation()
+    closeMessageActions()
+
+    if (profileMenuOpen) {
+      setProfileMenuOpen(false)
+      return
+    }
+
+    setProfileMenuPosition(getFloatingPanelPosition(
+      event.currentTarget.getBoundingClientRect(),
+      PROFILE_MENU_WIDTH,
+      PROFILE_MENU_HEIGHT,
+      'left'
+    ))
+    setProfileMenuOpen(true)
+  }
+
+  const requestDeleteConversation = () => {
+    setProfileMenuOpen(false)
+    setPendingDialog('delete-conversation')
+  }
+
+  const requestBlockUser = () => {
+    setProfileMenuOpen(false)
+    setPendingDialog('block-user')
+  }
+
+  const closeConfirmDialog = () => {
+    if (!isDialogLoading) setPendingDialog(null)
+  }
+
+  const refreshCurrentUser = (token) => {
+    if (token) dispatch(fetchUser(token))
+  }
+
+  const handleDeleteConversation = async () => {
+    const previousMessages = messagesRef.current
+    setIsDialogLoading(true)
+    setMessages([])
+
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/message/delete-conversation', { to_user_id: userId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!data.success) throw new Error(data.message)
+      dispatch(setNewMessageTrigger(Date.now()))
+      toast.success('Đã xóa đoạn chat')
+      setPendingDialog(null)
+      if (isMini) onClose?.()
+    } catch (error) {
+      setMessages(previousMessages)
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setIsDialogLoading(false)
+    }
+  }
+
+  const handleBlockUser = async () => {
+    setIsDialogLoading(true)
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/user/block', { id: userId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!data.success) throw new Error(data.message)
+      setBlockStatus((current) => ({ ...current, isBlockedByMe: true }))
+      refreshCurrentUser(token)
+      dispatch(setNewMessageTrigger(Date.now()))
+      toast.success('Đã chặn người dùng')
+      setPendingDialog(null)
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setIsDialogLoading(false)
+    }
+  }
+
+  const handleUnblockUser = async () => {
+    setIsDialogLoading(true)
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/user/unblock', { id: userId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!data.success) throw new Error(data.message)
+      setBlockStatus((current) => ({ ...current, isBlockedByMe: false }))
+      refreshCurrentUser(token)
+      dispatch(setNewMessageTrigger(Date.now()))
+      toast.success('Đã bỏ chặn người dùng')
+      setPendingDialog(null)
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setIsDialogLoading(false)
+    }
+  }
+
+  const handleConfirmDialog = () => {
+    if (pendingDialog === 'delete-conversation') return handleDeleteConversation()
+    if (pendingDialog === 'block-user') return handleBlockUser()
+    if (pendingDialog === 'unblock-user') return handleUnblockUser()
+  }
+
   // Socket listeners removed — App.jsx handles socket events and dispatches to Redux
   // This approach (Redux only, no local socket listeners) is faster and prevents duplicate updates
 
@@ -877,25 +1047,51 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
       )))
     }
 
+    const handleConversationDeleted = ({ userId: deletedChatUserId }) => {
+      if (deletedChatUserId?.toString?.() === userId?.toString?.()) {
+        setMessages([])
+      }
+    }
+
+    const handleBlockStatusChanged = ({ blockerId, blockedUserId, isBlocked }) => {
+      const blocker = blockerId?.toString?.() || blockerId
+      const blocked = blockedUserId?.toString?.() || blockedUserId
+
+      if (blocker === currentUserId && blocked === userId) {
+        setBlockStatus((current) => ({ ...current, isBlockedByMe: !!isBlocked }))
+      }
+
+      if (blocked === currentUserId && blocker === userId) {
+        setBlockStatus((current) => ({ ...current, hasBlockedMe: !!isBlocked }))
+      }
+    }
+
     socket.on('new-message', handleNewMessage)
     socket.on('message-reaction-updated', handleReactionUpdated)
     socket.on('message-edited', handleEdited)
     socket.on('message-deleted', handleDeleted)
+    socket.on('conversation-deleted', handleConversationDeleted)
+    socket.on('user-block-status-changed', handleBlockStatusChanged)
 
     return () => {
       socket.off('new-message', handleNewMessage)
       socket.off('message-reaction-updated', handleReactionUpdated)
       socket.off('message-edited', handleEdited)
       socket.off('message-deleted', handleDeleted)
+      socket.off('conversation-deleted', handleConversationDeleted)
+      socket.off('user-block-status-changed', handleBlockStatusChanged)
     }
-  }, [socketRef, userId, setMessages])
+  }, [currentUserId, socketRef, userId, setMessages])
 
   useEffect(() => {
     if (!userId) return
     miniReadMarkedRef.current = false
     setHasMoreMessages(true)
     setLoadingOlder(false)
+    setProfileMenuOpen(false)
+    setBlockStatus({ isBlockedByMe: false, hasBlockedMe: false })
     fetchUserData()
+    fetchBlockStatus()
     fetchUserMessages()
     if (!isMini) markMessagesAsRead()
     return () => {
@@ -905,7 +1101,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
       imagePreviews.forEach(url => URL.revokeObjectURL(url))
       videoPreviews.forEach(url => URL.revokeObjectURL(url))
     }
-  }, [fetchUserData, fetchUserMessages, isMini, markMessagesAsRead, userId, dispatch])
+  }, [fetchBlockStatus, fetchUserData, fetchUserMessages, isMini, markMessagesAsRead, userId, dispatch])
 
   useEffect(() => {
     if (!newMessageTrigger || !userId) return
@@ -934,8 +1130,19 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
       : <Loading height={isEmbedded ? '100%' : '100vh'} />
   }
 
-  const startCall = (callType) => {
+  const startCall = async (callType) => {
     if (!onStartCall || !socketRef.current || !user) return
+    if (isChatBlocked) {
+      toast.error('Bạn không thể gọi trong đoạn chat này')
+      return
+    }
+
+    const latestStatus = await fetchBlockStatus()
+    if (latestStatus?.isBlockedByMe || latestStatus?.hasBlockedMe) {
+      toast.error('Bạn không thể gọi trong đoạn chat này')
+      return
+    }
+
     const callData = {
       to: userId,
       from: currentUser._id,
@@ -976,16 +1183,53 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
   const floatingActionIsOwn = getMessageUserId(floatingActionMessage?.from_user_id) === currentUserId
   const canUsePortal = typeof document !== 'undefined'
   const forwardConnections = connections.length > 0 ? connections : (reduxConnections || [])
+  const confirmDialogContent = pendingDialog === 'delete-conversation'
+    ? {
+      title: 'Xóa đoạn chat?',
+      message: 'Tin nhắn sẽ bị xóa khỏi hộp chat của bạn. Người còn lại vẫn có thể xem đoạn chat của họ.',
+      confirmLabel: 'Xóa đoạn chat',
+      loadingLabel: 'Đang xóa...'
+    }
+    : pendingDialog === 'block-user'
+      ? {
+        title: `Chặn ${user.full_name}?`,
+        message: 'Sau khi chặn, hai bạn sẽ không thể nhắn tin, gọi điện hoặc gửi nội dung cho nhau.',
+        confirmLabel: 'Chặn',
+        loadingLabel: 'Đang chặn...'
+      }
+      : pendingDialog === 'unblock-user'
+        ? {
+          title: `Bỏ chặn ${user.full_name}?`,
+          message: 'Sau khi bỏ chặn, hai bạn có thể nhắn tin và gọi điện lại.',
+          confirmLabel: 'Bỏ chặn',
+          loadingLabel: 'Đang xử lý...'
+        }
+        : null
 
   return user && (
     <div className={shellClass} onFocusCapture={markMiniMessagesAsRead} onPointerDown={markMiniMessagesAsRead}>
       {/* ── Header ── */}
       <div className={isMini ? 'flex items-center border-b border-slate-200 bg-white px-3 py-2' : 'surface m-3 mb-0 flex items-center rounded-[1.4rem] px-4 py-3'}>
-        <img src={user.profile_picture} alt="" className={`${isMini ? 'size-9' : 'size-11 avatar-ring'} rounded-full object-cover`} />
-        <div className={`${isMini ? 'ml-2' : 'ml-4'} min-w-0 flex-1`}>
-          <p className={`${isMini ? 'text-sm' : ''} truncate font-black text-slate-900`}>{user.full_name}</p>
-          <p className='truncate text-sm text-slate-500'>@{user.username}</p>
-        </div>
+        <button
+          type='button'
+          onClick={openUserProfile}
+          className='shrink-0 rounded-full transition hover:brightness-95 focus:outline-none focus:ring-4 focus:ring-cyan-100'
+          title='Xem trang cá nhân'
+        >
+          <img src={user.profile_picture} alt="" className={`${isMini ? 'size-9' : 'size-11 avatar-ring'} rounded-full object-cover`} />
+        </button>
+        <button
+          type='button'
+          ref={profileMenuAnchorRef}
+          onClick={openProfileMenu}
+          className={`${isMini ? 'ml-2' : 'ml-4'} flex min-w-0 flex-1 items-center gap-1 rounded-xl px-1 py-0.5 text-left transition hover:bg-slate-100`}
+        >
+          <span className='min-w-0 flex-1'>
+            <span className={`${isMini ? 'text-sm' : ''} block truncate font-black text-slate-900`}>{user.full_name}</span>
+            <span className='block truncate text-sm text-slate-500'>@{user.username}</span>
+          </span>
+          <ChevronDown className={`size-4 shrink-0 text-slate-500 transition ${profileMenuOpen ? 'rotate-180' : ''}`} />
+        </button>
         {/* Call buttons */}
         {/* Call buttons */}
         <div className='flex items-center gap-1'>
@@ -993,7 +1237,8 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
             id='voice-call-btn'
             onClick={() => startCall('voice')}
             title='Gọi thoại'
-            className='p-2 rounded-full hover:bg-cyan-50 text-cyan-700 transition-colors cursor-pointer'
+            disabled={isChatBlocked}
+            className='p-2 rounded-full hover:bg-cyan-50 text-cyan-700 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent'
           >
             <Phone size={20} />
           </button>
@@ -1001,7 +1246,8 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
             id='video-call-btn'
             onClick={() => startCall('video')}
             title='Gọi video'
-            className='p-2 rounded-full hover:bg-cyan-50 text-cyan-700 transition-colors cursor-pointer'
+            disabled={isChatBlocked}
+            className='p-2 rounded-full hover:bg-cyan-50 text-cyan-700 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent'
           >
             <VideoIcon size={20} />
           </button>
@@ -1312,7 +1558,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
       {/* ── Input area ── */}
       <div className={isMini ? 'border-t border-slate-100 bg-white px-3 pb-3 pt-2' : 'px-4 pb-5 pt-2 bg-slate-100'}>
         {/* Media previews */}
-        {(imagePreviews.length > 0 || videoPreviews.length > 0) && (
+        {!isChatBlocked && (imagePreviews.length > 0 || videoPreviews.length > 0) && (
           <div className='flex flex-wrap gap-2 mb-3 p-3 bg-white rounded-lg border border-gray-200 max-w-4xl mx-auto'>
             {imagePreviews.map((url, idx) => (
               <div key={`img-${idx}`} className='relative group'>
@@ -1335,7 +1581,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
         )}
 
         {/* Voice recording panel */}
-        {(isRecording || audioBlob) && (
+        {!isChatBlocked && (isRecording || audioBlob) && (
           <div className='surface flex items-center gap-3 mb-3 px-4 py-3 rounded-2xl max-w-2xl mx-auto'>
             {isRecording ? (
               <>
@@ -1381,7 +1627,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
         )}
 
         {/* Edit mode bar */}
-        {editingMsg && (
+        {editingMsg && !isChatBlocked && (
           <div className='flex items-center gap-2 mb-2 px-4 py-2 bg-yellow-50 border border-yellow-200 rounded-xl max-w-2xl mx-auto'>
             <Pencil size={14} className='text-yellow-500 shrink-0' />
             <span className='text-xs text-yellow-700 flex-1 truncate'>Đang sửa: {editingMsg.text}</span>
@@ -1390,7 +1636,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
         )}
 
         {/* Reply bar */}
-        {replyingTo && (
+        {replyingTo && !isChatBlocked && (
           <div className='flex items-center gap-2 mb-2 px-4 py-2 bg-cyan-50 border border-cyan-100 rounded-xl max-w-2xl mx-auto'>
             <Reply size={14} className='text-cyan-500 shrink-0' />
             <div className='flex-1 min-w-0'>
@@ -1403,7 +1649,27 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
           </div>
         )}
 
-        {/* Main input bar */}
+        {isChatBlocked ? (
+          <div className='mx-auto flex w-full max-w-2xl flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-center'>
+            <p className='text-sm font-bold text-slate-900'>
+              {isBlockedByMe ? `Bạn đã chặn ${user.full_name}` : 'Bạn không thể nhắn tin hoặc gọi điện trong đoạn chat này'}
+            </p>
+            <p className='text-xs leading-5 text-slate-500'>
+              {isBlockedByMe
+                ? 'Các bạn sẽ không thể nhắn tin, gọi điện hoặc gửi nội dung cho nhau cho đến khi bạn bỏ chặn.'
+                : 'Người này hiện không thể nhận tin nhắn, cuộc gọi hoặc nội dung từ bạn.'}
+            </p>
+            {isBlockedByMe && (
+              <button
+                type='button'
+                onClick={() => setPendingDialog('unblock-user')}
+                className='btn-muted mx-auto px-4 py-2 text-sm'
+              >
+                Bỏ chặn
+              </button>
+            )}
+          </div>
+        ) : (
         <div className={isMini ? 'flex w-full items-center gap-2 rounded-full bg-slate-100 px-3 py-2' : 'surface flex items-center gap-3 pl-5 p-2 w-full max-w-2xl mx-auto rounded-full'}>
           <input
             type="text"
@@ -1451,7 +1717,52 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
               : editingMsg ? <Check size={18} /> : <SendHorizonal size={18} />}
           </button>
         </div>
+        )}
       </div>
+
+      {canUsePortal && profileMenuOpen && profileMenuPosition && createPortal(
+        <div
+          className='fixed z-[9999] w-[260px] overflow-hidden rounded-2xl border border-slate-200 bg-white py-2 shadow-2xl'
+          style={{ top: profileMenuPosition.top, left: profileMenuPosition.left }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type='button'
+            onClick={openUserProfile}
+            className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-800 hover:bg-slate-50'
+          >
+            <UserRound className='size-5 text-slate-700' />
+            Xem trang cá nhân
+          </button>
+          <button
+            type='button'
+            onClick={requestDeleteConversation}
+            className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-800 hover:bg-slate-50'
+          >
+            <Trash2 className='size-5 text-slate-700' />
+            Xóa đoạn chat
+          </button>
+          {!isBlockedByMe && (
+            <button
+              type='button'
+              onClick={requestBlockUser}
+              className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-800 hover:bg-slate-50'
+            >
+              <Ban className='size-5 text-slate-700' />
+              Chặn
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={() => setProfileMenuOpen(false)}
+            className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-400 hover:bg-slate-50'
+          >
+            <Flag className='size-5 text-slate-400' />
+            Báo cáo vi phạm
+          </button>
+        </div>,
+        document.body
+      )}
 
       {canUsePortal && floatingReactionMessage && reactionMenuPosition && createPortal(
         <div
@@ -1582,6 +1893,18 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose }) => {
         isOpen={!!showReactionListMsg}
         onClose={() => setShowReactionListMsg(null)}
         reactions={showReactionListMsg?.reactions || []}
+      />
+
+      <ConfirmDialog
+        isOpen={!!confirmDialogContent}
+        title={confirmDialogContent?.title || ''}
+        message={confirmDialogContent?.message || ''}
+        confirmLabel={confirmDialogContent?.confirmLabel}
+        loadingLabel={confirmDialogContent?.loadingLabel}
+        isDangerous={pendingDialog !== 'unblock-user'}
+        isLoading={isDialogLoading}
+        onConfirm={handleConfirmDialog}
+        onCancel={closeConfirmDialog}
       />
 
 

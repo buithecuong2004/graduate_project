@@ -11,11 +11,11 @@ import CreatePost from './pages/CreatePost'
 import PostDetail from './pages/PostDetail'
 import { useAuth } from './context/AuthContext'
 import Layout from './pages/Layout'
-import { Toaster } from 'react-hot-toast'
+import toast, { Toaster } from 'react-hot-toast'
 import { useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { fetchUser } from './features/user/userSlice'
-import { fetchConnections } from './features/connections/connectionsSlice'
+import { fetchConnections, updateUserPresence } from './features/connections/connectionsSlice'
 import { useRef } from 'react'
 import { addMessages, setNewMessageTrigger, editMessageLocal, deleteMessageLocal, updateMessageReactionsLocal } from './features/messages/messagesSlice'
 import { addNotification } from './features/notifications/notificationsSlice'
@@ -73,6 +73,10 @@ const AppInner = () => {
           socket.emit('user-connect', currentUser._id)
         })
 
+        socket.on('user-status-changed', (presence) => {
+          dispatch(updateUserPresence(presence))
+        })
+
         const refreshConnectionsFromSocket = async () => {
           const token = await getToken()
           if (token) dispatch(fetchConnections(token))
@@ -120,6 +124,12 @@ const AppInner = () => {
           const call = { ...data, isIncoming: true }
           activeCallRef.current = call
           setActiveCall(call)
+        })
+
+        socket.on('call-blocked', () => {
+          activeCallRef.current = null
+          setActiveCall(null)
+          toast.error('Không thể gọi trong đoạn chat này')
         })
 
         // NOTE: 'call-accepted' KHÔNG được xử lý ở App level nữa.

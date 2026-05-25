@@ -1,4 +1,6 @@
 import { Server } from 'socket.io';
+import User from '../models/User.js';
+import { isConversationBlocked } from '../utils/blocking.js';
 
 export const setupSocket = (server) => {
     const io = new Server(server, {
@@ -8,15 +10,43 @@ export const setupSocket = (server) => {
         }
     });
 
-    // Store connected users with their socket IDs
+    // Store connected users with all active socket IDs so multiple tabs stay online.
     const connectedUsers = new Map();
+
+    const emitUserPresence = async (userId, isOnline) => {
+        const lastSeen = new Date();
+
+        await User.findByIdAndUpdate(userId, { isOnline, lastSeen });
+
+        io.emit('user-status-changed', {
+            userId,
+            isOnline,
+            lastSeen: lastSeen.toISOString()
+        });
+    };
 
     io.on('connection', (socket) => {
 
         // Join user notification room
-        socket.on('user-connect', (userId) => {
-            connectedUsers.set(userId, socket.id);
-            socket.join(`user-${userId}`);
+        socket.on('user-connect', async (userId) => {
+            if (!userId) return;
+
+            const normalizedUserId = userId.toString();
+            const existingSockets = connectedUsers.get(normalizedUserId) || new Set();
+            const wasOffline = existingSockets.size === 0;
+
+            existingSockets.add(socket.id);
+            connectedUsers.set(normalizedUserId, existingSockets);
+            socket.data.userId = normalizedUserId;
+            socket.join(`user-${normalizedUserId}`);
+
+            if (wasOffline) {
+                try {
+                    await emitUserPresence(normalizedUserId, true);
+                } catch (error) {
+                    console.log('Presence update error:', error.message);
+                }
+            }
         });
 
         // Join a post room for real-time comments
@@ -31,9 +61,23 @@ export const setupSocket = (server) => {
 
         // ─── Call Signaling ───────────────────────────────────────────────
         // A initiates a call → forward to B
-        socket.on('call-user', (data) => {
+        socket.on('call-user', async (data) => {
             // data: { to, from, callType, callerName, callerAvatar, offer }
-            io.to(`user-${data.to}`).emit('incoming-call', data);
+            const from = socket.data.userId || data.from;
+            if (!from || !data?.to) return;
+
+            try {
+                if (await isConversationBlocked(from, data.to)) {
+                    socket.emit('call-blocked', { to: data.to });
+                    return;
+                }
+            } catch (error) {
+                console.log('Call block check error:', error.message);
+                socket.emit('call-blocked', { to: data.to });
+                return;
+            }
+
+            io.to(`user-${data.to}`).emit('incoming-call', { ...data, from });
         });
 
         // B accepts → send answer back to A (legacy)
@@ -78,13 +122,26 @@ export const setupSocket = (server) => {
         // ─────────────────────────────────────────────────────────────────
 
         // Handle disconnect
-        socket.on('disconnect', () => {
-            // Find and remove user from connectedUsers map
-            for (let [userId, socketId] of connectedUsers) {
-                if (socketId === socket.id) {
-                    connectedUsers.delete(userId);
-                    break;
-                }
+        socket.on('disconnect', async () => {
+            const userId = socket.data.userId;
+            if (!userId) return;
+
+            const userSockets = connectedUsers.get(userId);
+            if (!userSockets) return;
+
+            userSockets.delete(socket.id);
+
+            if (userSockets.size > 0) {
+                connectedUsers.set(userId, userSockets);
+                return;
+            }
+
+            connectedUsers.delete(userId);
+
+            try {
+                await emitUserPresence(userId, false);
+            } catch (error) {
+                console.log('Presence update error:', error.message);
             }
         });
     });

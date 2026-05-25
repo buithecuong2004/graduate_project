@@ -2,6 +2,7 @@ import fs from "fs"
 import imagekit from "../configs/imageKit.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
+import { isConversationBlocked } from "../utils/blocking.js";
 
 const REACTION_ICONS = {
     like: '👍',
@@ -28,6 +29,16 @@ const getVoiceFileExtension = (file) => {
     const originalExt = file.originalname?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()
 
     return extensionByMime[mimeType] || originalExt || 'webm'
+}
+
+const cleanupUploadedFiles = (files = {}) => {
+    Object.values(files).flat().forEach(file => {
+        if(file?.path) {
+            fs.unlink(file.path, (err) => {
+                if (err) console.log('File cleanup error:', err)
+            })
+        }
+    })
 }
 
 // Helper to delete file from ImageKit using file ID
@@ -137,6 +148,11 @@ export const sendMessage = async (req, res) => {
         // Allow an empty text when media URLs are being forwarded
         if (!text && images.length === 0 && videos.length === 0 && voiceFiles.length === 0 && bodyMediaUrls.length === 0) {
             return res.json({ success: false, message: 'Message cannot be empty' })
+        }
+
+        if (await isConversationBlocked(userId, to_user_id)) {
+            cleanupUploadedFiles(req.files)
+            return res.json({ success: false, message: 'Không thể gửi tin nhắn vì một trong hai người đã chặn người còn lại' })
         }
 
         let media_urls = []
@@ -311,7 +327,8 @@ export const getChatMessages = async (req, res) => {
             $or: [
                 { from_user_id: userId, to_user_id },
                 { from_user_id: to_user_id, to_user_id: userId }
-            ]
+            ],
+            deletedFor: { $ne: userId }
         }
 
         // Cursor-based pagination: fetch messages older than `before`
@@ -337,7 +354,7 @@ export const getChatMessages = async (req, res) => {
 
         if (mark_read !== false && mark_read !== 'false') {
             await Message.updateMany(
-                { from_user_id: to_user_id, to_user_id: userId },
+                { from_user_id: to_user_id, to_user_id: userId, deletedFor: { $ne: userId } },
                 { isRead: true }
             )
         }
@@ -361,7 +378,8 @@ export const getUserRecentMessages = async (req, res) => {
             $or: [
                 { from_user_id: userId },
                 { to_user_id: userId }
-            ]
+            ],
+            deletedFor: { $ne: userId }
         }).sort({ createdAt: -1 }).lean()
 
         messages = await Promise.all(
@@ -390,7 +408,7 @@ export const markMessagesAsRead = async (req, res) => {
         const { from_user_id } = req.body
 
         await Message.updateMany(
-            { from_user_id, to_user_id: userId, isRead: false },
+            { from_user_id, to_user_id: userId, isRead: false, deletedFor: { $ne: userId } },
             { isRead: true }
         )
 
@@ -432,6 +450,37 @@ export const deleteMessage = async (req, res) => {
         const io = req.app.locals.io
         if (io) {
             io.to(`user-${message.to_user_id}`).emit('message-deleted', { messageId })
+        }
+    } catch (error) {
+        res.json({ success: false, message: error.message })
+    }
+}
+
+export const deleteConversation = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { to_user_id } = req.body
+
+        if (!to_user_id) {
+            return res.json({ success: false, message: 'Missing conversation user id' })
+        }
+
+        await Message.updateMany(
+            {
+                $or: [
+                    { from_user_id: userId, to_user_id },
+                    { from_user_id: to_user_id, to_user_id: userId }
+                ],
+                deletedFor: { $ne: userId }
+            },
+            { $addToSet: { deletedFor: userId } }
+        )
+
+        res.json({ success: true, to_user_id })
+
+        const io = req.app.locals.io
+        if (io) {
+            io.to(`user-${userId}`).emit('conversation-deleted', { userId: to_user_id })
         }
     } catch (error) {
         res.json({ success: false, message: error.message })
@@ -488,6 +537,13 @@ export const reactMessage = async (req, res) => {
         const message = await Message.findById(messageId)
         if (!message) {
             return res.json({ success: false, message: 'Message not found' })
+        }
+
+        const otherParticipantId = message.from_user_id.toString() === userId
+            ? message.to_user_id.toString()
+            : message.from_user_id.toString()
+        if (await isConversationBlocked(userId, otherParticipantId)) {
+            return res.json({ success: false, message: 'Không thể bày tỏ cảm xúc vì một trong hai người đã chặn người còn lại' })
         }
 
         if (!message.reactions) message.reactions = []
@@ -586,6 +642,10 @@ export const saveCall = async (req, res) => {
 
         if (!to_user_id || !call_type || !call_status) {
             return res.json({ success: false, message: 'Missing required call fields' })
+        }
+
+        if (await isConversationBlocked(userId, to_user_id)) {
+            return res.json({ success: false, message: 'Không thể gọi vì một trong hai người đã chặn người còn lại' })
         }
 
         const callTexts = {

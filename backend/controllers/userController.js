@@ -6,6 +6,7 @@ import User from "../models/User.js"
 import fs  from 'fs'
 import crypto from 'crypto'
 import { promisify } from 'util'
+import { getConversationBlockStatus } from "../utils/blocking.js"
 
 const scryptAsync = promisify(crypto.scrypt)
 
@@ -37,7 +38,7 @@ export const getUserData = async (req,res) => {
 
         // Clean up dangling references: remove IDs of deleted users from this user's arrays
         // This fixes crash when a connection/follower/following account was deleted
-        const allRefs = [...(user.connections || []), ...(user.followers || []), ...(user.following || [])]
+        const allRefs = [...(user.connections || []), ...(user.followers || []), ...(user.following || []), ...(user.blockedUsers || [])]
         if(allRefs.length > 0) {
             const existingUsers = await User.find({ _id: { $in: allRefs } }).select('_id')
             const existingIds = new Set(existingUsers.map(u => u._id.toString()))
@@ -50,7 +51,8 @@ export const getUserData = async (req,res) => {
                         $set: {
                             connections: (user.connections || []).filter(id => existingIds.has(id.toString())),
                             followers: (user.followers || []).filter(id => existingIds.has(id.toString())),
-                            following: (user.following || []).filter(id => existingIds.has(id.toString()))
+                            following: (user.following || []).filter(id => existingIds.has(id.toString())),
+                            blockedUsers: (user.blockedUsers || []).filter(id => existingIds.has(id.toString()))
                         }
                     },
                     { new: true }
@@ -433,6 +435,90 @@ export const getUserConnections = async (req, res) => {
 
         res.json({success: true, connections, followers, following, pendingConnections})
 
+    } catch (error) {
+        console.log(error)
+        return res.json({success: false, message: error.message})
+    }
+}
+
+export const getUserBlockStatus = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { id } = req.body
+
+        if(!id) return res.json({success: false, message: 'Missing user id'})
+
+        const status = await getConversationBlockStatus(userId, id)
+        res.json({success: true, ...status})
+    } catch (error) {
+        console.log(error)
+        return res.json({success: false, message: error.message})
+    }
+}
+
+export const blockUser = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { id } = req.body
+
+        if(!id) return res.json({success: false, message: 'Missing user id'})
+        if(id.toString() === userId.toString()) {
+            return res.json({success: false, message: 'Không thể chặn chính bạn'})
+        }
+
+        const [user, blockedUser] = await Promise.all([
+            User.findByIdAndUpdate(userId, { $addToSet: { blockedUsers: id } }, { new: true }),
+            User.findById(id).select('_id')
+        ])
+
+        if(!user || !blockedUser) return res.json({success: false, message: 'User not found'})
+
+        const io = req.app.locals.io
+        if(io) {
+            io.to(`user-${userId}`).emit('user-block-status-changed', {
+                blockerId: userId,
+                blockedUserId: id,
+                isBlocked: true
+            })
+            io.to(`user-${id}`).emit('user-block-status-changed', {
+                blockerId: userId,
+                blockedUserId: id,
+                isBlocked: true
+            })
+        }
+
+        res.json({success: true, user, message: 'Đã chặn người dùng'})
+    } catch (error) {
+        console.log(error)
+        return res.json({success: false, message: error.message})
+    }
+}
+
+export const unblockUser = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { id } = req.body
+
+        if(!id) return res.json({success: false, message: 'Missing user id'})
+
+        const user = await User.findByIdAndUpdate(userId, { $pull: { blockedUsers: id } }, { new: true })
+        if(!user) return res.json({success: false, message: 'User not found'})
+
+        const io = req.app.locals.io
+        if(io) {
+            io.to(`user-${userId}`).emit('user-block-status-changed', {
+                blockerId: userId,
+                blockedUserId: id,
+                isBlocked: false
+            })
+            io.to(`user-${id}`).emit('user-block-status-changed', {
+                blockerId: userId,
+                blockedUserId: id,
+                isBlocked: false
+            })
+        }
+
+        res.json({success: true, user, message: 'Đã bỏ chặn người dùng'})
     } catch (error) {
         console.log(error)
         return res.json({success: false, message: error.message})

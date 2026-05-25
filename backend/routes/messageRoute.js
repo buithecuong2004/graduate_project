@@ -5,6 +5,7 @@ import {
     getUserRecentMessages,
     markMessagesAsRead,
     deleteMessage,
+    deleteConversation,
     editMessage,
     reactMessage,
     saveCall
@@ -23,6 +24,7 @@ messageRouter.post('/get', protect, getChatMessages)
 messageRouter.post('/get-recent', protect, getUserRecentMessages)
 messageRouter.post('/mark-as-read', protect, markMessagesAsRead)
 messageRouter.post('/delete', protect, deleteMessage)
+messageRouter.post('/delete-conversation', protect, deleteConversation)
 messageRouter.post('/edit', protect, editMessage)
 messageRouter.post('/react', protect, reactMessage)
 messageRouter.post('/save-call', protect, saveCall)

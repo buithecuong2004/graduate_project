@@ -1,5 +1,5 @@
 import express from 'express'
-import { acceptConnectionRequest, cancelConnectionRequest, changePassword, declineConnectionRequest, discoverUsers, followUser, getUserConnections, getUserData, getUserProfiles, removeConnection, sendConnectionRequest, unfollowUser, updateUserData } from '../controllers/userController.js'
+import { acceptConnectionRequest, blockUser, cancelConnectionRequest, changePassword, declineConnectionRequest, discoverUsers, followUser, getUserBlockStatus, getUserConnections, getUserData, getUserProfiles, removeConnection, sendConnectionRequest, unblockUser, unfollowUser, updateUserData } from '../controllers/userController.js'
 import { protect } from '../middlewares/auth.js'
 import { upload } from '../configs/multer.js'
 import { getUserRecentMessages, markMessagesAsRead } from '../controllers/messageController.js'
@@ -17,6 +17,9 @@ userRouter.post('/cancel-connection-request', protect, cancelConnectionRequest)
 userRouter.post('/accept', protect, acceptConnectionRequest)
 userRouter.post('/decline', protect, declineConnectionRequest)
 userRouter.post('/remove-connection', protect, removeConnection)
+userRouter.post('/block-status', protect, getUserBlockStatus)
+userRouter.post('/block', protect, blockUser)
+userRouter.post('/unblock', protect, unblockUser)
 userRouter.get('/connections', protect, getUserConnections)
 userRouter.post('/profiles',getUserProfiles)
 userRouter.get('/recent-messages', protect, getUserRecentMessages)

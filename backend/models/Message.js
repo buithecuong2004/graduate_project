@@ -25,6 +25,7 @@ const messageSchema = new mongoose.Schema({
     reply_to: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },     // ID of message being replied to
     is_forwarded: { type: Boolean, default: false },
     forwarded_type: { type: String, enum: ['message', 'link', 'story'], default: null }, // for recipient display
+    deletedFor: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 }, { timestamps: true, minimize: false})
 
 const Message = mongoose.model('Message', messageSchema)
