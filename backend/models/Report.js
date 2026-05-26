@@ -6,6 +6,7 @@ const reportSchema = new mongoose.Schema({
     reporter: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     reason: { type: String, required: true },
     details: { type: String, default: '' },
+    target_snapshot: { type: mongoose.Schema.Types.Mixed, default: null },
     status: { type: String, enum: ['pending', 'approved', 'rejected', 'resolved'], default: 'pending' },
     resolution_note: { type: String, default: '' },
     resolved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

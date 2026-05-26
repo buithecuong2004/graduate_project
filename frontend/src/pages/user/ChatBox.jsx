@@ -16,6 +16,7 @@ import { SmilePlus } from 'lucide-react'
 import ReactionPicker from '../../components/user/ReactionPicker'
 import ReactionListModal from '../../components/user/ReactionListModal'
 import ConfirmDialog from '../../components/user/ConfirmDialog'
+import ReportPopover from '../../components/user/ReportPopover'
 import localizeMessage from '../../utils/localization'
 import { REACTION_ICONS } from '../../utils/reactions'
 import { fetchUser } from '../../features/user/userSlice'
@@ -26,6 +27,8 @@ const FLOATING_MENU_WIDTH = 156
 const FLOATING_MENU_HEIGHT = 168
 const PROFILE_MENU_WIDTH = 260
 const PROFILE_MENU_HEIGHT = 272
+const REPORT_POPOVER_WIDTH = 384
+const REPORT_POPOVER_HEIGHT = 360
 const MESSAGE_PAGE_SIZE = 30
 
 const getMessageUserId = (value) => {
@@ -146,6 +149,9 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
   const [actionMenuPosition, setActionMenuPosition] = useState(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileMenuPosition, setProfileMenuPosition] = useState(null)
+  const [reportTarget, setReportTarget] = useState(null)
+  const [reportPopoverPosition, setReportPopoverPosition] = useState(null)
+  const [isReporting, setIsReporting] = useState(false)
   const [showReactionListMsg, setShowReactionListMsg] = useState(null)
   const [chatSearchOpen, setChatSearchOpen] = useState(false)
   const [chatSearchTerm, setChatSearchTerm] = useState('')
@@ -1007,45 +1013,77 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
     setPendingDialog('block-user')
   }
 
-  const handleReportUser = async () => {
-    if (!userId) return
-
-    setProfileMenuOpen(false)
-    try {
-      const token = await getToken()
-      const { data } = await api.post(
-        `/api/report/user/${userId}`,
-        { reason: 'other', details: 'Báo cáo người dùng từ đoạn chat' },
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-      if (data.success) {
-        toast.success(data.message === 'Report already pending' ? 'Bạn đã báo cáo người dùng này' : 'Đã gửi báo cáo')
-      } else {
-        toast.error(localizeMessage(data.message))
-      }
-    } catch (error) {
-      toast.error(localizeMessage(error.message))
-    }
+  const closeReportPopover = (force = false) => {
+    if (isReporting && !force) return
+    setReportTarget(null)
+    setReportPopoverPosition(null)
   }
 
-  const handleReportMessage = async (messageId) => {
-    if (!messageId) return
+  const openReportUser = (event) => {
+    event.stopPropagation()
+    if (!userId) return
 
-    closeMessageActions()
+    setReportTarget({
+      type: 'user',
+      id: userId,
+      title: 'Báo cáo người dùng',
+      description: user?.full_name ? `@${user.username || user.full_name}` : 'Chọn nội dung báo cáo người dùng này.',
+      defaultDetails: 'Báo cáo người dùng từ đoạn chat',
+      pendingMessage: 'Bạn đã báo cáo người dùng này'
+    })
+    setReportPopoverPosition(getFloatingPanelPosition(
+      event.currentTarget.getBoundingClientRect(),
+      REPORT_POPOVER_WIDTH,
+      REPORT_POPOVER_HEIGHT,
+      'right'
+    ))
+    setProfileMenuOpen(false)
+    setProfileMenuPosition(null)
+  }
+
+  const openReportMessage = (event, message) => {
+    event.stopPropagation()
+    if (!message?._id) return
+
+    setReportTarget({
+      type: 'message',
+      id: message._id,
+      title: 'Báo cáo tin nhắn',
+      description: getReplyLabel(message),
+      defaultDetails: 'Báo cáo tin nhắn trong đoạn chat',
+      pendingMessage: 'Bạn đã báo cáo tin nhắn này'
+    })
+    setReportPopoverPosition(getFloatingPanelPosition(
+      event.currentTarget.getBoundingClientRect(),
+      REPORT_POPOVER_WIDTH,
+      REPORT_POPOVER_HEIGHT,
+      floatingActionIsOwn ? 'right' : 'left'
+    ))
+    setOpenMenuId(null)
+    setActionMenuPosition(null)
+  }
+
+  const handleSubmitReport = async ({ reason, details }) => {
+    if (!reportTarget?.type || !reportTarget?.id) return
+
+    setIsReporting(true)
     try {
       const token = await getToken()
       const { data } = await api.post(
-        `/api/report/message/${messageId}`,
-        { reason: 'other', details: 'Báo cáo tin nhắn trong đoạn chat' },
+        `/api/report/${reportTarget.type}/${reportTarget.id}`,
+        { reason, details: details || reportTarget.defaultDetails },
         { headers: { Authorization: `Bearer ${token}` } }
       )
       if (data.success) {
-        toast.success(data.message === 'Report already pending' ? 'Bạn đã báo cáo tin nhắn này' : 'Đã gửi báo cáo')
+        toast.success(data.message === 'Report already pending' ? reportTarget.pendingMessage : 'Đã gửi báo cáo')
+        closeReportPopover(true)
       } else {
         toast.error(localizeMessage(data.message))
       }
     } catch (error) {
-      toast.error(localizeMessage(error.message))
+      toast.error(localizeMessage(error.response?.data?.message || error.message))
+    } finally {
+      setIsReporting(false)
     }
   }
 
@@ -2024,7 +2062,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
           )}
           <button
             type='button'
-            onClick={handleReportUser}
+            onClick={openReportUser}
             className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-amber-700 hover:bg-amber-50'
           >
             <Flag className='size-5 text-amber-700' />
@@ -2077,7 +2115,7 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
           </button>
           <button
             type='button'
-            onClick={() => handleReportMessage(floatingActionMessage._id)}
+            onClick={(event) => openReportMessage(event, floatingActionMessage)}
             className='flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-amber-700 hover:bg-amber-50'
           >
             <Flag size={13} /> Báo cáo
@@ -2183,6 +2221,18 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
         onConfirm={handleConfirmDialog}
         onCancel={closeConfirmDialog}
       />
+
+      {reportTarget && (
+        <ReportPopover
+          isOpen={true}
+          title={reportTarget.title}
+          description={reportTarget.description}
+          position={reportPopoverPosition}
+          isSubmitting={isReporting}
+          onClose={closeReportPopover}
+          onSubmit={handleSubmitReport}
+        />
+      )}
 
 
 

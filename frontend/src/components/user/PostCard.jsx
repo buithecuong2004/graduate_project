@@ -15,18 +15,9 @@ import ShareModal from './ShareModal'
 import ReactionPicker from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
 import { REACTION_ICONS, REACTION_LABELS } from '../../utils/reactions'
+import { REPORT_REASON_OPTIONS } from '../../utils/reportReasons'
 
 const withHashtags = (content = '') => content.replace(/(#\w+)/g, '<span class="text-cyan-700 font-semibold">$1</span>')
-
-const REPORT_REASONS = [
-    { value: 'spam', label: 'Spam' },
-    { value: 'harassment', label: 'Quấy rối' },
-    { value: 'hate', label: 'Ngôn từ thù ghét' },
-    { value: 'violence', label: 'Bạo lực' },
-    { value: 'nudity', label: 'Nội dung nhạy cảm' },
-    { value: 'scam', label: 'Lừa đảo' },
-    { value: 'other', label: 'Khác' }
-]
 
 const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) => {
 
@@ -378,7 +369,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                             className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none'
                             disabled={isReporting}
                         >
-                            {REPORT_REASONS.map((reason) => (
+                            {REPORT_REASON_OPTIONS.map((reason) => (
                                 <option key={reason.value} value={reason.value}>{reason.label}</option>
                             ))}
                         </select>

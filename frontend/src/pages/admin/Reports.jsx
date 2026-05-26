@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { CheckCircle2, Eye, FileWarning, XCircle } from 'lucide-react'
 import AdminPagination from '../../components/admin/AdminPagination'
 import PostPreviewModal from '../../components/admin/PostPreviewModal'
+import { getReportReasonLabel } from '../../utils/reportReasons'
 import {
   CardTitle,
   REPORT_CATEGORY_LABELS,
@@ -14,18 +15,47 @@ import {
 
 const getTarget = (report) => report.target || report.target_id || {}
 
+const getReportMessageMedia = (report) => {
+  if (report?.target_type !== 'message') return []
+  const target = getTarget(report)
+  const targetUrls = Array.isArray(target?.media_urls) ? target.media_urls.filter(Boolean) : []
+  if (targetUrls.length > 0) return targetUrls
+  return Array.isArray(report?.target_snapshot?.media_urls) ? report.target_snapshot.media_urls.filter(Boolean) : []
+}
+
+const getReportMessageType = (report) => {
+  const target = getTarget(report)
+  return target?.message_type || report?.target_snapshot?.message_type || 'text'
+}
+
+const getAudioSourceType = (url = '') => {
+  const cleanUrl = url.split('?')[0].toLowerCase()
+  if (cleanUrl.endsWith('.m4a') || cleanUrl.endsWith('.mp4')) return 'audio/mp4'
+  if (cleanUrl.endsWith('.ogg') || cleanUrl.endsWith('.oga')) return 'audio/ogg'
+  if (cleanUrl.endsWith('.wav')) return 'audio/wav'
+  if (cleanUrl.endsWith('.mp3')) return 'audio/mpeg'
+  if (cleanUrl.endsWith('.aac')) return 'audio/aac'
+  return 'audio/webm'
+}
+
 const getPersonLine = (user) => {
   if (!user) return 'Không rõ'
   return `${user.full_name || 'Không rõ'}${user.username ? ` - @${user.username}` : ''}`
 }
 
-const getMessageLabel = (message) => {
-  if (!message) return 'Tin nhắn không còn tồn tại.'
-  if (message.is_deleted) return 'Tin nhắn đã bị xóa.'
-  if (message.text) return message.text
-  if (message.message_type === 'voice') return 'Tin nhắn thoại'
-  if (Array.isArray(message.media_urls) && message.media_urls.length > 0) return `Tin nhắn đa phương tiện (${message.media_urls.length} tệp)`
-  if (message.shared_post_id) return 'Tin nhắn chia sẻ bài viết'
+const getMessageLabel = (message, report) => {
+  const mediaUrls = getReportMessageMedia(report)
+  const messageType = getReportMessageType(report)
+  const snapshot = report?.target_snapshot || {}
+
+  if (!message && !snapshot.text && mediaUrls.length === 0) return 'Tin nhắn không còn tồn tại.'
+  if (message?.text || snapshot.text) return message?.text || snapshot.text
+  if (messageType === 'voice') return 'Tin nhắn thoại'
+  if (mediaUrls.length > 0 && messageType?.includes('video')) return `Tin nhắn video (${mediaUrls.length} tệp)`
+  if (mediaUrls.length > 0 && messageType?.includes('image')) return `Tin nhắn ảnh (${mediaUrls.length} tệp)`
+  if (mediaUrls.length > 0) return `Tin nhắn đa phương tiện (${mediaUrls.length} tệp)`
+  if (message?.shared_post_id || snapshot.shared_post_id) return 'Tin nhắn chia sẻ bài viết'
+  if (message?.is_deleted) return 'Tin nhắn đã bị xóa.'
   return 'Tin nhắn không có nội dung chữ.'
 }
 
@@ -62,8 +92,8 @@ const getTargetInfo = (report) => {
     return {
       title: 'Tin nhắn bị báo cáo',
       owner: `${getPersonLine(target?.from_user_id)} -> ${getPersonLine(target?.to_user_id)}`,
-      meta: formatDate(target?.createdAt),
-      body: shortText(getMessageLabel(target), 220)
+      meta: formatDate(target?.createdAt || report?.target_snapshot?.createdAt),
+      body: shortText(getMessageLabel(target, report), 220)
     }
   }
 
@@ -82,6 +112,43 @@ const getTargetInfo = (report) => {
     meta: '',
     body: 'Không có dữ liệu.'
   }
+}
+
+const ReportMessageMedia = ({ report }) => {
+  const mediaUrls = getReportMessageMedia(report)
+  if (mediaUrls.length === 0) return null
+
+  const messageType = getReportMessageType(report)
+
+  return (
+    <div className='mt-3 grid gap-2 sm:grid-cols-2'>
+      {mediaUrls.map((url, index) => {
+        const isVoice = messageType === 'voice'
+        const isVideo = !isVoice && (messageType?.includes('video') || /\.(mp4|webm|mov|ogg)$/i.test(url.split('?')[0]))
+
+        if (isVoice) {
+          return (
+            <div key={url || index} className='rounded-xl border border-slate-200 bg-white p-3'>
+              <p className='mb-2 text-xs font-black uppercase text-slate-500'>Ghi âm</p>
+              <audio controls preload='metadata' className='h-9 w-full'>
+                <source src={url} type={getAudioSourceType(url)} />
+              </audio>
+            </div>
+          )
+        }
+
+        if (isVideo) {
+          return <video key={url || index} src={url} controls className='max-h-64 w-full rounded-xl border border-slate-200 bg-black object-contain' />
+        }
+
+        return (
+          <a key={url || index} href={url} target='_blank' rel='noreferrer' className='block'>
+            <img src={url} alt='Nội dung tin nhắn bị báo cáo' className='max-h-64 w-full rounded-xl border border-slate-200 object-contain' />
+          </a>
+        )
+      })}
+    </div>
+  )
 }
 
 const Reports = ({
@@ -139,7 +206,7 @@ const Reports = ({
                   <div className='min-w-0 flex-1'>
                     <div className='flex flex-wrap items-center gap-2'>
                       <StatusBadge status='pending'>{REPORT_CATEGORY_LABELS[report.target_type] || report.target_type}</StatusBadge>
-                      <StatusBadge status='pending'>{report.reason}</StatusBadge>
+                      <StatusBadge status='pending'>{getReportReasonLabel(report.reason)}</StatusBadge>
                       <StatusBadge status={report.status}>{REPORT_STATUS_LABELS[report.status] || report.status}</StatusBadge>
                       <span className='text-xs font-bold text-slate-400'>{formatDate(report.createdAt)}</span>
                     </div>
@@ -156,6 +223,7 @@ const Reports = ({
                         <p className='mt-1 text-sm font-bold text-slate-950'>{targetInfo.owner}</p>
                         {targetInfo.meta && <p className='mt-1 text-xs font-semibold text-slate-500'>{targetInfo.meta}</p>}
                         <p className='mt-2 text-sm leading-6 text-slate-600'>{targetInfo.body}</p>
+                        {report.target_type === 'message' && <ReportMessageMedia report={report} />}
                         {post && (
                           <button
                             type='button'

@@ -5,15 +5,45 @@ import Post from '../models/Post.js';
 import Report from '../models/Report.js';
 import User from '../models/User.js';
 
-const allowedReasons = new Set([
-    'spam',
-    'quấy rối',
-    'ghét',
-    'bạo lực',
-    'khoả thân',
-    'lừa đảo',
-    'khác'
+const reportReasonAliases = new Map([
+    ['spam', 'spam'],
+    ['harassment', 'harassment'],
+    ['hate', 'hate'],
+    ['violence', 'violence'],
+    ['violance', 'violence'],
+    ['nudity', 'nudity'],
+    ['nuditity', 'nudity'],
+    ['scam', 'scam'],
+    ['other', 'other'],
+    ['quấy rối', 'harassment'],
+    ['ghét', 'hate'],
+    ['ngôn từ thù ghét', 'hate'],
+    ['bạo lực', 'violence'],
+    ['bạo lực hoặc đe dọa', 'violence'],
+    ['khoả thân', 'nudity'],
+    ['nội dung nhạy cảm', 'nudity'],
+    ['lừa đảo', 'scam'],
+    ['khác', 'other']
 ]);
+
+const normalizeReportReason = (value) => {
+    const reason = String(value || 'other').trim().toLowerCase();
+    return reportReasonAliases.get(reason);
+};
+
+const buildTargetSnapshot = (targetType, target) => {
+    if (targetType !== 'message' || !target) return null;
+
+    return {
+        text: target.text || '',
+        message_type: target.message_type || 'text',
+        media_urls: Array.isArray(target.media_urls) ? target.media_urls : [],
+        shared_post_id: target.shared_post_id || null,
+        from_user_id: target.from_user_id || null,
+        to_user_id: target.to_user_id || null,
+        createdAt: target.createdAt || null
+    };
+};
 
 const reportTargetConfig = {
     post: {
@@ -54,14 +84,14 @@ const createReport = (targetType) => async (req, res) => {
     try {
         const config = reportTargetConfig[targetType];
         const targetId = req.params[config.idParam];
-        const reason = (req.body.reason || 'other').trim();
-        const details = (req.body.details || '').trim().slice(0, 1000);
+        const reason = normalizeReportReason(req.body.reason);
+        const details = String(req.body.details || '').trim().slice(0, 1000);
 
         if (!mongoose.Types.ObjectId.isValid(targetId)) {
             return res.status(400).json({ success: false, message: `Invalid ${targetType} id` });
         }
 
-        if (!allowedReasons.has(reason)) {
+        if (!reason) {
             return res.status(400).json({ success: false, message: 'Invalid report reason' });
         }
 
@@ -89,6 +119,10 @@ const createReport = (targetType) => async (req, res) => {
         });
 
         if (existingReport) {
+            if (targetType === 'message' && !existingReport.target_snapshot) {
+                existingReport.target_snapshot = buildTargetSnapshot(targetType, target);
+                await existingReport.save();
+            }
             return res.json({ success: true, report: existingReport, message: 'Report already pending' });
         }
 
@@ -97,7 +131,8 @@ const createReport = (targetType) => async (req, res) => {
             target_id: targetId,
             reporter: req.userId,
             reason,
-            details
+            details,
+            target_snapshot: buildTargetSnapshot(targetType, target)
         });
 
         res.json({ success: true, report, message: 'Report submitted' });

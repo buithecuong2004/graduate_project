@@ -8,9 +8,11 @@ import { useSocket } from '../../context/SocketContext'
 import { useNavigate } from 'react-router-dom'
 import api from '../../api/axios'
 import toast from 'react-hot-toast'
+import localizeMessage from '../../utils/localization'
 import ConfirmDialog from './ConfirmDialog'
 import ReactionPicker from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
+import ReportPopover from './ReportPopover'
 import { REACTION_ICONS, REACTION_LABELS } from '../../utils/reactions'
 
 const getReactionSummary = (reactions = []) => {
@@ -35,6 +37,25 @@ const prependUniqueById = (items = [], item) => {
         : [item, ...items]
 }
 
+const REPORT_POPOVER_WIDTH = 384
+const REPORT_POPOVER_HEIGHT = 360
+
+const getReportPopoverPosition = (anchorRect) => {
+    if (typeof window === 'undefined' || !anchorRect) return null
+
+    const margin = 12
+    const preferredTop = anchorRect.bottom + 8
+    const top = preferredTop + REPORT_POPOVER_HEIGHT > window.innerHeight - margin
+        ? anchorRect.top - REPORT_POPOVER_HEIGHT - 8
+        : preferredTop
+    const left = anchorRect.right - REPORT_POPOVER_WIDTH
+
+    return {
+        top: Math.max(margin, Math.min(top, window.innerHeight - REPORT_POPOVER_HEIGHT - margin)),
+        left: Math.max(margin, Math.min(left, window.innerWidth - REPORT_POPOVER_WIDTH - margin))
+    }
+}
+
 const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onTotalCount, onCountChange }) => {
     const [comments, setComments] = useState([])
     const [newComment, setNewComment] = useState('')
@@ -52,6 +73,9 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     const [showReactionListMsg, setShowReactionListMsg] = useState(null)
     const [openCommentMenuId, setOpenCommentMenuId] = useState(null)
     const [commentActionLoadingId, setCommentActionLoadingId] = useState('')
+    const [reportTarget, setReportTarget] = useState(null)
+    const [reportPopoverPosition, setReportPopoverPosition] = useState(null)
+    const [isReporting, setIsReporting] = useState(false)
 
     const currentUser = useSelector((state) => state.user.value)
     const { getToken } = useAuth()
@@ -381,28 +405,51 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         }
     }
 
-    const handleReportComment = async (commentId) => {
+    const openReportComment = (event, comment) => {
+        event.stopPropagation()
+        const commentId = getId(comment)
         if (!commentId) return
 
+        setOpenCommentMenuId(null)
+        setReportTarget({
+            id: commentId,
+            title: 'Báo cáo bình luận',
+            description: comment.content ? `"${comment.content.slice(0, 90)}${comment.content.length > 90 ? '...' : ''}"` : 'Chọn nội dung báo cáo bình luận này.',
+            defaultDetails: 'Báo cáo bình luận'
+        })
+        setReportPopoverPosition(getReportPopoverPosition(event.currentTarget.getBoundingClientRect()))
+    }
+
+    const closeReportPopover = (force = false) => {
+        if (isReporting && !force) return
+        setReportTarget(null)
+        setReportPopoverPosition(null)
+    }
+
+    const handleReportComment = async ({ reason, details }) => {
+        if (!reportTarget?.id) return
+
         try {
-            setOpenCommentMenuId(null)
-            setCommentActionLoadingId(commentId)
+            setCommentActionLoadingId(reportTarget.id)
+            setIsReporting(true)
             const token = await getToken()
             const { data } = await api.post(
-                `/api/report/comment/${commentId}`,
-                { reason: 'other', details: 'Báo cáo bình luận' },
+                `/api/report/comment/${reportTarget.id}`,
+                { reason, details: details || reportTarget.defaultDetails },
                 { headers: { Authorization: `Bearer ${token}` } }
             )
 
             if (data.success) {
                 toast.success(data.message === 'Report already pending' ? 'Bạn đã báo cáo bình luận này' : 'Đã gửi báo cáo')
+                closeReportPopover(true)
             } else {
                 toast.error(data.message || 'Không thể gửi báo cáo')
             }
-        } catch {
-            toast.error('Không thể gửi báo cáo')
+        } catch (error) {
+            toast.error(localizeMessage(error.response?.data?.message) || 'Không thể gửi báo cáo')
         } finally {
             setCommentActionLoadingId('')
+            setIsReporting(false)
         }
     }
 
@@ -504,7 +551,7 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                         </button>
                                         <button
                                             type='button'
-                                            onClick={() => handleReportComment(comment._id)}
+                                            onClick={(event) => openReportComment(event, comment)}
                                             disabled={isActionLoading}
                                             className='flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold text-amber-700 transition hover:bg-amber-50 disabled:opacity-50'
                                         >
@@ -709,6 +756,18 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                 onConfirm={handleConfirmDelete}
                 onCancel={() => setDeleteTarget(null)}
             />
+
+            {reportTarget && (
+                <ReportPopover
+                    isOpen={true}
+                    title={reportTarget.title}
+                    description={reportTarget.description}
+                    position={reportPopoverPosition}
+                    isSubmitting={isReporting}
+                    onClose={closeReportPopover}
+                    onSubmit={handleReportComment}
+                />
+            )}
 
             <ReactionListModal
                 isOpen={!!showReactionListMsg}

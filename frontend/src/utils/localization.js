@@ -8,6 +8,11 @@ const messageMap = {
   'Something went wrong': 'Đã có lỗi xảy ra',
   'Internal Server Error': 'Lỗi máy chủ nội bộ',
   'Network Error': 'Lỗi kết nối mạng',
+  'Invalid report reason': 'Nội dung báo cáo không hợp lệ',
+  'Report already pending': 'Bạn đã gửi báo cáo này',
+  'Report submitted': 'Đã gửi báo cáo',
+  'You cannot report yourself or your own content': 'Bạn không thể báo cáo chính mình hoặc nội dung của mình',
+  'You cannot report this content': 'Bạn không thể báo cáo nội dung này',
 
   // Authentication
   'Invalid credentials': 'Thông tin đăng nhập không hợp lệ',

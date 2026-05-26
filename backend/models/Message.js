@@ -35,7 +35,6 @@ export const buildMessageSearchIndex = (value = '') => {
 const messageSchema = new mongoose.Schema({
     from_user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     to_user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    client_message_id: { type: String, trim: true },
     text: { type: String, trim: true},
     searchText: { type: String, default: '' },
     searchTokens: { type: [String], default: [] },
