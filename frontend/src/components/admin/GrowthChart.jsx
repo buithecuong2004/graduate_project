@@ -57,12 +57,12 @@ const GrowthChart = ({ growth = {}, rangeDays = 7, onRangeChange = () => {} }) =
     <section className='rounded-xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(15,23,42,0.04)]'>
       <CardTitle
         icon={BarChart3}
-        title='Hieu suat tang truong'
-        subtitle='Theo doi so luong tung loai theo khoang thoi gian da chon'
+        title='Hiệu suất tăng trưởng'
+        subtitle='Theo dõi số lượng từng danh mục theo khoảng thời gian đã chọn'
         action={(
           <select
             value={rangeDays}
-            aria-label='Loc thoi gian bieu do'
+            aria-label='Lọc thời gian biểu đồ'
             onChange={(event) => {
               setHoverIndex(null)
               onRangeChange(Number(event.target.value))

@@ -24,11 +24,11 @@ const Users = ({
           value={filters.search}
           onChange={(event) => onFilterChange({ search: event.target.value })}
           className='h-10 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-4 text-sm font-semibold outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100'
-          placeholder='Tim theo ten, username hoac email'
+          placeholder='Tìm theo tên, username hoặc email'
         />
       </div>
       <button type='button' onClick={onSearch} className='rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-black text-white cursor-pointer'>
-        Tim kiem
+        Tìm kiếm
       </button>
     </div>
 
@@ -36,12 +36,12 @@ const Users = ({
       <table className='w-full min-w-[860px] text-left text-sm'>
         <thead className='bg-slate-50 text-xs uppercase text-slate-500'>
           <tr>
-            <th className='px-4 py-3'>Nguoi dung</th>
-            <th className='px-4 py-3'>Trang thai online</th>
-            <th className='px-4 py-3'>Vai tro</th>
-            <th className='px-4 py-3'>Tai khoan</th>
-            <th className='px-4 py-3'>Ngay tao</th>
-            <th className='px-4 py-3 text-right'>Thao tac</th>
+            <th className='px-4 py-3'>Người dùng</th>
+            <th className='px-4 py-3'>Trạng thái online</th>
+            <th className='px-4 py-3'>Vai trò</th>
+            <th className='px-4 py-3'>Tài khoản</th>
+            <th className='px-4 py-3'>Ngày tạo</th>
+            <th className='px-4 py-3 text-right'>Thao tác</th>
           </tr>
         </thead>
         <tbody className='divide-y divide-slate-100'>
@@ -58,7 +58,7 @@ const Users = ({
               </td>
               <td className='px-4 py-3'>
                 <StatusBadge status={user.isOnline ? 'approved' : 'hidden'}>
-                  {user.isOnline ? 'Online' : 'Offline'}
+                  {user.isOnline ? 'Trực tuyến' : 'Ngoại tuyến'}
                 </StatusBadge>
               </td>
               <td className='px-4 py-3'>
@@ -68,24 +68,24 @@ const Users = ({
                   onChange={(event) => onUpdateUser(user._id, { role: event.target.value })}
                   className='h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none'
                 >
-                  <option value='user'>Nguoi dung</option>
-                  <option value='admin'>Quan tri vien</option>
+                  <option value='user'>Người dùng</option>
+                  <option value='admin'>Quản trị viên</option>
                 </select>
               </td>
               <td className='px-4 py-3'>
                 <StatusBadge status={user.account_status === 'locked' ? 'locked' : 'active'}>
-                  {user.account_status === 'locked' ? 'Da khoa' : 'Hoat dong'}
+                  {user.account_status === 'locked' ? 'Đã khóa' : 'Hoạt động'}
                 </StatusBadge>
               </td>
               <td className='px-4 py-3 text-slate-500'>{formatDate(user.createdAt)}</td>
               <td className='px-4 py-3 text-right'>
                 {user.account_status === 'locked' ? (
                   <button type='button' onClick={() => onUpdateUser(user._id, { account_status: 'active' })} disabled={actionId === user._id} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 cursor-pointer'>
-                    <Unlock className='size-4' /> Mo khoa
+                    <Unlock className='size-4' /> Mở khoá
                   </button>
                 ) : (
-                  <button type='button' onClick={() => onUpdateUser(user._id, { account_status: 'locked', locked_reason: 'Khoa boi quan tri vien' })} disabled={actionId === user._id} className='inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 cursor-pointer'>
-                    <Lock className='size-4' /> Khoa
+                  <button type='button' onClick={() => onUpdateUser(user._id, { account_status: 'locked', locked_reason: 'Khóa bởi quản trị viên' })} disabled={actionId === user._id} className='inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 cursor-pointer'>
+                    <Lock className='size-4' /> Khoá
                   </button>
                 )}
               </td>

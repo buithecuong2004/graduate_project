@@ -315,7 +315,7 @@ export const getPostById = async (req, res) => {
             return res.json({ success: false, message: 'Post not found' })
         }
 
-        const totalComments = await getPostCommentCount(postId, req.userId)
+        const totalComments = await getPostCommentCount(postId, viewer?.role === 'admin' ? null : req.userId)
         const postWithCount = { ...post.toObject(), total_comments_count: totalComments }
 
         res.json({ success: true, post: postWithCount })

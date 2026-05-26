@@ -11,10 +11,10 @@ import {
 } from 'lucide-react'
 
 export const ADMIN_TABS = [
-  { id: 'overview', path: '/admin', label: 'Tong quan', Icon: Gauge },
-  { id: 'users', path: '/admin/users', label: 'Nguoi dung', Icon: Users },
-  { id: 'posts', path: '/admin/posts', label: 'Bai viet', Icon: MessageCircle },
-  { id: 'reports', path: '/admin/reports', label: 'Kiem duyet', Icon: FileWarning }
+  { id: 'overview', path: '/admin', label: 'Tổng quan', Icon: Gauge },
+  { id: 'users', path: '/admin/users', label: 'Người dùng', Icon: Users },
+  { id: 'posts', path: '/admin/posts', label: 'Bài viết', Icon: MessageCircle },
+  { id: 'reports', path: '/admin/reports', label: 'Kiểm duyệt', Icon: FileWarning }
 ]
 
 export const REPORT_STATUS_LABELS = {
@@ -44,27 +44,27 @@ export const REPORT_CATEGORY_LABELS = REPORT_CATEGORY_OPTIONS.reduce((labels, op
 }), {})
 
 export const CHART_TABS = [
-  { id: 'users', label: 'Nguoi dung', metricLabel: 'Nguoi dung', color: '#0ea5e9', fill: 'adminChartBlue' },
-  { id: 'posts', label: 'Bai dang', metricLabel: 'Bai dang', color: '#10b981', fill: 'adminChartGreen' },
-  { id: 'comments', label: 'Binh luan', metricLabel: 'Binh luan', color: '#8b5cf6', fill: 'adminChartViolet' },
-  { id: 'likes', label: 'Like', metricLabel: 'Like/Reactions', color: '#f43f5e', fill: 'adminChartRose' },
-  { id: 'shares', label: 'Chia se', metricLabel: 'Chia se', color: '#f59e0b', fill: 'adminChartAmber' }
+  { id: 'users', label: 'Người dùng', metricLabel: 'Người dùng', color: '#0ea5e9', fill: 'adminChartBlue' },
+  { id: 'posts', label: 'Bài đăng', metricLabel: 'Bài đăng', color: '#10b981', fill: 'adminChartGreen' },
+  { id: 'comments', label: 'Bình luận', metricLabel: 'Bình luận', color: '#8b5cf6', fill: 'adminChartViolet' },
+  { id: 'likes', label: 'Thích', metricLabel: 'Thích/Cảm xúc', color: '#f43f5e', fill: 'adminChartRose' },
+  { id: 'shares', label: 'Chia sẻ', metricLabel: 'Chia sẻ', color: '#f59e0b', fill: 'adminChartAmber' }
 ]
 
 export const CHART_RANGE_OPTIONS = [
-  { value: 1, label: '1 ngay' },
-  { value: 7, label: '1 tuan' },
-  { value: 30, label: '1 thang' },
-  { value: 90, label: '3 thang' },
-  { value: 180, label: '6 thang' },
-  { value: 365, label: '1 nam' }
+  { value: 1, label: '1 ngày' },
+  { value: 7, label: '1 tuần' },
+  { value: 30, label: '1 tháng' },
+  { value: 90, label: '3 tháng' },
+  { value: 180, label: '6 tháng' },
+  { value: 365, label: '1 năm' }
 ]
 
 export const POST_STATUS_OPTIONS = [
-  { value: 'all', label: 'Tat ca' },
-  { value: 'visible', label: 'Dang hien thi' },
-  { value: 'hidden', label: 'Da an' },
-  { value: 'reported', label: 'Bi bao cao' }
+  { value: 'all', label: 'Tất cả' },
+  { value: 'visible', label: 'Đang hiển thị' },
+  { value: 'hidden', label: 'Đã ẩn' },
+  { value: 'reported', label: 'Bị báo cáo' }
 ]
 
 export const formatNumber = (value) => new Intl.NumberFormat('vi-VN').format(value || 0)
@@ -149,10 +149,10 @@ export const StatusBadge = ({ status, children }) => {
 }
 
 export const adminOverviewMetrics = [
-  { key: 'users', label: 'Tong nguoi dung', icon: Users, tone: 'blue' },
-  { key: 'posts', label: 'Tong bai dang', icon: MessageCircle, tone: 'cyan' },
-  { key: 'comments', label: 'Tong binh luan', icon: Activity, tone: 'violet' },
-  { key: 'likesReactions', label: 'Likes/Reactions', icon: ThumbsUp, tone: 'rose' },
-  { key: 'reports', label: 'Bao cao vi pham', icon: FileWarning, tone: 'amber' },
-  { key: 'newUsersToday', label: 'User moi hom nay', icon: TrendingUp, tone: 'emerald' }
+  { key: 'users', label: 'Tổng người dùng', icon: Users, tone: 'blue' },
+  { key: 'posts', label: 'Tổng bài đăng', icon: MessageCircle, tone: 'cyan' },
+  { key: 'comments', label: 'Tổng bình luận', icon: Activity, tone: 'violet' },
+  { key: 'likesReactions', label: 'Thích/Cảm xúc', icon: ThumbsUp, tone: 'rose' },
+  { key: 'reports', label: 'Báo cáo vi phạm', icon: FileWarning, tone: 'amber' },
+  { key: 'newUsersToday', label: 'Người dùng mới hôm nay', icon: TrendingUp, tone: 'emerald' }
 ]

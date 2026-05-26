@@ -27,7 +27,7 @@ const AdminLayout = ({
             <img src={assets.logo_icon || assets.tarous_logo} alt='' className='size-8 object-contain' />
             <div>
               <p className='text-sm font-black leading-none text-slate-950'>Tarous Admin</p>
-              <p className='mt-1 text-[11px] font-bold uppercase tracking-wide text-slate-400'>Bang dieu khien</p>
+              <p className='mt-1 text-[11px] font-bold uppercase tracking-wide text-slate-400'>Bảng điều khiển</p>
             </div>
           </div>
 
@@ -60,13 +60,13 @@ const AdminLayout = ({
             <div className='mb-3 flex min-w-0 items-center gap-3'>
               <img src={currentUser?.profile_picture || assets.sample_profile} alt='' className='size-10 rounded-full object-cover ring-1 ring-slate-200' />
               <div className='min-w-0'>
-                <p className='truncate text-sm font-black text-slate-950'>{currentUser?.full_name || 'Quan tri vien'}</p>
+                <p className='truncate text-sm font-black text-slate-950'>{currentUser?.full_name || 'Quản trị viên'}</p>
                 <p className='truncate text-xs text-slate-500'>@{currentUser?.username || 'admin'}</p>
               </div>
             </div>
             <button type='button' onClick={onLogout} className='flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 cursor-pointer'>
               <LogOut className='size-4' />
-              Dang xuat
+              Đăng xuất
             </button>
           </div>
         </aside>
@@ -79,7 +79,7 @@ const AdminLayout = ({
               </span>
               <div className='min-w-0'>
                 <p className='truncate text-sm font-black text-slate-950'>{activeTabInfo.label}</p>
-                <p className='truncate text-xs text-slate-500'>Quan ly du lieu, kiem duyet va van hanh he thong</p>
+                <p className='truncate text-xs text-slate-500'>Quản lý dữ liệu, kiểm duyệt và vận hành hệ thống</p>
               </div>
             </div>
 
@@ -89,13 +89,13 @@ const AdminLayout = ({
                 value={globalSearch}
                 onChange={(event) => onGlobalSearchChange(event.target.value)}
                 className='h-10 w-full rounded-full border border-slate-200 bg-white pl-10 pr-14 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100'
-                placeholder='Tim noi dung, nguoi dung, bai viet'
+                placeholder='Tìm nội dung, người dùng, bài viết'
               />
               <span className='absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-slate-200 px-1.5 py-0.5 text-[11px] font-bold text-slate-400 sm:block'>Enter</span>
             </form>
 
             <div className='flex items-center gap-2'>
-              <button type='button' onClick={onRefresh} className='flex size-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 cursor-pointer' title='Lam moi'>
+              <button type='button' onClick={onRefresh} className='flex size-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 cursor-pointer' title='Làm mới'>
                 <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
               <div className='hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 xl:flex'>
@@ -126,12 +126,13 @@ const AdminLayout = ({
             </div>
           </div>
 
+          {loading && (
+            <div className='pointer-events-none fixed right-5 top-20 z-50 flex size-10 items-center justify-center rounded-full border border-slate-200 bg-white/95 shadow-lg backdrop-blur' role='status' aria-label='Đang tải'>
+              <span className='size-5 animate-spin rounded-full border-2 border-slate-200 border-t-cyan-500' />
+            </div>
+          )}
+
           <div className='p-4 pb-10 md:p-6'>
-            {loading && (
-              <div className='mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-500'>
-                Dang tai du lieu...
-              </div>
-            )}
 
             {children}
           </div>

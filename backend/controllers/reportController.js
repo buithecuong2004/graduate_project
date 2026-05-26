@@ -7,12 +7,12 @@ import User from '../models/User.js';
 
 const allowedReasons = new Set([
     'spam',
-    'harassment',
-    'hate',
-    'violence',
-    'nudity',
-    'scam',
-    'other'
+    'quấy rối',
+    'ghét',
+    'bạo lực',
+    'khoả thân',
+    'lừa đảo',
+    'khác'
 ]);
 
 const reportTargetConfig = {

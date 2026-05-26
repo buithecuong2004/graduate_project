@@ -22,36 +22,36 @@ const Overview = ({ growth, growthDays, onGrowthDaysChange, onOpenReports, topPo
   return (
     <div className='space-y-5'>
       <section className='grid gap-3 sm:grid-cols-2 xl:grid-cols-6'>
-        <MetricCard label='Tong nguoi dung' value={totals.users} icon={Users} tone='blue' {...percentBadgeProps(growthPercent.users)} />
-        <MetricCard label='Tong bai dang' value={totals.posts} icon={MessageCircle} tone='cyan' {...percentBadgeProps(growthPercent.posts)} />
-        <MetricCard label='Tong binh luan' value={totals.comments} icon={Activity} tone='violet' {...percentBadgeProps(growthPercent.comments)} />
-        <MetricCard label='Likes/Reactions' value={totals.likesReactions} icon={ThumbsUp} tone='rose' {...percentBadgeProps(growthPercent.likesReactions)} />
-        <MetricCard label='Bao cao vi pham' value={totals.reports} icon={FileWarning} tone='amber' note={`${formatNumber(totals.pendingReports)} cho`} {...percentBadgeProps(growthPercent.reports)} />
-        <MetricCard label='User moi hom nay' value={totals.newUsersToday} icon={TrendingUp} tone='emerald' note={`${formatNumber(totals.newUsersThisWeek)} tuan nay`} {...percentBadgeProps(growthPercent.newUsersToday ?? growthPercent.newUsersThisWeek)} />
+        <MetricCard label='Tổng người dùng' value={totals.users} icon={Users} tone='blue' {...percentBadgeProps(growthPercent.users)} />
+        <MetricCard label='Tổng bài đăng' value={totals.posts} icon={MessageCircle} tone='cyan' {...percentBadgeProps(growthPercent.posts)} />
+        <MetricCard label='Tổng bình luận' value={totals.comments} icon={Activity} tone='violet' {...percentBadgeProps(growthPercent.comments)} />
+        <MetricCard label='Thích/Cảm xúc' value={totals.likesReactions} icon={ThumbsUp} tone='rose' {...percentBadgeProps(growthPercent.likesReactions)} />
+        <MetricCard label='Báo cáo vi phạm' value={totals.reports} icon={FileWarning} tone='amber' note={`${formatNumber(totals.pendingReports)} chờ`} {...percentBadgeProps(growthPercent.reports)} />
+        <MetricCard label='Người dùng mới hôm nay' value={totals.newUsersToday} icon={TrendingUp} tone='emerald' note={`${formatNumber(totals.newUsersThisWeek)} tuần này`} {...percentBadgeProps(growthPercent.newUsersToday ?? growthPercent.newUsersThisWeek)} />
       </section>
 
       <div className='grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]'>
         <GrowthChart growth={growth} rangeDays={growthDays} onRangeChange={onGrowthDaysChange} />
 
         <section className='rounded-xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(15,23,42,0.04)]'>
-          <CardTitle icon={Target} title='Bao cao can xu ly' subtitle='Uu tien xu ly noi dung dang bi report' />
+          <CardTitle icon={Target} title='Báo cáo cần xử lý' subtitle='Ưu tiên xử lý nội dung đang bị báo cáo' />
           <div className='space-y-3'>
             <div className='rounded-xl border border-amber-100 bg-amber-50 p-4'>
-              <p className='text-xs font-black uppercase text-amber-700'>Dang cho</p>
+              <p className='text-xs font-black uppercase text-amber-700'>Đang chờ</p>
               <p className='mt-2 text-3xl font-black text-slate-950'>{formatNumber(totals.pendingReports)}</p>
               <button type='button' onClick={onOpenReports} className='mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white cursor-pointer'>
-                Mo kiem duyet
+                Mở kiểm duyệt
               </button>
             </div>
             <div className='rounded-xl border border-slate-200 p-4'>
-              <p className='text-sm font-black text-slate-950'>Tuong tac bai viet</p>
+              <p className='text-sm font-black text-slate-950'>Tương tác bài viết</p>
               <div className='mt-3 grid grid-cols-2 gap-3 text-sm'>
                 <div>
-                  <p className='text-xs text-slate-500'>Reactions</p>
+                  <p className='text-xs text-slate-500'>Cảm xúc</p>
                   <p className='font-black'>{formatNumber(totals.postReactions)}</p>
                 </div>
                 <div>
-                  <p className='text-xs text-slate-500'>Shares</p>
+                  <p className='text-xs text-slate-500'>Chia sẻ</p>
                   <p className='font-black'>{formatNumber(totals.shares)}</p>
                 </div>
               </div>
@@ -61,37 +61,37 @@ const Overview = ({ growth, growthDays, onGrowthDaysChange, onOpenReports, topPo
       </div>
 
       <section className='rounded-xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(15,23,42,0.04)]'>
-        <CardTitle icon={Sparkles} title='Top bai viet tuong tac cao' subtitle='Cac bai viet co tong tuong tac tot nhat gan day' />
+        <CardTitle icon={Sparkles} title='Top bài viết tương tác cao' subtitle='Các bài viết có tổng tương tác tốt nhất gần đây' />
         <div className='flex gap-4 overflow-x-auto pb-1'>
           {topPosts.map((post) => (
             <article key={post._id} className='min-w-[17rem] rounded-xl border border-slate-200 bg-white p-4'>
               <div className='mb-3 flex items-center justify-between gap-3'>
                 <p className='text-xs font-bold text-slate-500'>{formatDate(post.createdAt)}</p>
                 <StatusBadge status={post.pending_reports_count > 0 ? 'pending' : 'approved'}>
-                  {post.pending_reports_count > 0 ? 'Co report' : 'On dinh'}
+                  {post.pending_reports_count > 0 ? 'Có báo cáo' : 'Ổn định'}
                 </StatusBadge>
               </div>
-              <h3 className='line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-950'>{shortText(post.content || 'Bai viet media', 90)}</h3>
+              <h3 className='line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-950'>{shortText(post.content || 'Bài viết đa phương tiện', 90)}</h3>
               <div className='mt-5 grid grid-cols-3 gap-3 text-center text-xs'>
                 <div className='rounded-lg bg-rose-50 p-2 text-rose-700'>
                   <ThumbsUp className='mx-auto mb-1 size-4' />
                   <p className='font-black'>{formatNumber(post.reactions_count + post.old_likes_count)}</p>
-                  <p>Thich</p>
+                  <p>Thích</p>
                 </div>
                 <div className='rounded-lg bg-cyan-50 p-2 text-cyan-700'>
                   <MessageCircle className='mx-auto mb-1 size-4' />
                   <p className='font-black'>{formatNumber(post.comments_count)}</p>
-                  <p>Binh luan</p>
+                  <p>Bình luận</p>
                 </div>
                 <div className='rounded-lg bg-emerald-50 p-2 text-emerald-700'>
                   <Target className='mx-auto mb-1 size-4' />
                   <p className='font-black'>{formatNumber(post.total_interactions)}</p>
-                  <p>Tong</p>
+                  <p>Tổng</p>
                 </div>
               </div>
             </article>
           ))}
-          {topPosts.length === 0 && <p className='text-sm text-slate-500'>Chua co du lieu.</p>}
+          {topPosts.length === 0 && <p className='text-sm text-slate-500'>Chưa có dữ liệu.</p>}
         </div>
       </section>
     </div>

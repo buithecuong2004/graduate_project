@@ -24,7 +24,7 @@ const getMessageLabel = (message) => {
   if (message.is_deleted) return 'Tin nhắn đã bị xóa.'
   if (message.text) return message.text
   if (message.message_type === 'voice') return 'Tin nhắn thoại'
-  if (Array.isArray(message.media_urls) && message.media_urls.length > 0) return `Tin nhắn media (${message.media_urls.length} tệp)`
+  if (Array.isArray(message.media_urls) && message.media_urls.length > 0) return `Tin nhắn đa phương tiện (${message.media_urls.length} tệp)`
   if (message.shared_post_id) return 'Tin nhắn chia sẻ bài viết'
   return 'Tin nhắn không có nội dung chữ.'
 }
@@ -45,7 +45,7 @@ const getTargetInfo = (report) => {
       title: 'Bài viết bị báo cáo',
       owner: getPersonLine(target?.user),
       meta: formatDate(target?.createdAt),
-      body: shortText(target?.content || 'Bài viết media', 220)
+      body: shortText(target?.content || 'Bài viết đa phương tiện', 220)
     }
   }
 
