@@ -1,19 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   BarChart3,
   CalendarDays,
+  Camera,
   CheckCircle2,
   Eye,
   EyeOff,
   FileWarning,
   Gauge,
   Home,
+  KeyRound,
   Lock,
   LogOut,
   MessageCircle,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
   Target,
@@ -21,8 +24,10 @@ import {
   Trash2,
   TrendingUp,
   Unlock,
+  User,
   UserCog,
   Users,
+  X,
   XCircle
 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
@@ -30,7 +35,7 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { assets } from '../../assets/assets'
 import { useAuth } from '../../context/AuthContext'
-import { clearUser } from '../../features/user/userSlice'
+import { clearUser, setUser } from '../../features/user/userSlice'
 import api from '../../api/axios'
 import localizeMessage from '../../utils/localization'
 import { getReportReasonLabel } from '../../utils/reportReasons'
@@ -313,7 +318,7 @@ const StatusBadge = ({ status, children }) => {
   )
 }
 
-const GrowthChart = ({ growth = {}, rangeDays = 7, onRangeChange = () => {} }) => {
+const GrowthChart = ({ growth = {}, rangeDays = 7, onRangeChange = () => { } }) => {
   const [activeMetric, setActiveMetric] = useState('users')
   const [hoverIndex, setHoverIndex] = useState(null)
   const activeConfig = CHART_TABS.find((tab) => tab.id === activeMetric) || CHART_TABS[0]
@@ -528,6 +533,15 @@ const Admin = () => {
   const [postPagination, setPostPagination] = useState(DEFAULT_PAGINATION)
   const [reportPagination, setReportPagination] = useState(DEFAULT_PAGINATION)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [hideModal, setHideModal] = useState({ open: false, postId: null, reason: '', description: '' })
+  const hideDescRef = useRef(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState('password')
+  const [passwordForm, setPasswordForm] = useState({ current: '', newPwd: '', confirm: '' })
+  const [showPasswords, setShowPasswords] = useState({ current: false, newPwd: false, confirm: false })
+  const [profileForm, setProfileForm] = useState({ fullName: '', avatarFile: null, avatarPreview: '' })
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const avatarInputRef = useRef(null)
 
   const activeTabInfo = ADMIN_TABS.find((tab) => tab.id === activeTab) || ADMIN_TABS[0]
 
@@ -725,6 +739,82 @@ const Admin = () => {
     applyGlobalSearch(globalSearch)
   }, [applyGlobalSearch, globalSearch])
 
+  const openSettings = useCallback(() => {
+    setPasswordForm({ current: '', newPwd: '', confirm: '' })
+    setShowPasswords({ current: false, newPwd: false, confirm: false })
+    setProfileForm({ fullName: currentUser?.full_name || '', avatarFile: null, avatarPreview: '' })
+    setSettingsTab('password')
+    setSettingsOpen(true)
+  }, [currentUser])
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    if (profileForm.avatarPreview) URL.revokeObjectURL(profileForm.avatarPreview)
+  }, [profileForm.avatarPreview])
+
+  const handleAvatarSelect = useCallback((event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (profileForm.avatarPreview) URL.revokeObjectURL(profileForm.avatarPreview)
+    setProfileForm((current) => ({ ...current, avatarFile: file, avatarPreview: URL.createObjectURL(file) }))
+  }, [profileForm.avatarPreview])
+
+  const submitChangePassword = useCallback(async () => {
+    const { current, newPwd, confirm } = passwordForm
+    if (!current) return toast.error('Vui lòng nhập mật khẩu hiện tại')
+    if (newPwd.length < 6) return toast.error('Mật khẩu mới phải có ít nhất 6 ký tự')
+    if (newPwd !== confirm) return toast.error('Xác nhận mật khẩu không khớp')
+    if (current === newPwd) return toast.error('Mật khẩu mới phải khác mật khẩu hiện tại')
+
+    setSettingsLoading(true)
+    try {
+      const { data } = await api.post('/api/user/change-password', {
+        currentPassword: current,
+        newPassword: newPwd,
+        confirmPassword: confirm
+      }, { headers: await authHeaders() })
+      if (data.success) {
+        toast.success(data.message || 'Đổi mật khẩu thành công')
+        setPasswordForm({ current: '', newPwd: '', confirm: '' })
+        setShowPasswords({ current: false, newPwd: false, confirm: false })
+      } else {
+        toast.error(localizeMessage(data.message))
+      }
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }, [authHeaders, passwordForm])
+
+  const submitUpdateProfile = useCallback(async () => {
+    const trimmedName = profileForm.fullName.trim()
+    if (!trimmedName) return toast.error('Tên không được để trống')
+
+    setSettingsLoading(true)
+    try {
+      const formData = new FormData()
+      formData.append('full_name', trimmedName)
+      if (profileForm.avatarFile) formData.append('profile', profileForm.avatarFile)
+
+      const { data } = await api.post('/api/user/update', formData, {
+        headers: { ...(await authHeaders()), 'Content-Type': 'multipart/form-data' }
+      })
+      if (data.success) {
+        dispatch(setUser(data.user))
+        toast.success(data.message || 'Cập nhật hồ sơ thành công')
+        if (profileForm.avatarPreview) URL.revokeObjectURL(profileForm.avatarPreview)
+        setProfileForm({ fullName: data.user.full_name || '', avatarFile: null, avatarPreview: '' })
+      } else {
+        toast.error(localizeMessage(data.message))
+      }
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }, [authHeaders, dispatch, profileForm])
+
   const handleLogout = useCallback(() => {
     logout()
     dispatch(clearUser())
@@ -752,19 +842,53 @@ const Admin = () => {
     }
   }, [authHeaders])
 
-  const updatePostVisibility = useCallback(async (postId, isHidden) => {
-    const reason = isHidden ? window.prompt('Lý do ẩn bài viết', 'Vi phạm quy định cộng đồng') : ''
-    if (isHidden && reason === null) return
+  const openHideModal = useCallback((postId) => {
+    setHideModal({ open: true, postId, reason: '', description: '' })
+  }, [])
+
+  const closeHideModal = useCallback(() => {
+    setHideModal({ open: false, postId: null, reason: '', description: '' })
+  }, [])
+
+  const confirmHidePost = useCallback(async () => {
+    const { postId, reason, description } = hideModal
+    if (!postId || !reason) {
+      toast.error('Vui lòng chọn lý do ẩn bài viết')
+      return
+    }
+    closeHideModal()
+
+    const fullReason = description.trim() ? `${reason}: ${description.trim()}` : reason
 
     setActionId(postId)
     try {
       const { data } = await api.patch(`/api/admin/posts/${postId}/visibility`, {
-        is_hidden: isHidden,
-        reason
+        is_hidden: true,
+        reason: fullReason
       }, { headers: await authHeaders() })
       if (data.success) {
         setPosts((currentPosts) => currentPosts.map((post) => post._id === postId ? data.post : post))
-        toast.success(isHidden ? 'Đã ẩn bài viết' : 'Đã hiển thị bài viết')
+        toast.success('Đã ẩn bài viết')
+      } else {
+        toast.error(localizeMessage(data.message))
+      }
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setActionId('')
+    }
+  }, [authHeaders, closeHideModal, hideModal])
+
+  const unhidePost = useCallback(async (postId) => {
+    setActionId(postId)
+    try {
+      const { data } = await api.patch(`/api/admin/posts/${postId}/visibility`, {
+        is_hidden: false,
+        reason: ''
+      }, { headers: await authHeaders() })
+      if (data.success) {
+        setPosts((currentPosts) => currentPosts.map((post) => post._id === postId ? data.post : post))
+        toast.success('Đã hiển thị bài viết')
       } else {
         toast.error(localizeMessage(data.message))
       }
@@ -838,11 +962,10 @@ const Admin = () => {
                   key={tab.id}
                   type='button'
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
-                    isActive
+                  className={`flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-sm font-bold transition cursor-pointer ${isActive
                       ? 'bg-slate-100 text-slate-950 shadow-sm ring-1 ring-slate-200/70'
                       : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
-                  }`}
+                    }`}
                 >
                   <TabIcon className='size-4' />
                   <span className='flex-1'>{tab.label}</span>
@@ -852,21 +975,18 @@ const Admin = () => {
                 </button>
               )
             })}
-
-            <div className='my-4 h-px bg-slate-200' />
-            <button type='button' onClick={() => navigate('/feed')} className='flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 cursor-pointer'>
-              <Home className='size-4' />
-              Về ứng dụng
-            </button>
           </nav>
 
           <div className='border-t border-slate-200 p-4'>
             <div className='mb-3 flex min-w-0 items-center gap-3'>
               <img src={currentUser?.profile_picture || assets.sample_profile} alt='' className='size-10 rounded-full object-cover ring-1 ring-slate-200' />
-              <div className='min-w-0'>
+              <div className='min-w-0 flex-1'>
                 <p className='truncate text-sm font-black text-slate-950'>{currentUser?.full_name || 'Quản trị viên'}</p>
                 <p className='truncate text-xs text-slate-500'>@{currentUser?.username || 'admin'}</p>
               </div>
+              <button type='button' onClick={openSettings} className='flex size-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 cursor-pointer' title='Cài đặt'>
+                <Settings className='size-4' />
+              </button>
             </div>
             <button type='button' onClick={handleLogout} className='flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 cursor-pointer'>
               <LogOut className='size-4' />
@@ -1172,7 +1292,7 @@ const Admin = () => {
                           </div>
                         </div>
                         <div className='flex flex-wrap gap-2 xl:justify-end'>
-                          <button type='button' onClick={(event) => { event.stopPropagation(); updatePostVisibility(post._id, !post.is_hidden) }} disabled={actionId === post._id} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 cursor-pointer'>
+                          <button type='button' onClick={(event) => { event.stopPropagation(); post.is_hidden ? unhidePost(post._id) : openHideModal(post._id) }} disabled={actionId === post._id} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 cursor-pointer'>
                             {post.is_hidden ? <Eye className='size-4' /> : <EyeOff className='size-4' />}
                             {post.is_hidden ? 'Hiển thị' : 'Ẩn'}
                           </button>
@@ -1288,6 +1408,291 @@ const Admin = () => {
         </main>
       </div>
       <PostPreviewModal post={previewPost} onClose={() => setPreviewPost(null)} />
+
+      {hideModal.open && (
+        <div className='fixed inset-0 z-[60] flex items-center justify-center' onClick={closeHideModal}>
+          <div className='absolute inset-0 bg-slate-950/40 backdrop-blur-sm' style={{ animation: 'adminFadeIn 0.18s ease-out' }} />
+          <div
+            className='relative z-10 mx-4 w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl'
+            style={{ animation: 'adminSlideUp 0.22s ease-out' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className='flex items-center justify-between border-b border-slate-200 px-5 py-4'>
+              <div className='flex items-center gap-3'>
+                <span className='flex size-9 items-center justify-center rounded-lg bg-amber-50 text-amber-600'>
+                  <EyeOff className='size-4' />
+                </span>
+                <div>
+                  <p className='text-sm font-black text-slate-950'>Ẩn bài viết</p>
+                  <p className='text-xs text-slate-500'>Chọn lý do và mô tả chi tiết</p>
+                </div>
+              </div>
+              <button type='button' onClick={closeHideModal} className='flex size-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 cursor-pointer'>
+                <X className='size-4' />
+              </button>
+            </div>
+
+            <div className='px-5 py-4'>
+              <label className='mb-2.5 block text-xs font-black uppercase tracking-wide text-slate-500'>Lý do ẩn bài viết</label>
+              <div className='space-y-1'>
+                {['Spam', 'Quấy rối', 'Ngôn từ thù ghét', 'Bạo lực hoặc đe dọa', 'Nội dung nhạy cảm', 'Lừa đảo', 'Khác'].map((option) => {
+                  const isSelected = hideModal.reason === option
+                  return (
+                    <button
+                      key={option}
+                      type='button'
+                      onClick={() => setHideModal((current) => ({ ...current, reason: option }))}
+                      className={`flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-sm font-bold transition cursor-pointer ${isSelected
+                          ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
+                          : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                    >
+                      <span className={`flex size-[18px] items-center justify-center rounded-full border-2 transition ${isSelected ? 'border-amber-500 bg-amber-500' : 'border-slate-300'
+                        }`}>
+                        {isSelected && <span className='block size-2 rounded-full bg-white' />}
+                      </span>
+                      {option}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className='border-t border-slate-100 px-5 py-4'>
+              <label className='mb-2 block text-xs font-black uppercase tracking-wide text-slate-500'>Mô tả thêm <span className='font-semibold normal-case text-slate-400'>(không bắt buộc)</span></label>
+              <textarea
+                ref={hideDescRef}
+                value={hideModal.description}
+                onChange={(event) => setHideModal((current) => ({ ...current, description: event.target.value }))}
+                onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); confirmHidePost() } }}
+                rows={3}
+                className='w-full resize-none rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-amber-300 focus:ring-4 focus:ring-amber-100'
+                placeholder='Nhập mô tả chi tiết lý do ẩn bài viết...'
+              />
+            </div>
+
+            <div className='flex items-center justify-end gap-3 border-t border-slate-100 px-5 py-4'>
+              <button type='button' onClick={closeHideModal} className='rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 cursor-pointer'>
+                Hủy
+              </button>
+              <button
+                type='button'
+                onClick={confirmHidePost}
+                disabled={!hideModal.reason}
+                className={`rounded-lg px-5 py-2.5 text-sm font-black text-white shadow-sm transition cursor-pointer ${hideModal.reason
+                    ? 'bg-amber-500 hover:bg-amber-600'
+                    : 'bg-slate-300 cursor-not-allowed'
+                  }`}
+              >
+                Xác nhận ẩn
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className='fixed inset-0 z-[60] flex items-center justify-center' onClick={closeSettings}>
+          <div className='absolute inset-0 bg-slate-950/40 backdrop-blur-sm' style={{ animation: 'adminFadeIn 0.18s ease-out' }} />
+          <div
+            className='relative z-10 mx-4 w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl'
+            style={{ animation: 'adminSlideUp 0.22s ease-out' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {/* Header */}
+            <div className='flex items-center justify-between border-b border-slate-200 px-5 py-4'>
+              <div className='flex items-center gap-3'>
+                <span className='flex size-9 items-center justify-center rounded-lg bg-cyan-50 text-cyan-600'>
+                  <Settings className='size-4 animate-[spin_8s_linear_infinite]' />
+                </span>
+                <div>
+                  <p className='text-sm font-black text-slate-950'>Cấu hình tài khoản</p>
+                  <p className='text-xs text-slate-500'>Đổi mật khẩu hoặc cập nhật hồ sơ cá nhân</p>
+                </div>
+              </div>
+              <button type='button' onClick={closeSettings} className='flex size-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 cursor-pointer'>
+                <X className='size-4' />
+              </button>
+            </div>
+
+            {/* Tabs Selector */}
+            <div className='flex border-b border-slate-100 bg-slate-50/50 p-1'>
+              <button
+                type='button'
+                onClick={() => setSettingsTab('password')}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-black transition cursor-pointer ${settingsTab === 'password'
+                    ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/50'
+                    : 'text-slate-500 hover:text-slate-800'
+                  }`}
+              >
+                <KeyRound className='size-3.5' />
+                Đổi mật khẩu
+              </button>
+              <button
+                type='button'
+                onClick={() => setSettingsTab('profile')}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-black transition cursor-pointer ${settingsTab === 'profile'
+                    ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/50'
+                    : 'text-slate-500 hover:text-slate-800'
+                  }`}
+              >
+                <User className='size-3.5' />
+                Cập nhật hồ sơ
+              </button>
+            </div>
+
+            {/* Forms Content */}
+            {settingsTab === 'password' ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  submitChangePassword()
+                }}
+                className='space-y-4 px-5 py-4'
+              >
+                <div>
+                  <label className='mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500'>Mật khẩu cũ</label>
+                  <div className='relative'>
+                    <input
+                      type={showPasswords.current ? 'text' : 'password'}
+                      value={passwordForm.current}
+                      onChange={(event) => setPasswordForm((current) => ({ ...current, current: event.target.value }))}
+                      className='h-11 w-full rounded-lg border border-slate-200 bg-white pl-4 pr-10 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100'
+                      placeholder='Nhập mật khẩu hiện tại...'
+                    />
+                    <button
+                      type='button'
+                      onClick={() => setShowPasswords((current) => ({ ...current, current: !current.current }))}
+                      className='absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer'
+                    >
+                      {showPasswords.current ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className='mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500'>Mật khẩu mới</label>
+                  <div className='relative'>
+                    <input
+                      type={showPasswords.newPwd ? 'text' : 'password'}
+                      value={passwordForm.newPwd}
+                      onChange={(event) => setPasswordForm((current) => ({ ...current, newPwd: event.target.value }))}
+                      className='h-11 w-full rounded-lg border border-slate-200 bg-white pl-4 pr-10 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100'
+                      placeholder='Tối thiểu 6 ký tự...'
+                    />
+                    <button
+                      type='button'
+                      onClick={() => setShowPasswords((current) => ({ ...current, newPwd: !current.newPwd }))}
+                      className='absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer'
+                    >
+                      {showPasswords.newPwd ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className='mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500'>Xác nhận mật khẩu mới</label>
+                  <div className='relative'>
+                    <input
+                      type={showPasswords.confirm ? 'text' : 'password'}
+                      value={passwordForm.confirm}
+                      onChange={(event) => setPasswordForm((current) => ({ ...current, confirm: event.target.value }))}
+                      className='h-11 w-full rounded-lg border border-slate-200 bg-white pl-4 pr-10 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100'
+                      placeholder='Nhập lại mật khẩu mới...'
+                    />
+                    <button
+                      type='button'
+                      onClick={() => setShowPasswords((current) => ({ ...current, confirm: !current.confirm }))}
+                      className='absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer'
+                    >
+                      {showPasswords.confirm ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className='flex items-center justify-end gap-3 border-t border-slate-100 pt-4 mt-2'>
+                  <button type='button' onClick={closeSettings} className='rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 cursor-pointer'>
+                    Hủy
+                  </button>
+                  <button
+                    type='submit'
+                    disabled={settingsLoading}
+                    className='flex items-center justify-center gap-2 rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-cyan-600 disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer'
+                  >
+                    {settingsLoading && <span className='size-4 animate-spin rounded-full border-2 border-white border-t-transparent' />}
+                    Cập nhật
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  submitUpdateProfile()
+                }}
+                className='space-y-4 px-5 py-4'
+              >
+                <div className='flex flex-col items-center justify-center py-2'>
+                  <div className='group relative cursor-pointer' onClick={() => avatarInputRef.current?.click()}>
+                    <img
+                      src={profileForm.avatarPreview || currentUser?.profile_picture || assets.sample_profile}
+                      alt=''
+                      className='size-24 rounded-full border border-slate-200 object-cover shadow-sm transition group-hover:opacity-80 ring-4 ring-cyan-50'
+                    />
+                    <div className='absolute inset-0 flex items-center justify-center rounded-full bg-slate-950/20 opacity-0 transition group-hover:opacity-100'>
+                      <Camera className='size-6 text-white' />
+                    </div>
+                  </div>
+                  <input
+                    ref={avatarInputRef}
+                    type='file'
+                    accept='image/*'
+                    onChange={handleAvatarSelect}
+                    className='hidden'
+                  />
+                  <p className='mt-2 text-xs font-bold text-slate-400'>Nhấp để đổi ảnh đại diện</p>
+                </div>
+
+                <div>
+                  <label className='mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500'>Tên hiển thị</label>
+                  <input
+                    type='text'
+                    value={profileForm.fullName}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, fullName: event.target.value }))}
+                    className='h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100'
+                    placeholder='Nhập tên hiển thị mới...'
+                  />
+                </div>
+
+                <div className='flex items-center justify-end gap-3 border-t border-slate-100 pt-4 mt-2'>
+                  <button type='button' onClick={closeSettings} className='rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 cursor-pointer'>
+                    Hủy
+                  </button>
+                  <button
+                    type='submit'
+                    disabled={settingsLoading}
+                    className='flex items-center justify-center gap-2 rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-cyan-600 disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer'
+                  >
+                    {settingsLoading && <span className='size-4 animate-spin rounded-full border-2 border-white border-t-transparent' />}
+                    Lưu thay đổi
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes adminFadeIn {
+          from { opacity: 0 }
+          to { opacity: 1 }
+        }
+        @keyframes adminSlideUp {
+          from { opacity: 0; transform: translateY(12px) scale(0.97) }
+          to { opacity: 1; transform: translateY(0) scale(1) }
+        }
+      `}</style>
     </div>
   )
 }
