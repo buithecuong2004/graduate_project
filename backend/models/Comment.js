@@ -11,6 +11,11 @@ const commentSchema = new mongoose.Schema({
         user: {type: mongoose.Schema.Types.ObjectId, ref: 'User'},
         type: {type: String, enum: ['like', 'love', 'haha', 'wow', 'sad', 'angry']}
     }],
+    is_hidden: {type: Boolean, default: false},
+    hidden_at: {type: Date},
+    hidden_by: {type: mongoose.Schema.Types.ObjectId, ref: 'User'},
+    hidden_reason: {type: String, default: ''},
+    hidden_for: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
 }, {timestamps: true, minimize: false})
 
 const Comment = mongoose.model('Comment', commentSchema)

@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import toast from 'react-hot-toast'
 import { assets } from '../assets/assets'
@@ -7,6 +7,7 @@ import { ArrowRight, CheckCircle2, KeyRound, Mail, ShieldCheck, UserRound, Users
 import api from '../api/axios'
 import { useAuth } from '../context/AuthContext'
 import { clearUser, fetchUser, setUser } from '../features/user/userSlice'
+import { ACCOUNT_LOCKED_CODE, ACCOUNT_LOCKED_MESSAGE, ACCOUNT_LOCKED_STORAGE_KEY, ACCOUNT_LOCKED_TOAST_ID } from '../utils/authMessages'
 import localizeMessage from '../utils/localization'
 
 const GoogleIcon = () => (
@@ -28,6 +29,7 @@ const initialForm = {
 
 const Login = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const dispatch = useDispatch()
   const { login } = useAuth()
   const [mode, setMode] = useState('login')
@@ -53,6 +55,20 @@ const Login = () => {
       ? resetStep === 'email' ? 'Gửi mã OTP' : 'Đổi mật khẩu'
       : isRegister ? 'Tạo tài khoản' : 'Đăng nhập'
   const passwordPlaceholder = mode === 'login' ? '********' : 'Ít nhất 6 ký tự'
+
+  useEffect(() => {
+    const storedAuthMessage = sessionStorage.getItem(ACCOUNT_LOCKED_STORAGE_KEY)
+    if (storedAuthMessage) {
+      sessionStorage.removeItem(ACCOUNT_LOCKED_STORAGE_KEY)
+      toast.error(storedAuthMessage, { id: ACCOUNT_LOCKED_TOAST_ID })
+      return
+    }
+
+    if (searchParams.get('error') === 'account_locked') {
+      toast.error(ACCOUNT_LOCKED_MESSAGE, { id: ACCOUNT_LOCKED_TOAST_ID })
+      navigate('/', { replace: true })
+    }
+  }, [navigate, searchParams])
 
   const updateField = (event) => {
     const { name, value } = event.target
@@ -165,7 +181,7 @@ const Login = () => {
 
       const { data } = await api.post(endpoint, payload)
       if (!data.success) {
-        toast.error(localizeMessage(data.message))
+        toast.error(localizeMessage(data.message), data.code === ACCOUNT_LOCKED_CODE ? { id: ACCOUNT_LOCKED_TOAST_ID } : undefined)
         return
       }
 

@@ -1,9 +1,21 @@
 import React from 'react'
 import { Lock, Search, Unlock } from 'lucide-react'
 import { assets } from '../../assets/assets'
+import AdminPagination from '../../components/admin/AdminPagination'
 import { StatusBadge, formatDate } from '../../components/admin/adminShared'
 
-const Users = ({ actionId, filters, onFilterChange, onSearch, onUpdateUser, users = [] }) => (
+const Users = ({
+  actionId,
+  filters,
+  loading = false,
+  onFilterChange,
+  onLimitChange,
+  onPageChange,
+  onSearch,
+  onUpdateUser,
+  pagination,
+  users = []
+}) => (
   <section className='rounded-xl border border-slate-200 bg-white shadow-[0_8px_28px_rgba(15,23,42,0.04)]'>
     <div className='flex flex-col gap-3 border-b border-slate-200 p-4 md:flex-row md:items-center'>
       <div className='relative flex-1'>
@@ -82,6 +94,16 @@ const Users = ({ actionId, filters, onFilterChange, onSearch, onUpdateUser, user
         </tbody>
       </table>
     </div>
+
+    <AdminPagination
+      disabled={loading}
+      hasMore={pagination?.hasMore}
+      limit={pagination?.limit}
+      onLimitChange={onLimitChange}
+      onPageChange={onPageChange}
+      page={pagination?.page}
+      total={pagination?.total}
+    />
   </section>
 )
 

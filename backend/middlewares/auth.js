@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
+import { sendAccountLocked } from '../utils/authMessages.js'
 
 export const protect = async (req, res, next) => {
     try {
@@ -21,7 +22,7 @@ export const protect = async (req, res, next) => {
         }
 
         if (user.account_status === 'locked') {
-            return res.status(403).json({ success: false, message: "Account is locked" })
+            return sendAccountLocked(res)
         }
 
         // Attach userId to request for controllers to use

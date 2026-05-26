@@ -54,12 +54,6 @@ const AdminLayout = ({
                 </NavLink>
               )
             })}
-
-            <div className='my-4 h-px bg-slate-200' />
-            <button type='button' onClick={() => navigate('/feed')} className='flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 cursor-pointer'>
-              <Home className='size-4' />
-              Ve ung dung
-            </button>
           </nav>
 
           <div className='border-t border-slate-200 p-4'>

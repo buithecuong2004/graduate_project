@@ -20,6 +20,8 @@ const getActiveAdminTab = (pathname) => {
   return 'overview'
 }
 
+const DEFAULT_PAGINATION = { page: 1, limit: 10, total: 0, hasMore: false }
+
 const Admin = () => {
   const { getToken, logout } = useAuth()
   const currentUser = useSelector((state) => state.user.value)
@@ -38,6 +40,10 @@ const Admin = () => {
   const [userFilters, setUserFilters] = useState({ search: '' })
   const [postFilters, setPostFilters] = useState({ search: '', user: '', from: '', to: '', status: 'all' })
   const [reportStatus, setReportStatus] = useState('pending')
+  const [reportType, setReportType] = useState('all')
+  const [userPagination, setUserPagination] = useState(DEFAULT_PAGINATION)
+  const [postPagination, setPostPagination] = useState(DEFAULT_PAGINATION)
+  const [reportPagination, setReportPagination] = useState(DEFAULT_PAGINATION)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const authHeaders = useCallback(async () => ({
@@ -65,48 +71,85 @@ const Admin = () => {
     try {
       const { data } = await api.get('/api/admin/users', {
         headers: await authHeaders(),
-        params: { search: userFilters.search, limit: 50 }
+        params: {
+          search: userFilters.search,
+          page: userPagination.page,
+          limit: userPagination.limit
+        }
       })
-      if (data.success) setUsers(data.users)
+      if (data.success) {
+        setUsers(data.users)
+        setUserPagination((current) => ({
+          ...current,
+          page: data.page || current.page,
+          total: data.total || 0,
+          hasMore: !!data.hasMore
+        }))
+      }
       else toast.error(localizeMessage(data.message))
     } catch (error) {
       toast.error(localizeMessage(error.message))
     } finally {
       setLoading(false)
     }
-  }, [authHeaders, userFilters.search])
+  }, [authHeaders, userFilters.search, userPagination.limit, userPagination.page])
 
   const loadPosts = useCallback(async () => {
     setLoading(true)
     try {
       const { data } = await api.get('/api/admin/posts', {
         headers: await authHeaders(),
-        params: { ...postFilters, limit: 50 }
+        params: {
+          ...postFilters,
+          page: postPagination.page,
+          limit: postPagination.limit
+        }
       })
-      if (data.success) setPosts(data.posts)
+      if (data.success) {
+        setPosts(data.posts)
+        setPostPagination((current) => ({
+          ...current,
+          page: data.page || current.page,
+          total: data.total || 0,
+          hasMore: !!data.hasMore
+        }))
+      }
       else toast.error(localizeMessage(data.message))
     } catch (error) {
       toast.error(localizeMessage(error.message))
     } finally {
       setLoading(false)
     }
-  }, [authHeaders, postFilters])
+  }, [authHeaders, postFilters, postPagination.limit, postPagination.page])
 
   const loadReports = useCallback(async () => {
     setLoading(true)
     try {
       const { data } = await api.get('/api/admin/reports', {
         headers: await authHeaders(),
-        params: { status: reportStatus, limit: 50 }
+        params: {
+          status: reportStatus,
+          target_type: reportType,
+          page: reportPagination.page,
+          limit: reportPagination.limit
+        }
       })
-      if (data.success) setReports(data.reports)
+      if (data.success) {
+        setReports(data.reports)
+        setReportPagination((current) => ({
+          ...current,
+          page: data.page || current.page,
+          total: data.total || 0,
+          hasMore: !!data.hasMore
+        }))
+      }
       else toast.error(localizeMessage(data.message))
     } catch (error) {
       toast.error(localizeMessage(error.message))
     } finally {
       setLoading(false)
     }
-  }, [authHeaders, reportStatus])
+  }, [authHeaders, reportPagination.limit, reportPagination.page, reportStatus, reportType])
 
   useEffect(() => {
     if (activeTab === 'overview') loadDashboard()
@@ -121,18 +164,21 @@ const Admin = () => {
 
     if (activeTab === 'users') {
       setUserFilters({ search })
+      setUserPagination((current) => ({ ...current, page: 1 }))
       setRefreshKey((value) => value + 1)
       return
     }
 
     if (activeTab === 'posts') {
       setPostFilters((filters) => ({ ...filters, search }))
+      setPostPagination((current) => ({ ...current, page: 1 }))
       setRefreshKey((value) => value + 1)
       return
     }
 
     navigate('/admin/posts')
     setPostFilters((filters) => ({ ...filters, search }))
+    setPostPagination((current) => ({ ...current, page: 1 }))
   }, [activeTab, globalSearch, navigate])
 
   const handleLogout = useCallback(() => {
@@ -142,6 +188,36 @@ const Admin = () => {
   }, [dispatch, logout, navigate])
 
   const refreshCurrentTab = useCallback(() => {
+    setRefreshKey((value) => value + 1)
+  }, [])
+
+  const updateUserFilters = useCallback((nextFilters) => {
+    setUserFilters(nextFilters)
+    setUserPagination((current) => ({ ...current, page: 1 }))
+  }, [])
+
+  const updatePostFilters = useCallback((nextFilters) => {
+    setPostFilters(nextFilters)
+    setPostPagination((current) => ({ ...current, page: 1 }))
+  }, [])
+
+  const updateReportStatus = useCallback((nextStatus) => {
+    setReportStatus(nextStatus)
+    setReportPagination((current) => ({ ...current, page: 1 }))
+  }, [])
+
+  const updateReportType = useCallback((nextType) => {
+    setReportType(nextType)
+    setReportPagination((current) => ({ ...current, page: 1 }))
+  }, [])
+
+  const searchUsers = useCallback(() => {
+    setUserPagination((current) => ({ ...current, page: 1 }))
+    setRefreshKey((value) => value + 1)
+  }, [])
+
+  const searchPosts = useCallback(() => {
+    setPostPagination((current) => ({ ...current, page: 1 }))
     setRefreshKey((value) => value + 1)
   }, [])
 
@@ -263,9 +339,13 @@ const Admin = () => {
             <Users
               actionId={actionId}
               filters={userFilters}
-              onFilterChange={setUserFilters}
-              onSearch={loadUsers}
+              loading={loading && activeTab === 'users'}
+              onFilterChange={updateUserFilters}
+              onLimitChange={(limit) => setUserPagination((current) => ({ ...current, limit, page: 1 }))}
+              onPageChange={(page) => setUserPagination((current) => ({ ...current, page }))}
+              onSearch={searchUsers}
               onUpdateUser={updateUser}
+              pagination={userPagination}
               users={users}
             />
           )}
@@ -276,10 +356,14 @@ const Admin = () => {
             <Posts
               actionId={actionId}
               filters={postFilters}
+              loading={loading && activeTab === 'posts'}
               onDeletePost={deletePost}
-              onFilterChange={setPostFilters}
-              onSearch={loadPosts}
+              onFilterChange={updatePostFilters}
+              onLimitChange={(limit) => setPostPagination((current) => ({ ...current, limit, page: 1 }))}
+              onPageChange={(page) => setPostPagination((current) => ({ ...current, page }))}
+              onSearch={searchPosts}
               onUpdateVisibility={updatePostVisibility}
+              pagination={postPagination}
               posts={posts}
             />
           )}
@@ -289,10 +373,16 @@ const Admin = () => {
           element={(
             <Reports
               actionId={actionId}
-              onStatusChange={setReportStatus}
+              loading={loading && activeTab === 'reports'}
+              onLimitChange={(limit) => setReportPagination((current) => ({ ...current, limit, page: 1 }))}
+              onPageChange={(page) => setReportPagination((current) => ({ ...current, page }))}
+              onStatusChange={updateReportStatus}
+              onTypeChange={updateReportType}
               onUpdateReport={updateReport}
+              pagination={reportPagination}
               reports={reports}
               status={reportStatus}
+              type={reportType}
             />
           )}
         />

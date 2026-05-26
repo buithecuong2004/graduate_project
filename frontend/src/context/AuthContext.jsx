@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import api from '../api/axios'
+import { ACCOUNT_LOCKED_MESSAGE, ACCOUNT_LOCKED_STORAGE_KEY, isAccountLockedResponse } from '../utils/authMessages'
 
 const AuthContext = createContext(null)
 
@@ -7,6 +8,37 @@ export const AuthProvider = ({ children }) => {
     const [token, setToken] = useState(() => localStorage.getItem('tarous_token'))
     const [isAuthenticated, setIsAuthenticated] = useState(false)
     const [loading, setLoading] = useState(true)
+    const isHandlingLockedRef = useRef(false)
+
+    const handleAccountLocked = useCallback(() => {
+        if (isHandlingLockedRef.current) return
+        isHandlingLockedRef.current = true
+
+        sessionStorage.setItem(ACCOUNT_LOCKED_STORAGE_KEY, ACCOUNT_LOCKED_MESSAGE)
+        localStorage.removeItem('tarous_token')
+        setToken(null)
+        setIsAuthenticated(false)
+        setLoading(false)
+
+        if (window.location.pathname !== '/') {
+            window.location.replace('/')
+        }
+    }, [])
+
+    useEffect(() => {
+        const interceptorId = api.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                if (isAccountLockedResponse(error)) {
+                    handleAccountLocked()
+                    return new Promise(() => {})
+                }
+                return Promise.reject(error)
+            }
+        )
+
+        return () => api.interceptors.response.eject(interceptorId)
+    }, [handleAccountLocked])
 
     // Verify token on mount
     useEffect(() => {
@@ -33,9 +65,11 @@ export const AuthProvider = ({ children }) => {
                     setIsAuthenticated(false)
                 }
             } catch (error) {
-                localStorage.removeItem('tarous_token')
-                setToken(null)
-                setIsAuthenticated(false)
+                if (!isAccountLockedResponse(error)) {
+                    localStorage.removeItem('tarous_token')
+                    setToken(null)
+                    setIsAuthenticated(false)
+                }
             } finally {
                 setLoading(false)
             }

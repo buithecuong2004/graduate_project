@@ -1,4 +1,4 @@
-import { BadgeCheck, Flag, Heart, MessageCircle, Share2, Trash2 } from 'lucide-react'
+import { BadgeCheck, EyeOff, Flag, Heart, MessageCircle, MoreVertical, Share2, Trash2 } from 'lucide-react'
 import moment from '../../utils/moment'
 import React, { useCallback, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -41,10 +41,14 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     const [showShareModal, setShowShareModal] = useState(false)
     const [showReactionList, setShowReactionList] = useState(false)
     const [showReportForm, setShowReportForm] = useState(false)
+    const [showPostMenu, setShowPostMenu] = useState(false)
+    const [isLocallyHidden, setIsLocallyHidden] = useState(false)
     const [reportReason, setReportReason] = useState('spam')
     const [reportDetails, setReportDetails] = useState('')
     const [isReporting, setIsReporting] = useState(false)
+    const [isHiding, setIsHiding] = useState(false)
     const onPostDeletedRef = useRef(onPostDeleted)
+    const postMenuRef = useRef(null)
 
     useEffect(() => {
         if (autoOpenComments) setShowCommentModal(true)
@@ -61,6 +65,17 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     useEffect(() => {
         onPostDeletedRef.current = onPostDeleted
     }, [onPostDeleted])
+
+    useEffect(() => {
+        if (!showPostMenu) return undefined
+
+        const handlePointerDown = (event) => {
+            if (!postMenuRef.current?.contains(event.target)) setShowPostMenu(false)
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        return () => document.removeEventListener('pointerdown', handlePointerDown)
+    }, [showPostMenu])
 
     const setSyncedCommentCount = useCallback((count) => {
         const nextCount = Math.max(0, count)
@@ -224,6 +239,31 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
         }
     }
 
+    const handleHidePost = async () => {
+        try {
+            setShowPostMenu(false)
+            setIsHiding(true)
+            const token = await getToken()
+            const { data } = await api.post('/api/post/hide', { postId: post._id }, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+
+            if (data.success) {
+                toast.success('Đã ẩn bài viết')
+                setIsLocallyHidden(true)
+                onPostDeleted?.(post._id)
+            } else {
+                toast.error(localizeMessage(data.message))
+            }
+        } catch (error) {
+            toast.error(localizeMessage(error.message))
+        } finally {
+            setIsHiding(false)
+        }
+    }
+
+    if (isLocallyHidden) return null
+
     return (
         <article className='surface w-full max-w-2xl rounded-[1.6rem] p-4 space-y-4 sm:p-5'>
             <div className='flex items-center justify-between'>
@@ -237,24 +277,56 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                         <div className='text-slate-500 text-sm truncate'>@{post.user.username} · {moment(post.createdAt).fromNow()}</div>
                     </div>
                 </div>
-                {isOwner ? (
+                <div ref={postMenuRef} className='relative shrink-0'>
                     <button
-                        onClick={() => setShowDeleteConfirm(true)}
-                        disabled={isDeleting}
-                        className='text-slate-400 hover:text-red-500 transition disabled:opacity-50 cursor-pointer'
-                        title='Xóa bài viết'
+                        type='button'
+                        onClick={() => setShowPostMenu((value) => !value)}
+                        className='rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 cursor-pointer'
+                        title='Tác vụ bài viết'
                     >
-                        <Trash2 className='w-5 h-5' />
+                        <MoreVertical className='w-5 h-5' />
                     </button>
-                ) : (
-                    <button
-                        onClick={() => setShowReportForm((value) => !value)}
-                        className='text-slate-400 hover:text-amber-600 transition cursor-pointer'
-                        title='Báo cáo vi phạm'
-                    >
-                        <Flag className='w-5 h-5' />
-                    </button>
-                )}
+                    {showPostMenu && (
+                        <div className='absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 shadow-xl'>
+                            {!isOwner && (
+                                <button
+                                    type='button'
+                                    onClick={() => {
+                                        setShowPostMenu(false)
+                                        setShowReportForm(true)
+                                    }}
+                                    className='flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold text-slate-700 transition hover:bg-amber-50 hover:text-amber-700'
+                                >
+                                    <Flag className='size-4' />
+                                    Báo cáo
+                                </button>
+                            )}
+                            <button
+                                type='button'
+                                onClick={handleHidePost}
+                                disabled={isHiding}
+                                className='flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50'
+                            >
+                                <EyeOff className='size-4' />
+                                Ẩn bài viết
+                            </button>
+                            {isOwner && (
+                                <button
+                                    type='button'
+                                    onClick={() => {
+                                        setShowPostMenu(false)
+                                        setShowDeleteConfirm(true)
+                                    }}
+                                    disabled={isDeleting}
+                                    className='flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50'
+                                >
+                                    <Trash2 className='size-4' />
+                                    Xóa bài viết
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {post.content && <div className='text-slate-800 text-[15px] leading-7 whitespace-pre-line' dangerouslySetInnerHTML={{ __html: postWithHashtags }} />}

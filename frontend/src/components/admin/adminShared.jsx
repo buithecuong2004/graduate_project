@@ -18,17 +18,30 @@ export const ADMIN_TABS = [
 ]
 
 export const REPORT_STATUS_LABELS = {
-  pending: 'Cho xu ly',
-  approved: 'Da duyet',
-  rejected: 'Tu choi',
-  resolved: 'Da xu ly'
+  pending: 'Chờ xử lý',
+  approved: 'Đã duyệt',
+  rejected: 'Từ chối',
+  resolved: 'Đã xử lý'
 }
 
 export const REPORT_ACTION_LABELS = {
-  approve: 'Duyet',
-  reject: 'Tu choi',
-  resolve: 'Danh dau xong'
+  approve: 'Duyệt',
+  reject: 'Từ chối',
+  resolve: 'Đánh dấu xong'
 }
+
+export const REPORT_CATEGORY_OPTIONS = [
+  { value: 'all', label: 'Tất cả' },
+  { value: 'post', label: 'Bài viết' },
+  { value: 'comment', label: 'Bình luận' },
+  { value: 'message', label: 'Tin nhắn' },
+  { value: 'user', label: 'Người dùng' }
+]
+
+export const REPORT_CATEGORY_LABELS = REPORT_CATEGORY_OPTIONS.reduce((labels, option) => ({
+  ...labels,
+  [option.value]: option.label
+}), {})
 
 export const CHART_TABS = [
   { id: 'users', label: 'Nguoi dung', metricLabel: 'Nguoi dung', color: '#0ea5e9', fill: 'adminChartBlue' },
@@ -56,6 +69,11 @@ export const POST_STATUS_OPTIONS = [
 
 export const formatNumber = (value) => new Intl.NumberFormat('vi-VN').format(value || 0)
 
+export const formatPercent = (value) => {
+  const numericValue = Number(value) || 0
+  return `${numericValue >= 0 ? '+' : ''}${new Intl.NumberFormat('vi-VN').format(Math.round(numericValue))}%`
+}
+
 export const formatDate = (value) => value ? new Date(value).toLocaleDateString('vi-VN') : '-'
 
 export const formatChartDate = (value) => {
@@ -75,6 +93,12 @@ const iconToneClasses = {
   rose: 'bg-rose-50 text-rose-600 ring-rose-100'
 }
 
+const badgeToneClasses = {
+  positive: 'bg-emerald-50 text-emerald-700',
+  negative: 'bg-rose-50 text-rose-700',
+  neutral: 'bg-slate-100 text-slate-600'
+}
+
 export const CardTitle = ({ icon: IconComponent = BarChart3, title, subtitle, action }) => (
   <div className='mb-5 flex items-start justify-between gap-4'>
     <div className='flex items-start gap-3'>
@@ -90,13 +114,13 @@ export const CardTitle = ({ icon: IconComponent = BarChart3, title, subtitle, ac
   </div>
 )
 
-export const MetricCard = ({ label, value, note, icon: IconComponent = Activity, tone = 'cyan' }) => (
+export const MetricCard = ({ badge, badgeTone = 'positive', label, value, note, icon: IconComponent = Activity, tone = 'cyan' }) => (
   <div className='rounded-xl border border-slate-200 bg-white p-4 shadow-[0_8px_28px_rgba(15,23,42,0.04)]'>
     <div className='flex items-start justify-between gap-3'>
       <span className={`flex size-10 items-center justify-center rounded-xl ring-1 ${iconToneClasses[tone] || iconToneClasses.cyan}`}>
         {React.createElement(IconComponent, { className: 'size-5' })}
       </span>
-      <span className='rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-black text-emerald-700'>+2%</span>
+      {badge && <span className={`rounded-full px-2 py-1 text-[11px] font-black ${badgeToneClasses[badgeTone] || badgeToneClasses.positive}`}>{badge}</span>}
     </div>
     <p className='mt-5 text-xs font-bold text-slate-500'>{label}</p>
     <div className='mt-2 flex items-end gap-2'>
@@ -130,5 +154,5 @@ export const adminOverviewMetrics = [
   { key: 'comments', label: 'Tong binh luan', icon: Activity, tone: 'violet' },
   { key: 'likesReactions', label: 'Likes/Reactions', icon: ThumbsUp, tone: 'rose' },
   { key: 'reports', label: 'Bao cao vi pham', icon: FileWarning, tone: 'amber' },
-  { key: 'newUsersThisWeek', label: 'User moi tuan nay', icon: TrendingUp, tone: 'emerald' }
+  { key: 'newUsersToday', label: 'User moi hom nay', icon: TrendingUp, tone: 'emerald' }
 ]

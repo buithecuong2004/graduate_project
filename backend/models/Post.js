@@ -20,6 +20,7 @@ const postSchema = new mongoose.Schema({
     hidden_at: {type: Date},
     hidden_by: {type: mongoose.Schema.Types.ObjectId, ref: 'User'},
     hidden_reason: {type: String, default: ''},
+    hidden_for: [{type: mongoose.Schema.Types.ObjectId, ref: 'User'}],
 }, {timestamps: true, minimize: false})
 
 const Post = mongoose.model('Post', postSchema)

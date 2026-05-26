@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronUp, MessageCircle, SendHorizonal, SmilePlus, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, EyeOff, Flag, MessageCircle, MoreVertical, SendHorizonal, SmilePlus, Trash2, X } from 'lucide-react'
 import moment from '../../utils/moment'
 import { useSelector } from 'react-redux'
 import { useAuth } from '../../context/AuthContext'
@@ -50,11 +50,21 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
     const [isLoadingMore, setIsLoadingMore] = useState(false)
     const [reactionMenuId, setReactionMenuId] = useState(null)
     const [showReactionListMsg, setShowReactionListMsg] = useState(null)
+    const [openCommentMenuId, setOpenCommentMenuId] = useState(null)
+    const [commentActionLoadingId, setCommentActionLoadingId] = useState('')
 
     const currentUser = useSelector((state) => state.user.value)
     const { getToken } = useAuth()
     const { socketRef, socket } = useSocket()
     const navigate = useNavigate()
+
+    useEffect(() => {
+        if (!openCommentMenuId) return undefined
+
+        const closeMenu = () => setOpenCommentMenuId(null)
+        document.addEventListener('click', closeMenu)
+        return () => document.removeEventListener('click', closeMenu)
+    }, [openCommentMenuId])
 
     const fetchComments = useCallback(async (pageNum = 1) => {
         try {
@@ -320,6 +330,82 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         }
     }
 
+    const removeCommentFromView = (commentId, isReply, parentCommentId) => {
+        if (isReply) {
+            setReplies(prev => ({
+                ...prev,
+                [parentCommentId]: (prev[parentCommentId] || []).filter(reply => getId(reply) !== getId(commentId))
+            }))
+            setComments(prev => prev.map(comment => (
+                getId(comment) === getId(parentCommentId)
+                    ? { ...comment, replies: (comment.replies || []).filter(reply => getId(reply) !== getId(commentId)) }
+                    : comment
+            )))
+            return
+        }
+
+        setComments(prev => prev.filter(comment => getId(comment) !== getId(commentId)))
+        setReplies(prev => {
+            const next = { ...prev }
+            delete next[commentId]
+            return next
+        })
+    }
+
+    const handleHideComment = async (comment, isReply, parentCommentId) => {
+        const commentId = getId(comment)
+        if (!commentId) return
+
+        try {
+            setOpenCommentMenuId(null)
+            setCommentActionLoadingId(commentId)
+            const token = await getToken()
+            const { data } = await api.post(
+                '/api/post/comment/hide',
+                { commentId },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+
+            if (data.success) {
+                removeCommentFromView(commentId, isReply, parentCommentId)
+                if (Number.isFinite(data.totalCommentsCount)) onTotalCount?.(data.totalCommentsCount)
+                else onCountChange?.(-1)
+                toast.success('Đã ẩn bình luận')
+            } else {
+                toast.error(data.message || 'Không thể ẩn bình luận')
+            }
+        } catch {
+            toast.error('Không thể ẩn bình luận')
+        } finally {
+            setCommentActionLoadingId('')
+        }
+    }
+
+    const handleReportComment = async (commentId) => {
+        if (!commentId) return
+
+        try {
+            setOpenCommentMenuId(null)
+            setCommentActionLoadingId(commentId)
+            const token = await getToken()
+            const { data } = await api.post(
+                `/api/report/comment/${commentId}`,
+                { reason: 'other', details: 'Báo cáo bình luận' },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+
+            if (data.success) {
+                toast.success(data.message === 'Report already pending' ? 'Bạn đã báo cáo bình luận này' : 'Đã gửi báo cáo')
+            } else {
+                toast.error(data.message || 'Không thể gửi báo cáo')
+            }
+        } catch {
+            toast.error('Không thể gửi báo cáo')
+        } finally {
+            setCommentActionLoadingId('')
+        }
+    }
+
     const handleConfirmDelete = async () => {
         if (!deleteTarget) return
 
@@ -375,6 +461,8 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
         const currentReaction = reactions.find(r => (r.user?._id || r.user) === currentUser?._id)?.type
         const topReactions = getReactionSummary(reactions)
         const canDelete = comment.user?._id === currentUser?._id
+        const menuOpen = openCommentMenuId === comment._id
+        const isActionLoading = commentActionLoadingId === comment._id
 
         return (
             <article className={`rounded-2xl border border-slate-200 bg-white p-4 ${isReply ? 'ml-8' : ''}`}>
@@ -391,15 +479,54 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                                 <h4 className='truncate text-sm font-black text-slate-900 hover:text-cyan-700'>{comment.user?.full_name}</h4>
                                 <p className='text-xs text-slate-500'>@{comment.user?.username}</p>
                             </button>
-                            {canDelete && (
+                            <div className='relative shrink-0' onClick={(event) => event.stopPropagation()}>
                                 <button
                                     type='button'
-                                    onClick={() => setDeleteTarget({ type: isReply ? 'reply' : 'comment', id: comment._id, commentId: parentCommentId })}
-                                    className='rounded-full p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-500 cursor-pointer'
+                                    onClick={(event) => {
+                                        event.stopPropagation()
+                                        setOpenCommentMenuId(menuOpen ? null : comment._id)
+                                    }}
+                                    className={`rounded-full p-1.5 transition cursor-pointer ${menuOpen ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900'}`}
+                                    title='Tác vụ bình luận'
                                 >
-                                    <Trash2 className='size-4'/>
+                                    <MoreVertical className='size-4'/>
                                 </button>
-                            )}
+                                {menuOpen && (
+                                    <div className='absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 shadow-xl'>
+                                        <button
+                                            type='button'
+                                            onClick={() => handleHideComment(comment, isReply, parentCommentId)}
+                                            disabled={isActionLoading}
+                                            className='flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50'
+                                        >
+                                            <EyeOff className='size-4'/>
+                                            Ẩn bình luận
+                                        </button>
+                                        <button
+                                            type='button'
+                                            onClick={() => handleReportComment(comment._id)}
+                                            disabled={isActionLoading}
+                                            className='flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold text-amber-700 transition hover:bg-amber-50 disabled:opacity-50'
+                                        >
+                                            <Flag className='size-4'/>
+                                            Báo cáo
+                                        </button>
+                                        {canDelete && (
+                                            <button
+                                                type='button'
+                                                onClick={() => {
+                                                    setOpenCommentMenuId(null)
+                                                    setDeleteTarget({ type: isReply ? 'reply' : 'comment', id: comment._id, commentId: parentCommentId })
+                                                }}
+                                                className='flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50'
+                                            >
+                                                <Trash2 className='size-4'/>
+                                                Xóa
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <p className='mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'>{comment.content}</p>

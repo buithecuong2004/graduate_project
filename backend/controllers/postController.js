@@ -6,7 +6,15 @@ import User from "../models/User.js";
 import axios from "axios";
 import { getUniqueNotificationRecipientIds } from "../utils/notificationRecipients.js";
 
-const getPostCommentCount = (postId) => Comment.countDocuments({ post: postId })
+const visibleForUserFilter = (userId) => ({
+    is_hidden: { $ne: true },
+    hidden_for: { $ne: userId }
+})
+
+const getPostCommentCount = (postId, userId = null) => Comment.countDocuments({
+    post: postId,
+    ...(userId ? visibleForUserFilter(userId) : {})
+})
 
 const emitPostRoomEvent = (req, postId, event, payload = {}) => {
     const io = req.app.locals.io
@@ -237,7 +245,7 @@ export const getFeedPosts = async (req, res) => {
         }
 
         const candidatePoolSize = Math.max(skip + limitNum * 5, 100)
-        const candidatePosts = await Post.find({ is_hidden: { $ne: true } })
+        const candidatePosts = await Post.find(visibleForUserFilter(userId))
             .populate('user')
             .populate({
                 path: 'shared_from',
@@ -250,7 +258,7 @@ export const getFeedPosts = async (req, res) => {
         const scoredPosts = await Promise.all(candidatePosts
             .filter(post => post.user)
             .map(async (post) => {
-                const totalComments = await Comment.countDocuments({ post: post._id })
+                const totalComments = await getPostCommentCount(post._id, userId)
                 const postObj = { ...post.toObject(), total_comments_count: totalComments }
                 const postUserId = (postObj.user?._id || postObj.user)?.toString()
                 const isNetworkPost = networkIdSet.has(postUserId)
@@ -302,11 +310,12 @@ export const getPostById = async (req, res) => {
             return res.json({ success: false, message: 'Post not found' })
         }
 
-        if (post.is_hidden && viewer?.role !== 'admin') {
+        const isHiddenForViewer = (post.hidden_for || []).some((id) => id.toString() === req.userId)
+        if ((post.is_hidden || isHiddenForViewer) && viewer?.role !== 'admin') {
             return res.json({ success: false, message: 'Post not found' })
         }
 
-        const totalComments = await Comment.countDocuments({ post: postId })
+        const totalComments = await getPostCommentCount(postId, req.userId)
         const postWithCount = { ...post.toObject(), total_comments_count: totalComments }
 
         res.json({ success: true, post: postWithCount })
@@ -438,13 +447,15 @@ export const getComments = async (req, res) => {
         // Get total count of top-level comments
         const totalComments = await Comment.countDocuments({
             post: postId,
-            parent_comment_id: { $in: [null, undefined] }
+            parent_comment_id: { $in: [null, undefined] },
+            ...visibleForUserFilter(req.userId)
         })
 
         // Only fetch top-level comments (not replies) with pagination
         let comments = await Comment.find({
             post: postId,
-            parent_comment_id: { $in: [null, undefined] }
+            parent_comment_id: { $in: [null, undefined] },
+            ...visibleForUserFilter(req.userId)
         })
             .populate('reactions.user', 'username profile_picture full_name _id')
             .sort({createdAt: -1})
@@ -462,7 +473,7 @@ export const getComments = async (req, res) => {
         )
 
         const hasMore = skip + parseInt(limit) < totalComments
-        const totalCommentsCount = await getPostCommentCount(postId)
+        const totalCommentsCount = await getPostCommentCount(postId, req.userId)
 
         res.json({ success: true, comments, hasMore, page: parseInt(page), totalCommentsCount })
     } catch (error) {
@@ -681,6 +692,49 @@ export const deletePost = async (req, res) => {
     }
 }
 
+export const hidePostForUser = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { postId } = req.body
+
+        const post = await Post.findByIdAndUpdate(
+            postId,
+            { $addToSet: { hidden_for: userId } },
+            { new: true }
+        ).select('_id')
+
+        if (!post) return res.json({ success: false, message: 'Post not found' })
+
+        res.json({ success: true, message: 'Post hidden', postId })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+export const hideCommentForUser = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { commentId } = req.body
+
+        const comment = await Comment.findById(commentId).select('post parent_comment_id')
+
+        if (!comment) return res.json({ success: false, message: 'Comment not found' })
+
+        const hideFilter = comment.parent_comment_id
+            ? { _id: comment._id }
+            : { $or: [{ _id: comment._id }, { parent_comment_id: comment._id }] }
+
+        await Comment.updateMany(hideFilter, { $addToSet: { hidden_for: userId } })
+
+        const totalCommentsCount = await getPostCommentCount(comment.post, userId)
+        res.json({ success: true, message: 'Comment hidden', commentId, totalCommentsCount })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
 // Add reply to a comment
 export const addReply = async (req, res) => {
     try {
@@ -769,7 +823,7 @@ export const getReplies = async (req, res) => {
             return res.json({ success: true, replies: [] })
         }
 
-        let replies = await Comment.find({ _id: { $in: parentComment.replies } })
+        let replies = await Comment.find({ _id: { $in: parentComment.replies }, ...visibleForUserFilter(req.userId) })
             .populate('reactions.user', 'username profile_picture full_name _id')
             .sort({createdAt: 1})
 

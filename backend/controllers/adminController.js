@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Comment from '../models/Comment.js';
+import Message from '../models/Message.js';
 import Post from '../models/Post.js';
 import Report from '../models/Report.js';
 import User from '../models/User.js';
@@ -7,6 +8,10 @@ import User from '../models/User.js';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USER_PUBLIC_FIELDS = 'full_name username email profile_picture role account_status isOnline lastSeen createdAt locked_at locked_reason';
 const GROWTH_DAY_OPTIONS = new Set([1, 7, 30, 90, 180, 365]);
+const POST_SHARED_POPULATE = {
+    path: 'shared_from',
+    populate: { path: 'user', select: USER_PUBLIC_FIELDS }
+};
 
 const startOfDay = (date = new Date()) => {
     const nextDate = new Date(date);
@@ -19,6 +24,17 @@ const parseLimit = (value, fallback = 20, max = 100) => Math.min(Math.max(parseI
 const parseGrowthDays = (value) => {
     const days = parseInt(value, 10);
     return GROWTH_DAY_OPTIONS.has(days) ? days : 7;
+};
+
+const getPercentChange = (current = 0, previous = 0) => {
+    const currentValue = Number(current) || 0;
+    const previousValue = Number(previous) || 0;
+
+    if (currentValue === previousValue) return 0;
+    if (previousValue <= 0) return currentValue > 0 ? 100 : 0;
+
+    const percent = Math.round(((currentValue - previousValue) / previousValue) * 100);
+    return Math.max(-100, Math.min(100, percent));
 };
 
 const arraySize = (value) => Array.isArray(value) ? value.length : 0;
@@ -78,6 +94,69 @@ const buildPostAdminPayload = (post, stats = {}) => {
         reports_count: stats.reportsCount || 0,
         pending_reports_count: stats.pendingReportsCount || 0
     };
+};
+
+const hydrateReports = async (reports = []) => {
+    const idsByType = reports.reduce((acc, report) => {
+        const type = report.target_type;
+        if (!acc[type]) acc[type] = [];
+        if (report.target_id) acc[type].push(report.target_id);
+        return acc;
+    }, {});
+
+    const [posts, comments, messages, users] = await Promise.all([
+        idsByType.post?.length
+            ? Post.find({ _id: { $in: idsByType.post } })
+                .populate('user', USER_PUBLIC_FIELDS)
+                .populate(POST_SHARED_POPULATE)
+                .lean()
+            : [],
+        idsByType.comment?.length
+            ? Comment.find({ _id: { $in: idsByType.comment } })
+                .populate('user', USER_PUBLIC_FIELDS)
+                .populate({
+                    path: 'post',
+                    populate: [
+                        { path: 'user', select: USER_PUBLIC_FIELDS },
+                        POST_SHARED_POPULATE
+                    ]
+                })
+                .lean()
+            : [],
+        idsByType.message?.length
+            ? Message.find({ _id: { $in: idsByType.message } })
+                .populate('from_user_id', USER_PUBLIC_FIELDS)
+                .populate('to_user_id', USER_PUBLIC_FIELDS)
+                .populate({
+                    path: 'shared_post_id',
+                    populate: [
+                        { path: 'user', select: USER_PUBLIC_FIELDS },
+                        POST_SHARED_POPULATE
+                    ]
+                })
+                .lean()
+            : [],
+        idsByType.user?.length
+            ? User.find({ _id: { $in: idsByType.user } }).select(USER_PUBLIC_FIELDS).lean()
+            : []
+    ]);
+
+    const targetMaps = {
+        post: new Map(posts.map((post) => [post._id.toString(), post])),
+        comment: new Map(comments.map((comment) => [comment._id.toString(), comment])),
+        message: new Map(messages.map((message) => [message._id.toString(), message])),
+        user: new Map(users.map((user) => [user._id.toString(), user]))
+    };
+
+    return reports.map((report) => {
+        const reportObject = report.toObject ? report.toObject() : report;
+        const target = targetMaps[reportObject.target_type]?.get(reportObject.target_id?.toString()) || null;
+        return {
+            ...reportObject,
+            target,
+            target_id: target || reportObject.target_id
+        };
+    });
 };
 
 const getGrowthStart = (days = 14) => startOfDay(new Date(Date.now() - (days - 1) * DAY_MS));
@@ -176,7 +255,10 @@ const getShareGrowth = async (days = 14) => {
 export const getAdminDashboard = async (req, res) => {
     try {
         const today = startOfDay();
+        const yesterday = new Date(today.getTime() - DAY_MS);
         const weekStart = new Date(today.getTime() - 6 * DAY_MS);
+        const beforeTodayFilter = { createdAt: { $lt: today } };
+        const yesterdayFilter = { createdAt: { $gte: yesterday, $lt: today } };
         const growthDays = parseGrowthDays(req.query.growthDays || req.query.days);
 
         const [
@@ -187,8 +269,21 @@ export const getAdminDashboard = async (req, res) => {
             pendingReports,
             newUsersToday,
             newUsersThisWeek,
+            newPostsToday,
+            newPostsThisWeek,
+            newCommentsToday,
+            newCommentsThisWeek,
+            newReportsToday,
+            newReportsThisWeek,
+            usersBeforeToday,
+            postsBeforeToday,
+            commentsBeforeToday,
+            reportsBeforeToday,
+            newUsersYesterday,
             postReactionTotals,
             commentReactionTotals,
+            postReactionBeforeTodayTotals,
+            commentReactionBeforeTodayTotals,
             usersGrowth,
             postsGrowth,
             commentsGrowth,
@@ -203,6 +298,17 @@ export const getAdminDashboard = async (req, res) => {
             Report.countDocuments({ status: 'pending' }),
             User.countDocuments({ createdAt: { $gte: today } }),
             User.countDocuments({ createdAt: { $gte: weekStart } }),
+            Post.countDocuments({ createdAt: { $gte: today } }),
+            Post.countDocuments({ createdAt: { $gte: weekStart } }),
+            Comment.countDocuments({ createdAt: { $gte: today } }),
+            Comment.countDocuments({ createdAt: { $gte: weekStart } }),
+            Report.countDocuments({ createdAt: { $gte: today } }),
+            Report.countDocuments({ createdAt: { $gte: weekStart } }),
+            User.countDocuments(beforeTodayFilter),
+            Post.countDocuments(beforeTodayFilter),
+            Comment.countDocuments(beforeTodayFilter),
+            Report.countDocuments(beforeTodayFilter),
+            User.countDocuments(yesterdayFilter),
             Post.aggregate([
                 {
                     $group: {
@@ -222,6 +328,26 @@ export const getAdminDashboard = async (req, res) => {
                     }
                 }
             ]),
+            Post.aggregate([
+                { $match: beforeTodayFilter },
+                {
+                    $group: {
+                        _id: null,
+                        oldLikes: { $sum: { $size: { $ifNull: ['$likes_count', []] } } },
+                        reactions: { $sum: { $size: { $ifNull: ['$reactions', []] } } }
+                    }
+                }
+            ]),
+            Comment.aggregate([
+                { $match: beforeTodayFilter },
+                {
+                    $group: {
+                        _id: null,
+                        oldLikes: { $sum: { $size: { $ifNull: ['$likes_count', []] } } },
+                        reactions: { $sum: { $size: { $ifNull: ['$reactions', []] } } }
+                    }
+                }
+            ]),
             getGrowth(User, growthDays),
             getGrowth(Post, growthDays),
             getGrowth(Comment, growthDays),
@@ -229,6 +355,7 @@ export const getAdminDashboard = async (req, res) => {
             getShareGrowth(growthDays),
             Post.find({})
                 .populate('user', USER_PUBLIC_FIELDS)
+                .populate(POST_SHARED_POPULATE)
                 .sort({ createdAt: -1 })
                 .limit(100)
         ]);
@@ -242,6 +369,11 @@ export const getAdminDashboard = async (req, res) => {
 
         const postTotals = postReactionTotals[0] || { oldLikes: 0, reactions: 0, shares: 0 };
         const commentTotals = commentReactionTotals[0] || { oldLikes: 0, reactions: 0 };
+        const postBeforeTodayTotals = postReactionBeforeTodayTotals[0] || { oldLikes: 0, reactions: 0 };
+        const commentBeforeTodayTotals = commentReactionBeforeTodayTotals[0] || { oldLikes: 0, reactions: 0 };
+        const likesReactions = postTotals.oldLikes + postTotals.reactions + commentTotals.oldLikes + commentTotals.reactions;
+        const likesReactionsBeforeToday = postBeforeTodayTotals.oldLikes + postBeforeTodayTotals.reactions + commentBeforeTodayTotals.oldLikes + commentBeforeTodayTotals.reactions;
+        const likesReactionsToday = Math.max(likesReactions - likesReactionsBeforeToday, 0);
 
         res.json({
             success: true,
@@ -252,14 +384,30 @@ export const getAdminDashboard = async (req, res) => {
                     comments: totalComments,
                     reports: totalReports,
                     pendingReports,
-                    likesReactions: postTotals.oldLikes + postTotals.reactions + commentTotals.oldLikes + commentTotals.reactions,
+                    likesReactions,
                     postLikes: postTotals.oldLikes,
                     postReactions: postTotals.reactions,
                     commentLikes: commentTotals.oldLikes,
                     commentReactions: commentTotals.reactions,
                     shares: postTotals.shares,
                     newUsersToday,
-                    newUsersThisWeek
+                    newUsersThisWeek,
+                    newPostsToday,
+                    newPostsThisWeek,
+                    newCommentsToday,
+                    newCommentsThisWeek,
+                    newReportsToday,
+                    newReportsThisWeek,
+                    likesReactionsToday,
+                    growthPercent: {
+                        users: getPercentChange(totalUsers, usersBeforeToday),
+                        posts: getPercentChange(totalPosts, postsBeforeToday),
+                        comments: getPercentChange(totalComments, commentsBeforeToday),
+                        reports: getPercentChange(totalReports, reportsBeforeToday),
+                        likesReactions: getPercentChange(likesReactions, likesReactionsBeforeToday),
+                        newUsersToday: getPercentChange(newUsersToday, newUsersYesterday),
+                        newUsersThisWeek: getPercentChange(newUsersToday, newUsersYesterday)
+                    }
                 },
                 topPosts,
                 growthDays,
@@ -390,6 +538,7 @@ export const getAdminPosts = async (req, res) => {
         const [posts, total] = await Promise.all([
             Post.find(filter)
                 .populate('user', USER_PUBLIC_FIELDS)
+                .populate(POST_SHARED_POPULATE)
                 .populate('hidden_by', USER_PUBLIC_FIELDS)
                 .sort({ createdAt: -1 })
                 .skip((page - 1) * limit)
@@ -419,7 +568,9 @@ export const updateAdminPostVisibility = async (req, res) => {
             ? { is_hidden: true, hidden_at: new Date(), hidden_by: req.userId, hidden_reason: reason || '' }
             : { is_hidden: false, hidden_at: null, hidden_by: null, hidden_reason: '' };
 
-        const post = await Post.findByIdAndUpdate(postId, update, { new: true }).populate('user', USER_PUBLIC_FIELDS);
+        const post = await Post.findByIdAndUpdate(postId, update, { new: true })
+            .populate('user', USER_PUBLIC_FIELDS)
+            .populate(POST_SHARED_POPULATE);
         if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
         if (is_hidden) {
@@ -486,25 +637,29 @@ export const getAdminReports = async (req, res) => {
         const page = parsePage(req.query.page);
         const limit = parseLimit(req.query.limit);
         const status = (req.query.status || 'all').trim();
+        const targetType = (req.query.target_type || req.query.type || 'all').trim();
         const filter = {};
 
         if (status !== 'all') filter.status = status;
+        if (targetType !== 'all') {
+            if (!['post', 'comment', 'message', 'user'].includes(targetType)) {
+                return res.status(400).json({ success: false, message: 'Invalid report category' });
+            }
+            filter.target_type = targetType;
+        }
 
         const [reports, total] = await Promise.all([
             Report.find(filter)
                 .populate('reporter', USER_PUBLIC_FIELDS)
-                .populate({
-                    path: 'target_id',
-                    populate: { path: 'user', select: USER_PUBLIC_FIELDS }
-                })
                 .populate('resolved_by', USER_PUBLIC_FIELDS)
                 .sort({ createdAt: -1 })
                 .skip((page - 1) * limit)
-                .limit(limit),
+                .limit(limit)
+                .lean(),
             Report.countDocuments(filter)
         ]);
 
-        res.json({ success: true, reports, total, page, hasMore: page * limit < total });
+        res.json({ success: true, reports: await hydrateReports(reports), total, page, hasMore: page * limit < total });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -532,18 +687,42 @@ export const updateAdminReport = async (req, res) => {
         report.resolved_at = new Date();
         await report.save();
 
-        if (action === 'approve' && report.target_type === 'post') {
-            await Promise.all([
-                Post.findByIdAndUpdate(report.target_id, {
+        if (action === 'approve') {
+            const moderationUpdate = {
+                post: () => Post.findByIdAndUpdate(report.target_id, {
                     is_hidden: true,
                     hidden_at: new Date(),
                     hidden_by: req.userId,
                     hidden_reason: resolution_note || 'Report approved'
                 }),
+                comment: () => Comment.findByIdAndUpdate(report.target_id, {
+                    is_hidden: true,
+                    hidden_at: new Date(),
+                    hidden_by: req.userId,
+                    hidden_reason: resolution_note || 'Report approved'
+                }),
+                message: () => Message.findByIdAndUpdate(report.target_id, {
+                    is_deleted: true,
+                    text: '',
+                    searchText: '',
+                    searchTokens: [],
+                    media_urls: [],
+                    media_ids: []
+                }),
+                user: () => User.findByIdAndUpdate(report.target_id, {
+                    account_status: 'locked',
+                    locked_at: new Date(),
+                    locked_reason: resolution_note || 'Report approved',
+                    isOnline: false
+                })
+            }[report.target_type];
+
+            await Promise.all([
+                moderationUpdate ? moderationUpdate() : Promise.resolve(),
                 Report.updateMany(
                     {
                         _id: { $ne: report._id },
-                        target_type: 'post',
+                        target_type: report.target_type,
                         target_id: report.target_id,
                         status: 'pending'
                     },
@@ -559,13 +738,10 @@ export const updateAdminReport = async (req, res) => {
             ]);
         }
 
-        const populatedReport = await Report.findById(reportId)
+        const [populatedReport] = await hydrateReports([await Report.findById(reportId)
             .populate('reporter', USER_PUBLIC_FIELDS)
-            .populate({
-                path: 'target_id',
-                populate: { path: 'user', select: USER_PUBLIC_FIELDS }
-            })
-            .populate('resolved_by', USER_PUBLIC_FIELDS);
+            .populate('resolved_by', USER_PUBLIC_FIELDS)
+            .lean()]);
 
         res.json({ success: true, report: populatedReport });
     } catch (error) {

@@ -6,6 +6,7 @@ import { promisify } from 'util'
 import User from '../models/User.js'
 import sendEmail from '../configs/nodeMailer.js'
 import { getFrontendUrl } from '../utils/appUrl.js'
+import { ACCOUNT_LOCKED_CODE, ACCOUNT_LOCKED_MESSAGE, sendAccountLocked } from '../utils/authMessages.js'
 import { getDefaultProfilePictureUrl } from '../utils/defaultProfilePicture.js'
 
 const authRouter = express.Router()
@@ -197,7 +198,7 @@ authRouter.post('/login', async (req, res) => {
         }
 
         if (user.account_status === 'locked') {
-            return res.json({ success: false, message: 'Account is locked' })
+            return res.json({ success: false, code: ACCOUNT_LOCKED_CODE, message: ACCOUNT_LOCKED_MESSAGE })
         }
 
         const token = generateToken(user)
@@ -353,6 +354,9 @@ authRouter.get('/me', async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET)
 
         const user = await User.findById(decoded.userId)
+        if (user?.account_status === 'locked') {
+            return sendAccountLocked(res)
+        }
         res.json({ success: true, userId: decoded.userId, user: user ? buildAuthUser(user) : null })
     } catch (error) {
         res.json({ success: false, message: 'Invalid or expired token' })

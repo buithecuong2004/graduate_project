@@ -23,7 +23,7 @@ import { fetchUser } from '../../features/user/userSlice'
 const FLOATING_REACTION_WIDTH = 292
 const FLOATING_REACTION_HEIGHT = 64
 const FLOATING_MENU_WIDTH = 156
-const FLOATING_MENU_HEIGHT = 132
+const FLOATING_MENU_HEIGHT = 168
 const PROFILE_MENU_WIDTH = 260
 const PROFILE_MENU_HEIGHT = 272
 const MESSAGE_PAGE_SIZE = 30
@@ -1007,6 +1007,48 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
     setPendingDialog('block-user')
   }
 
+  const handleReportUser = async () => {
+    if (!userId) return
+
+    setProfileMenuOpen(false)
+    try {
+      const token = await getToken()
+      const { data } = await api.post(
+        `/api/report/user/${userId}`,
+        { reason: 'other', details: 'Báo cáo người dùng từ đoạn chat' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (data.success) {
+        toast.success(data.message === 'Report already pending' ? 'Bạn đã báo cáo người dùng này' : 'Đã gửi báo cáo')
+      } else {
+        toast.error(localizeMessage(data.message))
+      }
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    }
+  }
+
+  const handleReportMessage = async (messageId) => {
+    if (!messageId) return
+
+    closeMessageActions()
+    try {
+      const token = await getToken()
+      const { data } = await api.post(
+        `/api/report/message/${messageId}`,
+        { reason: 'other', details: 'Báo cáo tin nhắn trong đoạn chat' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (data.success) {
+        toast.success(data.message === 'Report already pending' ? 'Bạn đã báo cáo tin nhắn này' : 'Đã gửi báo cáo')
+      } else {
+        toast.error(localizeMessage(data.message))
+      }
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    }
+  }
+
   const closeConfirmDialog = () => {
     if (!isDialogLoading) setPendingDialog(null)
   }
@@ -1982,10 +2024,10 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
           )}
           <button
             type='button'
-            onClick={() => setProfileMenuOpen(false)}
-            className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-400 hover:bg-slate-50'
+            onClick={handleReportUser}
+            className='flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-amber-700 hover:bg-amber-50'
           >
-            <Flag className='size-5 text-slate-400' />
+            <Flag className='size-5 text-amber-700' />
             Báo cáo vi phạm
           </button>
         </div>,
@@ -2032,6 +2074,13 @@ const ChatBox = ({ onStartCall, chatUserId, variant = 'page', onClose, scrollToM
             className='flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50'
           >
             <CornerUpRight size={13} /> Chuyển tiếp
+          </button>
+          <button
+            type='button'
+            onClick={() => handleReportMessage(floatingActionMessage._id)}
+            className='flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-amber-700 hover:bg-amber-50'
+          >
+            <Flag size={13} /> Báo cáo
           </button>
           {floatingActionIsOwn && (
             <button
