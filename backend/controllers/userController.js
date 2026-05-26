@@ -9,6 +9,13 @@ import { promisify } from 'util'
 import { getConversationBlockStatus } from "../utils/blocking.js"
 
 const scryptAsync = promisify(crypto.scrypt)
+const VISIBLE_USER_ROLE = 'user'
+
+const isVisibleUser = (user, currentUserId) => (
+    user &&
+    user.role === VISIBLE_USER_ROLE &&
+    user._id?.toString?.() !== currentUserId?.toString?.()
+)
 
 const hashPassword = async (password) => {
     const salt = crypto.randomBytes(16).toString('hex')
@@ -211,16 +218,17 @@ export const discoverUsers = async (req,res) => {
         if(!currentUser) {
             return res.json({success: false, message: "User not found"})
         }
-        const query = input
-            ? {
+        const query = {
+            role: VISIBLE_USER_ROLE,
+            ...(input ? {
                 $or: [
                     {username: new RegExp(input, 'i')},
                     {email: new RegExp(input, 'i')},
                     {full_name: new RegExp(input, 'i')},
                     {location: new RegExp(input, 'i')},
                 ]
-            }
-            : {}
+            } : {})
+        }
         const allUsers = await User.find(query)
         const targetUsers = allUsers.filter(user => user._id.toString() !== userId)
         const targetUserIds = targetUsers.map(user => user._id)
@@ -281,7 +289,14 @@ export const followUser = async (req,res) => {
         const userId = req.userId
         const { id } = req.body
 
-       const user = await User.findById(userId)
+       const [user, toUser] = await Promise.all([
+            User.findById(userId),
+            User.findOne({_id: id, role: VISIBLE_USER_ROLE})
+       ])
+
+       if(!user || user.role !== VISIBLE_USER_ROLE || !isVisibleUser(toUser, userId)) {
+            return res.json({success: false, message: 'User not found'})
+       }
 
        if(user.following.map(fid => fid.toString()).includes(id)){
             return res.json({success: false, message: 'You are already following this user'})
@@ -290,7 +305,6 @@ export const followUser = async (req,res) => {
        user.following.push(id)
        await user.save()
 
-       const toUser = await User.findById(id)
        toUser.followers.push(userId)
        await toUser.save()
 
@@ -328,6 +342,15 @@ export const sendConnectionRequest = async (req, res) => {
         const userId = req.userId
         const {id} = req.body
 
+        const [requestingUser, targetUser] = await Promise.all([
+            User.findById(userId),
+            User.findOne({_id: id, role: VISIBLE_USER_ROLE})
+        ])
+
+        if(!requestingUser || requestingUser.role !== VISIBLE_USER_ROLE || !isVisibleUser(targetUser, userId)) {
+            return res.json({success: false, message: 'User not found'})
+        }
+
         const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000)
         const connectionRequests = await Connection.find({from_user_id: userId, createdAt: { $gt: last24Hours }})
         if(connectionRequests.length >= 20) {
@@ -347,20 +370,19 @@ export const sendConnectionRequest = async (req, res) => {
                 to_user_id: id
             })
 
-            const [, , requesterUser] = await Promise.all([
+            await Promise.all([
                 User.findByIdAndUpdate(userId, { $addToSet: { following: id } }),
-                User.findByIdAndUpdate(id, { $addToSet: { followers: userId } }),
-                User.findById(userId)
+                User.findByIdAndUpdate(id, { $addToSet: { followers: userId } })
             ])
 
             // Send friend request notification via socket
             const io = req.app.locals.io
-            if(io && requesterUser) {
+            if(io && requestingUser) {
                 const requesterData = {
-                    _id: requesterUser._id,
-                    full_name: requesterUser.full_name,
-                    username: requesterUser.username,
-                    profile_picture: requesterUser.profile_picture
+                    _id: requestingUser._id,
+                    full_name: requestingUser.full_name,
+                    username: requestingUser.username,
+                    profile_picture: requestingUser.profile_picture
                 }
                 const friendRequestNotification = {
                     type: 'friend_request',
@@ -419,20 +441,25 @@ export const cancelConnectionRequest = async (req, res) => {
 export const getUserConnections = async (req, res) => {
     try {
         const userId = req.userId
-        const user = await User.findById(userId).populate('connections followers following')
+        const user = await User.findById(userId)
+            .populate({ path: 'connections', match: { role: VISIBLE_USER_ROLE } })
+            .populate({ path: 'followers', match: { role: VISIBLE_USER_ROLE } })
+            .populate({ path: 'following', match: { role: VISIBLE_USER_ROLE } })
 
         // If user not yet in DB (race condition on first login), return empty
         if(!user) return res.json({success: true, connections: [], followers: [], following: [], pendingConnections: []})
 
-        // Filter out null values from arrays (can happen when a referenced user was deleted)
-        const isNotCurrentUser = (item) => item && item._id?.toString?.() !== userId
-        const connections = (user.connections || []).filter(isNotCurrentUser)
-        const followers = (user.followers || []).filter(isNotCurrentUser)
-        const following = (user.following || []).filter(isNotCurrentUser)
+        // Filter out null values from deleted users or populate role mismatches.
+        const connections = (user.connections || []).filter(item => isVisibleUser(item, userId))
+        const followers = (user.followers || []).filter(item => isVisibleUser(item, userId))
+        const following = (user.following || []).filter(item => isVisibleUser(item, userId))
 
-        const pendingConnections = (await Connection.find({to_user_id: userId, status: 'pending'}).populate('from_user_id'))
+        const pendingConnections = (await Connection.find({to_user_id: userId, status: 'pending'}).populate({
+            path: 'from_user_id',
+            match: { role: VISIBLE_USER_ROLE }
+        }))
             .map(connection => connection.from_user_id)
-            .filter(isNotCurrentUser)
+            .filter(item => isVisibleUser(item, userId))
 
         res.json({success: true, connections, followers, following, pendingConnections})
 
@@ -537,13 +564,17 @@ export const acceptConnectionRequest = async (req, res) => {
             return res.json({success: false, message: 'Connection not found'})
         }
 
-        const user = await User.findById(userId);
-        user.connections.push(id)
-        await user.save()
+        const [user, toUser] = await Promise.all([
+            User.findById(userId),
+            User.findOne({_id: id, role: VISIBLE_USER_ROLE})
+        ])
 
-        const toUser = await User.findById(id);
+        if(!user || user.role !== VISIBLE_USER_ROLE || !isVisibleUser(toUser, userId)) {
+            return res.json({success: false, message: 'User not found'})
+        }
+        user.connections.push(id)
         toUser.connections.push(userId)
-        await toUser.save()
+        await Promise.all([user.save(), toUser.save()])
 
         connection.status = 'accepted'
         await connection.save()

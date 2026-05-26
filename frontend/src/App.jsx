@@ -2,16 +2,16 @@ import React, { useCallback } from 'react'
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
-import Feed from './pages/Feed'
-import Message from './pages/Message'
-import Connections from './pages/Connections'
-import Discover from './pages/Discover'
-import Profile from './pages/Profile'
-import CreatePost from './pages/CreatePost'
-import PostDetail from './pages/PostDetail'
-import Admin from './pages/Admin'
+import Feed from './pages/user/Feed'
+import Message from './pages/user/Message'
+import Connections from './pages/user/Connections'
+import Discover from './pages/user/Discover'
+import Profile from './pages/user/Profile'
+import CreatePost from './pages/user/CreatePost'
+import PostDetail from './pages/user/PostDetail'
+import Admin from './pages/admin/Admin'
 import { useAuth } from './context/AuthContext'
-import Layout from './pages/Layout'
+import Layout from './pages/user/Layout'
 import toast, { Toaster } from 'react-hot-toast'
 import { useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
@@ -25,8 +25,8 @@ import { addStoryLocal, deleteStoryLocal, updateStoryReactionsLocal } from './fe
 import { Navigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { SocketProvider, useSocket } from './context/SocketContext'
-import CallModal from './components/CallModal'
-import Loading from './components/Loading'
+import CallModal from './components/user/CallModal'
+import Loading from './components/user/Loading'
 import api from './api/axios'
 
 const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
@@ -104,7 +104,7 @@ const AppInner = () => {
   }, [pathname])
 
   useEffect(() => {
-    if (isAuthenticated && currentUser?.role === 'admin' && pathname !== '/admin' && !pathname.startsWith('/auth/')) {
+    if (isAuthenticated && currentUser?.role === 'admin' && !pathname.startsWith('/admin') && !pathname.startsWith('/auth/')) {
       navigate('/admin', { replace: true })
     }
   }, [currentUser?.role, isAuthenticated, navigate, pathname])
@@ -353,11 +353,7 @@ const AppInner = () => {
 
   // Show loading while verifying auth
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50">
-        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    )
+    return <Loading />
   }
 
   return (
@@ -365,7 +361,7 @@ const AppInner = () => {
       <Toaster />
       <Routes>
         <Route path='/auth/callback' element={<AuthCallback />} />
-        <Route path='/admin' element={isAuthenticated ? <AdminRoute currentUser={currentUser} /> : <Login />} />
+        <Route path='/admin/*' element={isAuthenticated ? <AdminRoute currentUser={currentUser} /> : <Login />} />
         <Route path='/' element={isAuthenticated ? <Layout onStartCall={handleStartCall} /> : <Login />}>
           <Route index element={<HomeRedirect currentUser={currentUser} />} />
           <Route path='feed' element={<Feed />} />
