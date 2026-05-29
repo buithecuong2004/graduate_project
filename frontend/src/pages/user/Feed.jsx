@@ -1,14 +1,19 @@
-import React, { useEffect, useRef } from 'react'
-import { Sparkles } from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { LoaderCircle, Radio } from 'lucide-react'
 import { assets } from '../../assets/assets'
 import Loading from '../../components/user/Loading'
 import StoriesBar from '../../components/user/StoriesBar'
 import PostCard from '../../components/user/PostCard'
 import RecentMessages from '../../components/user/RecentMessages'
 import { useAuth } from '../../context/AuthContext'
+import { useSocket } from '../../context/SocketContext'
 import { useDispatch, useSelector } from 'react-redux'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { fetchPosts, deletePost } from '../../features/posts/postSlice'
+import api from '../../api/axios'
+import toast from 'react-hot-toast'
+import localizeMessage from '../../utils/localization'
+import moment from '../../utils/moment'
 
 const SUGGESTED_INJECT_INTERVAL = 5
 
@@ -46,11 +51,15 @@ const buildInterleavedFeed = (posts = [], suggestedPosts = []) => {
 
 const Feed = () => {
   const location = useLocation()
+  const navigate = useNavigate()
   const dispatch = useDispatch()
   const { posts, suggestedPosts, loading, hasMore, page } = useSelector((state) => state.posts)
   const { getToken } = useAuth()
+  const { socketRef, socket } = useSocket()
   const feedRef = useRef(null)
   const isLoadingMore = useRef(false)
+  const [activeLiveStreams, setActiveLiveStreams] = useState([])
+  const [isStartingLive, setIsStartingLive] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -62,6 +71,67 @@ const Feed = () => {
 
   const handlePostDeleted = (postId) => {
     dispatch(deletePost(postId))
+  }
+
+  const loadActiveLiveStreams = useCallback(async () => {
+    try {
+      const token = await getToken()
+      const { data } = await api.get('/api/live/active', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (data.success) setActiveLiveStreams(data.streams || [])
+    } catch (error) {
+      console.error('active live streams error:', error)
+    }
+  }, [getToken])
+
+  useEffect(() => {
+    loadActiveLiveStreams()
+  }, [loadActiveLiveStreams, location.state?.refresh])
+
+  useEffect(() => {
+    const activeSocket = socket || socketRef?.current
+    if (!activeSocket) return undefined
+
+    const handleLiveStarted = (stream) => {
+      if (!stream?._id) return
+      setActiveLiveStreams((items) => [stream, ...items.filter((item) => item._id !== stream._id)])
+    }
+
+    const handleLiveEnded = ({ streamId }) => {
+      if (!streamId) return
+      setActiveLiveStreams((items) => items.filter((stream) => stream._id !== streamId))
+    }
+
+    activeSocket.on('live-stream-started', handleLiveStarted)
+    activeSocket.on('live-stream-ended', handleLiveEnded)
+
+    return () => {
+      activeSocket.off('live-stream-started', handleLiveStarted)
+      activeSocket.off('live-stream-ended', handleLiveEnded)
+    }
+  }, [socket, socketRef])
+
+  const handleStartLive = async () => {
+    if (isStartingLive) return
+
+    try {
+      setIsStartingLive(true)
+      const token = await getToken()
+      const { data } = await api.post('/api/live/start', {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (data.success && data.stream?._id) {
+        navigate(`/live/${data.stream._id}`, { state: { isHost: true } })
+      } else {
+        toast.error(localizeMessage(data.message))
+      }
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setIsStartingLive(false)
+    }
   }
 
   const sentinelRef = useRef(null)
@@ -110,11 +180,54 @@ const Feed = () => {
                   <h1 className='page-title !text-[1.75rem] sm:!text-[2.25rem] lg:!text-[2.5rem]'>Hôm nay có gì mới?</h1>
                   <p className='page-subtitle mt-3 max-w-xl'>Theo dõi bài viết, story và những cập nhật mới từ mạng lưới của bạn.</p>
                 </div>
+                <button
+                  type='button'
+                  onClick={handleStartLive}
+                  disabled={isStartingLive}
+                  className='btn-primary h-12 px-5 text-sm disabled:cursor-not-allowed disabled:opacity-60'
+                >
+                  {isStartingLive ? <LoaderCircle className='size-5 animate-spin' /> : <Radio className='size-5' />}
+                  Livestream
+                </button>
               </div>
               <div className='mt-5'>
                 <StoriesBar refreshTrigger={location.state?.refresh}/>
               </div>
             </section>
+
+            {activeLiveStreams.length > 0 && (
+              <section className='mb-6 surface rounded-[1.5rem] p-4'>
+                <div className='mb-3 flex items-center justify-between gap-3'>
+                  <div>
+                    <p className='page-kicker'>Đang trực tiếp</p>
+                    <h2 className='text-lg font-black text-slate-950'>Livestream từ mạng lưới của bạn</h2>
+                  </div>
+                  <span className='rounded-full bg-red-50 px-3 py-1 text-xs font-black text-red-600'>{activeLiveStreams.length} LIVE</span>
+                </div>
+                <div className='grid gap-3 sm:grid-cols-2'>
+                  {activeLiveStreams.map((stream) => (
+                    <button
+                      key={stream._id}
+                      type='button'
+                      onClick={() => navigate(`/live/${stream._id}`)}
+                      className='group flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-cyan-200 hover:bg-cyan-50/50'
+                    >
+                      <div className='relative shrink-0'>
+                        <img src={stream.user?.profile_picture} alt='' className='size-12 rounded-full object-cover avatar-ring' />
+                        <span className='absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-black text-white'>LIVE</span>
+                      </div>
+                      <div className='min-w-0 flex-1'>
+                        <p className='truncate text-sm font-black text-slate-950'>{stream.user?.full_name || stream.user?.username}</p>
+                        <p className='truncate text-xs font-bold text-slate-500'>
+                          {stream.title || 'Đang livestream'} · {moment(stream.started_at || stream.createdAt).fromNow()}
+                        </p>
+                      </div>
+                      <Radio className='size-5 shrink-0 text-red-500 transition group-hover:scale-110' />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <div className='space-y-6'>
               {loading && page === 1

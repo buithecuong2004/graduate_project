@@ -9,6 +9,7 @@ import Discover from './pages/user/Discover'
 import Profile from './pages/user/Profile'
 import CreatePost from './pages/user/CreatePost'
 import PostDetail from './pages/user/PostDetail'
+import LiveStream from './pages/user/LiveStream'
 import Admin from './pages/admin/Admin'
 import { useAuth } from './context/AuthContext'
 import Layout from './pages/user/Layout'
@@ -236,6 +237,10 @@ const AppInner = () => {
           fetchRealtimeStory(notification?.data?.story_id || story?._id, story)
         })
 
+        socket.on('new-live-notification', (notification) => {
+          dispatch(addNotification(notification))
+        })
+
         socket.on('story-created', (story) => {
           fetchRealtimeStory(story?._id, story)
         })
@@ -373,6 +378,7 @@ const AppInner = () => {
           <Route path='profile/:profileId' element={<Profile />} />
           <Route path='create-post' element={<CreatePost />} />
           <Route path='post/:postId' element={<PostDetail />} />
+          <Route path='live/:streamId' element={<LiveStream />} />
         </Route>
       </Routes>
 

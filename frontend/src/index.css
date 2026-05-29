@@ -23,6 +23,20 @@ body {
     color: #0f172a;
 }
 
+@keyframes floatLiveReaction {
+    0% {
+        opacity: 0;
+        transform: translateY(1.5rem) scale(0.82);
+    }
+    15% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-9rem) scale(1.25);
+    }
+}
+
 .no-scrollbar::-webkit-scrollbar {
     display: none;
 }

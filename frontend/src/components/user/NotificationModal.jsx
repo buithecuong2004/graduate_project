@@ -17,6 +17,8 @@ const getNotificationIcon = (type) => {
             return '📖'
         case 'new_post':
             return '📝'
+        case 'new_live':
+            return 'LIVE'
         case 'new_comment':
         case 'new_reply':
             return '💬'
@@ -64,6 +66,8 @@ const getNotificationText = (notification) => {
             return `${data?.comment?.user?.full_name || data?.comment?.user?.username || 'Ai đó'} đã bình luận về bài viết của bạn`
         case 'new_reply':
             return `${data?.reply?.user?.full_name || data?.reply?.user?.username || 'Ai đó'} đã trả lời bình luận của bạn`
+        case 'new_live':
+            return `${actor || 'Ai đó'} đang livestream`
         case 'new_like':
             return `${actor || 'Ai đó'} thích ${data?.liked_type === 'post' ? 'bài viết' : 'bình luận'} của bạn`
         case 'new_reaction':
@@ -101,6 +105,9 @@ const NotificationModal = ({ isOpen, onClose }) => {
             case 'new_story':
             case 'new_post':
                 navigate('/feed', { state: { refresh } })
+                break
+            case 'new_live':
+                navigate(`/live/${data.live_id || data.stream?._id}`, { state: { refresh } })
                 break
             case 'new_comment':
                 navigate(`/post/${data.post_id}`, { state: { refresh, autoOpenComments: true } })

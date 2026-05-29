@@ -19,6 +19,8 @@ const getNotificationId = (notification = {}) => {
             return `new_story:${data.story_id || data.story?._id || Date.now()}`;
         case 'new_post':
             return `new_post:${data.post_id || data.post?._id || Date.now()}`;
+        case 'new_live':
+            return `new_live:${data.live_id || data.stream?._id || Date.now()}`;
         case 'new_comment':
             return `new_comment:${data.comment?._id || `${data.post_id}:${data.comment?.user?._id}` || Date.now()}`;
         case 'new_reply':

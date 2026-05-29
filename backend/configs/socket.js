@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import User from '../models/User.js';
+import LiveStream from '../models/LiveStream.js';
 import { isConversationBlocked } from '../utils/blocking.js';
 
 export const setupSocket = (server) => {
@@ -12,6 +13,7 @@ export const setupSocket = (server) => {
 
     // Store connected users with all active socket IDs so multiple tabs stay online.
     const connectedUsers = new Map();
+    const liveViewersByStream = new Map();
 
     const emitUserPresence = async (userId, isOnline) => {
         const lastSeen = new Date();
@@ -23,6 +25,46 @@ export const setupSocket = (server) => {
             isOnline,
             lastSeen: lastSeen.toISOString()
         });
+    };
+
+    const getLiveViewerCount = (streamId) => liveViewersByStream.get(streamId)?.size || 0;
+
+    const emitLiveViewerCount = async (streamId) => {
+        const viewers_count = getLiveViewerCount(streamId);
+
+        await LiveStream.findByIdAndUpdate(streamId, { viewers_count });
+        io.to(`live-${streamId}`).emit('live-viewer-count-updated', {
+            streamId,
+            viewers_count
+        });
+
+        return viewers_count;
+    };
+
+    const removeLiveViewer = async (socket, streamId) => {
+        const viewers = liveViewersByStream.get(streamId);
+        if (!viewers?.has(socket.id)) return;
+
+        const viewerId = viewers.get(socket.id);
+        viewers.delete(socket.id);
+        if (viewers.size === 0) liveViewersByStream.delete(streamId);
+
+        const stream = await LiveStream.findById(streamId).select('user');
+        const viewers_count = await emitLiveViewerCount(streamId);
+
+        if (stream?.user) {
+            io.to(`user-${stream.user}`).emit('live-viewer-left', {
+                streamId,
+                viewerSocketId: socket.id,
+                viewerId,
+                viewers_count
+            });
+        }
+    };
+
+    const removeSocketFromLiveStreams = async (socket) => {
+        const streamIds = Array.from(liveViewersByStream.keys());
+        await Promise.all(streamIds.map((streamId) => removeLiveViewer(socket, streamId)));
     };
 
     io.on('connection', (socket) => {
@@ -57,6 +99,74 @@ export const setupSocket = (server) => {
         // Leave a post room
         socket.on('leave-post', (postId) => {
             socket.leave(`post-${postId}`);
+        });
+
+        socket.on('join-live-stream', async ({ streamId, role = 'viewer' } = {}) => {
+            if (!streamId) return;
+
+            try {
+                const stream = await LiveStream.findById(streamId).select('user status');
+                if (!stream || stream.status !== 'live') {
+                    socket.emit('live-stream-ended', { streamId });
+                    return;
+                }
+
+                const normalizedStreamId = streamId.toString();
+                const normalizedUserId = socket.data.userId?.toString?.() || '';
+
+                socket.join(`live-${normalizedStreamId}`);
+
+                if (role === 'host' && normalizedUserId === stream.user.toString()) {
+                    const currentViewers = liveViewersByStream.get(normalizedStreamId);
+                    if (currentViewers) {
+                        currentViewers.forEach((viewerId, viewerSocketId) => {
+                            socket.emit('live-viewer-joined', {
+                                streamId: normalizedStreamId,
+                                viewerSocketId,
+                                viewerId
+                            });
+                        });
+                    }
+                    await emitLiveViewerCount(normalizedStreamId);
+                    return;
+                }
+
+                const viewers = liveViewersByStream.get(normalizedStreamId) || new Map();
+                viewers.set(socket.id, normalizedUserId);
+                liveViewersByStream.set(normalizedStreamId, viewers);
+
+                io.to(`user-${stream.user}`).emit('live-viewer-joined', {
+                    streamId: normalizedStreamId,
+                    viewerSocketId: socket.id,
+                    viewerId: normalizedUserId
+                });
+
+                await emitLiveViewerCount(normalizedStreamId);
+            } catch (error) {
+                console.log('Join live stream error:', error.message);
+            }
+        });
+
+        socket.on('leave-live-stream', async ({ streamId } = {}) => {
+            if (!streamId) return;
+
+            try {
+                await removeLiveViewer(socket, streamId.toString());
+                socket.leave(`live-${streamId}`);
+            } catch (error) {
+                console.log('Leave live stream error:', error.message);
+            }
+        });
+
+        socket.on('live-webrtc-signal', (data = {}) => {
+            if (!data.streamId || !data.targetSocketId || !data.signal) return;
+
+            io.to(data.targetSocketId).emit('live-webrtc-signal', {
+                streamId: data.streamId,
+                signal: data.signal,
+                fromSocketId: socket.id,
+                fromUserId: socket.data.userId
+            });
         });
 
         // ─── Call Signaling ───────────────────────────────────────────────
@@ -128,6 +238,13 @@ export const setupSocket = (server) => {
         // Handle disconnect
         socket.on('disconnect', async () => {
             const userId = socket.data.userId;
+
+            try {
+                await removeSocketFromLiveStreams(socket);
+            } catch (error) {
+                console.log('Live stream disconnect cleanup error:', error.message);
+            }
+
             if (!userId) return;
 
             const userSockets = connectedUsers.get(userId);
