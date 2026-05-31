@@ -2,7 +2,10 @@ import React from 'react'
 import { useSocket } from '../../context/SocketContext'
 import ChatBox from '../../pages/user/ChatBox'
 
-const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
+const getUserId = (userOrId) => {
+  if (userOrId?.type === 'group') return userOrId.groupId?.toString?.() || userOrId._id?.toString?.() || ''
+  return userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
+}
 
 const ChatDock = ({ onStartCall }) => {
   const { openChats, closeChat } = useSocket()
@@ -18,7 +21,8 @@ const ChatDock = ({ onStartCall }) => {
         return (
           <ChatBox
             key={contactId}
-            chatUserId={contactId}
+            chatUserId={contact?.type === 'group' ? undefined : contactId}
+            groupId={contact?.type === 'group' ? contactId : undefined}
             variant='mini'
             onStartCall={onStartCall}
             onClose={() => closeChat(contactId)}

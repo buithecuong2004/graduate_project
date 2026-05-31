@@ -1,10 +1,14 @@
+/* eslint-disable react-refresh/only-export-components */
 // SocketContext.jsx
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 
 const SocketContext = createContext(null)
 const MAX_OPEN_CHAT_BOXES = 3
 
-const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
+const getUserId = (userOrId) => {
+    if (userOrId?.type === 'group') return userOrId.groupId?.toString?.() || userOrId._id?.toString?.() || ''
+    return userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
+}
 
 export const SocketProvider = ({ children }) => {
     const socketRef = useRef(null)
@@ -37,8 +41,29 @@ export const SocketProvider = ({ children }) => {
         setOpenChats((currentChats) => currentChats.filter((chat) => getUserId(chat) !== contactId))
     }, [])
 
+    const clearOpenChats = useCallback(() => {
+        setOpenChats([])
+    }, [])
+
     const openChatFromMessage = useCallback((message, currentUserId) => {
         if (!message || message.message_type === 'reaction' || message.message_type === 'call') return
+
+        if (message.group_id) {
+            const group = typeof message.group_id === 'object'
+                ? message.group_id
+                : { _id: message.group_id }
+            const groupId = group?._id?.toString?.() || group?.toString?.() || ''
+            if (!groupId) return
+
+            openChat({
+                ...group,
+                type: 'group',
+                groupId,
+                full_name: group.name || 'Nhóm chat',
+                profile_picture: group.avatar_url || '',
+            }, { replaceOldest: true })
+            return
+        }
 
         const currentId = getUserId(currentUserId)
         const fromId = getUserId(message.from_user_id)
@@ -52,8 +77,8 @@ export const SocketProvider = ({ children }) => {
     const value = useMemo(() => ({
         socketRef, socket, setSocket,
         incomingCall, setIncomingCall,
-        openChats, openChat, closeChat, openChatFromMessage,
-    }), [closeChat, incomingCall, openChat, openChatFromMessage, openChats, socket])
+        openChats, openChat, closeChat, clearOpenChats, openChatFromMessage,
+    }), [clearOpenChats, closeChat, incomingCall, openChat, openChatFromMessage, openChats, socket])
 
     return (
         <SocketContext.Provider value={value}>

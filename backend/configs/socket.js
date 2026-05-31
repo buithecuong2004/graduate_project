@@ -1,7 +1,28 @@
 import { Server } from 'socket.io';
 import User from '../models/User.js';
 import LiveStream from '../models/LiveStream.js';
+import GroupChat from '../models/GroupChat.js';
 import { isConversationBlocked } from '../utils/blocking.js';
+
+const getUserId = (value) => value?._id?.toString?.() || value?.toString?.() || '';
+
+const getGroupMemberIds = (group) => (
+    (group?.members || []).map((member) => getUserId(member.user)).filter(Boolean)
+);
+
+const isGroupMember = (group, userId) => (
+    getGroupMemberIds(group).includes(userId?.toString?.() || userId)
+);
+
+const isGroupCallPayload = (data = {}) => (
+    data.groupCall === true ||
+    data.groupCall === 'true' ||
+    data.isGroupCall === true ||
+    data.isGroupCall === 'true' ||
+    data.callScope === 'group' ||
+    data.conversationType === 'group' ||
+    !!data.groupId
+);
 
 export const setupSocket = (server) => {
     const io = new Server(server, {
@@ -14,6 +35,7 @@ export const setupSocket = (server) => {
     // Store connected users with all active socket IDs so multiple tabs stay online.
     const connectedUsers = new Map();
     const liveViewersByStream = new Map();
+    const activeGroupCalls = new Map();
 
     const emitUserPresence = async (userId, isOnline) => {
         const lastSeen = new Date();
@@ -174,6 +196,62 @@ export const setupSocket = (server) => {
         socket.on('call-user', async (data) => {
             // data: { to, from, callType, callerName, callerAvatar, offer }
             const from = socket.data.userId || data.from;
+            if (isGroupCallPayload(data)) {
+                if (!from || !data?.groupId) return;
+
+                try {
+                    const group = await GroupChat.findById(data.groupId)
+                        .populate('members.user', 'full_name username profile_picture _id')
+                        .lean();
+
+                    if (!group || !isGroupMember(group, from)) {
+                        socket.emit('call-blocked', { groupId: data.groupId });
+                        return;
+                    }
+
+                    const recipientIds = getGroupMemberIds(group)
+                        .filter((memberId) => memberId !== from.toString());
+                    if (recipientIds.length === 0) {
+                        socket.emit('call-blocked', { groupId: data.groupId });
+                        return;
+                    }
+
+                    const callId = data.callId || `${data.groupId}-${Date.now()}-${from}`;
+                    activeGroupCalls.set(callId, {
+                        groupId: data.groupId.toString(),
+                        callerId: from.toString(),
+                        participantIds: new Set([from.toString()]),
+                        recipientIds: new Set(recipientIds),
+                    });
+
+                    const incomingCall = {
+                        ...data,
+                        groupCall: true,
+                        isGroupCall: true,
+                        callScope: 'group',
+                        conversationType: 'group',
+                        groupId: data.groupId.toString(),
+                        callId,
+                        from,
+                        groupName: data.groupName || group.name,
+                        groupAvatar: data.groupAvatar || group.avatar_url || '',
+                        groupMembers: group.members?.map((member) => member.user).filter(Boolean) || [],
+                        recipientIds,
+                    };
+
+                    recipientIds.forEach((recipientId) => {
+                        io.to(`user-${recipientId}`).emit('incoming-call', {
+                            ...incomingCall,
+                            to: recipientId,
+                        });
+                    });
+                } catch (error) {
+                    console.log('Group call error:', error.message);
+                    socket.emit('call-blocked', { groupId: data.groupId });
+                }
+                return;
+            }
+
             if (!from || !data?.to) return;
             if (from.toString() === data.to.toString()) {
                 socket.emit('call-blocked', { to: data.to });
@@ -196,6 +274,39 @@ export const setupSocket = (server) => {
 
         // B accepts → send answer back to A (legacy)
         socket.on('call-accepted', (data) => {
+            if (isGroupCallPayload(data) && data?.callId) {
+                const from = (socket.data.userId || data.from)?.toString?.() || data.from;
+                const call = activeGroupCalls.get(data.callId);
+                if (!from || !call) return;
+
+                const existingParticipantIds = Array.from(call.participantIds)
+                    .filter((participantId) => participantId !== from);
+                call.participantIds.add(from);
+
+                io.to(`user-${call.callerId}`).emit('call-accepted', {
+                    ...data,
+                    from,
+                    to: call.callerId,
+                    groupId: call.groupId,
+                });
+
+                existingParticipantIds.forEach((participantId) => {
+                    io.to(`user-${participantId}`).emit('group-call-participant-joined', {
+                        callId: data.callId,
+                        groupId: call.groupId,
+                        userId: from,
+                        participantIds: Array.from(call.participantIds),
+                    });
+                });
+
+                io.to(`user-${from}`).emit('group-call-existing-participants', {
+                    callId: data.callId,
+                    groupId: call.groupId,
+                    participantIds: existingParticipantIds,
+                });
+                return;
+            }
+
             io.to(`user-${data.to}`).emit('call-accepted', data);
         });
 
@@ -214,12 +325,62 @@ export const setupSocket = (server) => {
         // B rejects → notify A
         socket.on('call-rejected', (data) => {
             // data: { to, from }
+            if (isGroupCallPayload(data) && data?.callId) {
+                const from = (socket.data.userId || data.from)?.toString?.() || data.from;
+                const call = activeGroupCalls.get(data.callId);
+                if (!from || !call) return;
+                io.to(`user-${call.callerId}`).emit('call-rejected', {
+                    ...data,
+                    from,
+                    to: call.callerId,
+                    groupId: call.groupId,
+                });
+                return;
+            }
+
             io.to(`user-${data.to}`).emit('call-rejected', data);
         });
 
         // Either party ends call
         socket.on('call-ended', (data) => {
             // data: { to, from }
+            if (isGroupCallPayload(data) && data?.callId) {
+                const from = (socket.data.userId || data.from)?.toString?.() || data.from;
+                const call = activeGroupCalls.get(data.callId);
+                if (!from || !call) return;
+
+                const participantIds = Array.from(call.participantIds);
+                const shouldEndForAll = data.endForAll || from === call.callerId;
+
+                if (shouldEndForAll) {
+                    const targetIds = new Set([...participantIds, ...Array.from(call.recipientIds)]);
+                    targetIds.delete(from);
+                    targetIds.forEach((targetId) => {
+                        io.to(`user-${targetId}`).emit('call-ended', {
+                            ...data,
+                            from,
+                            groupId: call.groupId,
+                            endForAll: true,
+                        });
+                    });
+                    activeGroupCalls.delete(data.callId);
+                    return;
+                }
+
+                call.participantIds.delete(from);
+                participantIds
+                    .filter((participantId) => participantId !== from)
+                    .forEach((participantId) => {
+                        io.to(`user-${participantId}`).emit('group-call-participant-left', {
+                            callId: data.callId,
+                            groupId: call.groupId,
+                            userId: from,
+                            participantIds: Array.from(call.participantIds),
+                        });
+                    });
+                return;
+            }
+
             io.to(`user-${data.to}`).emit('call-ended', data);
         });
 

@@ -20,6 +20,14 @@ const getAvatarUrl = (user) => (
   `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(user))}&background=0891b2&color=fff`
 )
 
+const getGroupId = (groupOrId) => groupOrId?._id?.toString?.() || groupOrId?.toString?.() || ''
+const getGroupDisplayName = (group) => group?.name || 'Nhóm chat'
+const getGroupAvatarUrl = (group) => (
+  group?.avatar_url ||
+  `https://ui-avatars.com/api/?name=${encodeURIComponent(getGroupDisplayName(group))}&background=0891b2&color=fff`
+)
+const getGroupMemberCount = (group) => group?.members?.length || 0
+
 const getOtherParticipant = (message, currentUserId) => (
   getUserId(message.from_user_id) === currentUserId ? message.to_user_id : message.from_user_id
 )
@@ -143,7 +151,7 @@ const mergeUniqueUsers = (excludedUserId, ...groups) => {
 }
 
 const Message = ({ onStartCall }) => {
-  const { userId: selectedUserId } = useParams()
+  const { userId: selectedUserId, groupId: selectedGroupIdParam } = useParams()
   const navigate = useNavigate()
   const { getToken } = useAuth()
   const { socketRef, socket } = useSocket()
@@ -152,13 +160,20 @@ const Message = ({ onStartCall }) => {
   const { connections, followers, following } = useSelector((state) => state.connections)
   const newMessageTrigger = useSelector((state) => state.messages.newMessageTrigger)
   const [recentMessages, setRecentMessages] = useState([])
+  const [groupChats, setGroupChats] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
+  const [groupsLoading, setGroupsLoading] = useState(false)
   const [conversationFilter, setConversationFilter] = useState('all')
   const [messageSearch, setMessageSearch] = useState({ groups: [], messages: [], loading: false })
   const [selectedSearchUserId, setSelectedSearchUserId] = useState('')
   const [highlightTarget, setHighlightTarget] = useState(null)
   const knownUsersByIdRef = useRef(new Map())
+  const selectedGroupId = selectedGroupIdParam || ''
+  const selectedGroup = useMemo(() => (
+    groupChats.find((group) => getGroupId(group) === selectedGroupId) ||
+    (selectedGroupId ? { _id: selectedGroupId, name: 'Nhóm chat', members: [] } : null)
+  ), [groupChats, selectedGroupId])
 
   const knownUsersById = useMemo(() => {
     const userMap = new Map()
@@ -253,10 +268,67 @@ const Message = ({ onStartCall }) => {
   }, [currentUser, currentUserId, getToken, newMessageTrigger])
 
   useEffect(() => {
+    if (!currentUserId) return undefined
+
+    let cancelled = false
+    const fetchGroupChats = async () => {
+      try {
+        setGroupsLoading(true)
+        const token = await getToken()
+        const { data } = await api.get('/api/group', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (cancelled) return
+        data.success ? setGroupChats(data.groups || []) : toast.error(data.message)
+      } catch (error) {
+        if (!cancelled) toast.error(error.message)
+      } finally {
+        if (!cancelled) setGroupsLoading(false)
+      }
+    }
+
+    fetchGroupChats()
+    return () => { cancelled = true }
+  }, [currentUserId, getToken, newMessageTrigger])
+
+  useEffect(() => {
     const activeSocket = socket || socketRef?.current
     if (!activeSocket || !currentUserId) return undefined
 
+    const upsertGroup = (group) => {
+      if (!group?._id) return
+      setGroupChats((currentGroups) => [
+        group,
+        ...currentGroups.filter((item) => item._id !== group._id)
+      ])
+    }
+
+    const removeGroup = ({ groupId }) => {
+      if (!groupId) return
+      setGroupChats((currentGroups) => currentGroups.filter((group) => group._id !== groupId))
+      if (groupId === selectedGroupId) navigate('/messages')
+    }
+
     const handleNewMessage = (message) => {
+      const messageGroupId = getGroupId(message.group_id)
+      if (messageGroupId) {
+        const messageGroup = typeof message.group_id === 'object' ? message.group_id : null
+        setGroupChats((currentGroups) => {
+          const existingGroup = currentGroups.find((group) => group._id === messageGroupId)
+          const nextGroup = {
+            ...(existingGroup || {}),
+            ...(messageGroup || {}),
+            _id: messageGroupId,
+            latestMessage: message,
+          }
+          return [
+            nextGroup,
+            ...currentGroups.filter((group) => group._id !== messageGroupId)
+          ]
+        })
+        return
+      }
+
       const fromId = getUserId(message.from_user_id)
       const toId = getUserId(message.to_user_id)
       if (fromId !== currentUserId && toId !== currentUserId) return
@@ -295,18 +367,38 @@ const Message = ({ onStartCall }) => {
     activeSocket.on('message-edited', handleEditedMessage)
     activeSocket.on('message-deleted', handleDeletedMessage)
     activeSocket.on('message-reaction-updated', handleReactionUpdated)
+    activeSocket.on('group-chat-created', upsertGroup)
+    activeSocket.on('group-chat-updated', upsertGroup)
+    activeSocket.on('group-chat-removed', removeGroup)
 
     return () => {
       activeSocket.off('new-message', handleNewMessage)
       activeSocket.off('message-edited', handleEditedMessage)
       activeSocket.off('message-deleted', handleDeletedMessage)
       activeSocket.off('message-reaction-updated', handleReactionUpdated)
+      activeSocket.off('group-chat-created', upsertGroup)
+      activeSocket.off('group-chat-updated', upsertGroup)
+      activeSocket.off('group-chat-removed', removeGroup)
     }
-  }, [currentUser, currentUserId, selectedUserId, socket, socketRef])
+  }, [currentUser, currentUserId, navigate, selectedGroupId, selectedUserId, socket, socketRef])
 
   const recentConversations = useMemo(() => (
     buildRecentConversations(recentMessages, currentUserId)
   ), [currentUserId, recentMessages])
+
+  const groupConversations = useMemo(() => (
+    [...groupChats]
+      .map((group) => ({
+        type: 'group',
+        group,
+        lastMessage: group.latestMessage || null,
+        unreadCount: 0,
+      }))
+      .sort((a, b) => (
+        new Date(b.lastMessage?.createdAt || b.group.updatedAt || 0) -
+        new Date(a.lastMessage?.createdAt || a.group.updatedAt || 0)
+      ))
+  ), [groupChats])
 
   const cardUsers = useMemo(() => {
     const recentUsers = recentConversations.map((conversation) => conversation.user)
@@ -314,16 +406,37 @@ const Message = ({ onStartCall }) => {
   }, [connections, currentUserId, followers, following, recentConversations])
 
   const conversationsForSidebar = useMemo(() => {
-    if (!selectedUserId || selectedUserId === currentUserId) return recentConversations
-    if (recentConversations.some((conversation) => getUserId(conversation.user) === selectedUserId)) return recentConversations
+    const baseConversations = [
+      ...groupConversations,
+      ...recentConversations.map((conversation) => ({ ...conversation, type: 'user' })),
+    ]
+
+    if (selectedGroupId) {
+      return baseConversations.some((conversation) => getGroupId(conversation.group) === selectedGroupId)
+        ? baseConversations
+        : [{ type: 'group', group: selectedGroup, lastMessage: null, unreadCount: 0 }, ...baseConversations]
+    }
+
+    if (!selectedUserId || selectedUserId === currentUserId) return baseConversations
+    if (baseConversations.some((conversation) => getUserId(conversation.user) === selectedUserId)) return baseConversations
 
     const selectedUser = cardUsers.find((user) => getUserId(user) === selectedUserId)
     return selectedUser
-      ? [{ user: selectedUser, lastMessage: null, unreadCount: 0 }, ...recentConversations]
-      : recentConversations
-  }, [cardUsers, currentUserId, recentConversations, selectedUserId])
+      ? [{ type: 'user', user: selectedUser, lastMessage: null, unreadCount: 0 }, ...baseConversations]
+      : baseConversations
+  }, [cardUsers, currentUserId, groupConversations, recentConversations, selectedGroup, selectedGroupId, selectedUserId])
 
-  const filteredCards = useMemo(() => {
+  const filteredGroupCards = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase()
+    if (!keyword) return groupChats
+
+    return groupChats.filter((group) => (
+      getGroupDisplayName(group).toLowerCase().includes(keyword) ||
+      getMessagePreview(group.latestMessage, currentUserId).toLowerCase().includes(keyword)
+    ))
+  }, [currentUserId, groupChats, searchTerm])
+
+  const filteredUserCards = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase()
     if (!keyword) return cardUsers
 
@@ -334,6 +447,12 @@ const Message = ({ onStartCall }) => {
     ))
   }, [cardUsers, searchTerm])
 
+  const hasFilteredCards = filteredGroupCards.length > 0 || filteredUserCards.length > 0
+  const filteredCards = useMemo(() => ([
+    ...filteredGroupCards.map((group) => ({ type: 'group', group })),
+    ...filteredUserCards.map((user) => ({ type: 'user', user })),
+  ]), [filteredGroupCards, filteredUserCards])
+
   const filteredConversations = useMemo(() => {
     const baseConversations = conversationFilter === 'unread'
       ? conversationsForSidebar.filter((conversation) => conversation.unreadCount > 0)
@@ -342,10 +461,17 @@ const Message = ({ onStartCall }) => {
     const keyword = searchTerm.trim().toLowerCase()
     if (!keyword || selectedUserId) return baseConversations
 
-    return baseConversations.filter(({ user, lastMessage }) => (
-      getDisplayName(user).toLowerCase().includes(keyword) ||
-      (user?.username || '').toLowerCase().includes(keyword) ||
-      getMessagePreview(lastMessage, getUserId(currentUser)).toLowerCase().includes(keyword)
+    return baseConversations.filter(({ type, user, group, lastMessage }) => (
+      type === 'group'
+        ? (
+          getGroupDisplayName(group).toLowerCase().includes(keyword) ||
+          getMessagePreview(lastMessage, getUserId(currentUser)).toLowerCase().includes(keyword)
+        )
+        : (
+          getDisplayName(user).toLowerCase().includes(keyword) ||
+          (user?.username || '').toLowerCase().includes(keyword) ||
+          getMessagePreview(lastMessage, getUserId(currentUser)).toLowerCase().includes(keyword)
+        )
     ))
   }, [conversationFilter, conversationsForSidebar, currentUser, searchTerm, selectedUserId])
 
@@ -373,6 +499,19 @@ const Message = ({ onStartCall }) => {
     navigate(`/messages/${userId}`)
   }
 
+  const openGroupInCurrentWindow = (group) => {
+    if (!group?._id) return
+    setHighlightTarget(null)
+    navigate(`/messages/group/${group._id}`)
+  }
+
+  const openGroupMessengerWindow = (group) => {
+    if (!group?._id) return
+    const url = `${window.location.origin}/messages/group/${group._id}`
+    const chatWindow = window.open(url, '_blank')
+    chatWindow?.focus()
+  }
+
   const openMessengerWindow = (userId) => {
     const url = `${window.location.origin}/messages/${userId}`
     const chatWindow = window.open(url, '_blank')
@@ -380,6 +519,11 @@ const Message = ({ onStartCall }) => {
   }
 
   const openConversation = (conversation) => {
+    if (conversation.type === 'group') {
+      openGroupInCurrentWindow(conversation.group)
+      return
+    }
+
     const contactId = getUserId(conversation.user)
     openConversationInCurrentWindow(contactId)
     if (conversation.unreadCount > 0) markConversationAsRead(contactId)
@@ -492,7 +636,7 @@ const Message = ({ onStartCall }) => {
     )
   }
 
-  if (!selectedUserId) {
+  if (!selectedUserId && !selectedGroupId) {
     return (
       <div className='app-page min-h-full'>
         <div className='app-container xl:max-w-6xl'>
@@ -502,12 +646,12 @@ const Message = ({ onStartCall }) => {
               <div>
                 <h1 className='page-title !text-[2rem] sm:!text-[2.5rem]'>Đoạn chat</h1>
                 <p className='page-subtitle mt-3 max-w-2xl'>
-                  Chọn bạn bè, người theo dõi hoặc người đã từng nhắn tin để mở cửa sổ Messenger đầy đủ.
+                  Chọn bạn bè, nhóm chat hoặc người đã từng nhắn tin để mở cửa sổ Messenger đầy đủ.
                 </p>
               </div>
               <div className='inline-flex w-fit items-center gap-2 rounded-full bg-cyan-50 px-4 py-2 text-sm font-black text-cyan-700'>
                 <UsersRound className='size-4' />
-                {cardUsers.length} người liên hệ
+                {cardUsers.length} người liên hệ · {groupChats.length} nhóm
               </div>
             </div>
 
@@ -517,54 +661,75 @@ const Message = ({ onStartCall }) => {
                 type='text'
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder='Tìm bạn bè để nhắn tin...'
+                placeholder='Tìm bạn bè hoặc nhóm chat để nhắn tin...'
                 className='input-modern py-4 pl-12 pr-4 text-base'
               />
             </div>
           </section>
 
-          {loading && cardUsers.length === 0 ? (
+          {(loading || groupsLoading) && cardUsers.length === 0 && groupChats.length === 0 ? (
             <div className='surface flex min-h-72 items-center justify-center rounded-[2rem] p-10 text-sm font-bold text-slate-400'>
-              Đang tải người liên hệ...
+              Đang tải cuộc trò chuyện...
             </div>
-          ) : filteredCards.length === 0 ? (
+          ) : !hasFilteredCards ? (
             <div className='surface flex min-h-72 flex-col items-center justify-center rounded-[2rem] p-10 text-center'>
               <Search className='mb-4 size-10 text-slate-300' />
-              <h2 className='text-xl font-black text-slate-900'>Không tìm thấy người phù hợp</h2>
-              <p className='mt-2 text-sm text-slate-500'>Thử tìm bằng tên hoặc username khác.</p>
+              <h2 className='text-xl font-black text-slate-900'>Không tìm thấy liên hệ hoặc nhóm phù hợp</h2>
+              <p className='mt-2 text-sm text-slate-500'>Thử tìm bằng tên, username hoặc tên nhóm khác.</p>
             </div>
           ) : (
             <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-3'>
-              {filteredCards.map((user) => (
-                <article key={getUserId(user)} className='surface flex h-full flex-col rounded-[1.5rem] p-5 transition hover:-translate-y-0.5 hover:shadow-xl'>
+              {filteredCards.map((item, index) => {
+                const isGroup = item.type === 'group'
+                const title = isGroup ? getGroupDisplayName(item.group) : getDisplayName(item.user)
+                const subtitle = isGroup ? `${getGroupMemberCount(item.group)} thành viên` : (item.user.username ? `@${item.user.username}` : '')
+                const body = isGroup ? getMessagePreview(item.group.latestMessage, currentUserId) : (item.user.bio || '')
+                const avatar = isGroup ? getGroupAvatarUrl(item.group) : getAvatarUrl(item.user)
+                const key = isGroup ? `group-${getGroupId(item.group)}` : `user-${getUserId(item.user)}`
+                const previousItem = filteredCards[index - 1]
+                const showSectionHeader = !previousItem || previousItem.type !== item.type
+
+                return (
+                <React.Fragment key={key}>
+                  {showSectionHeader && (
+                    <div className='col-span-full flex items-center justify-between pt-2'>
+                      <h2 className='text-xl font-black text-slate-950'>{isGroup ? 'Nhóm chat' : 'Người liên hệ'}</h2>
+                      <span className='rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500'>
+                        {isGroup ? filteredGroupCards.length : filteredUserCards.length}
+                      </span>
+                    </div>
+                  )}
+                <article className='surface flex h-full flex-col rounded-[1.5rem] p-5 transition hover:-translate-y-0.5 hover:shadow-xl'>
                   <div className='flex items-start gap-4'>
                     <img
-                      src={getAvatarUrl(user)}
-                      alt={getDisplayName(user)}
+                      src={avatar}
+                      alt={title}
                       className='size-16 rounded-full object-cover avatar-ring'
                       onError={(event) => {
-                        event.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(user))}&background=0891b2&color=fff`
+                        event.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(title)}&background=0891b2&color=fff`
                       }}
                     />
                     <div className='min-w-0 flex-1'>
-                      <p className='truncate text-lg font-black text-slate-900'>{getDisplayName(user)}</p>
-                      {user.username && <p className='text-sm text-slate-500'>@{user.username}</p>}
+                      <p className='truncate text-lg font-black text-slate-900'>{title}</p>
+                      {subtitle && <p className='text-sm text-slate-500'>{subtitle}</p>}
                       <p className='mt-2 min-h-12 overflow-hidden text-sm leading-6 text-slate-600 [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]'>
-                        {user.bio || ''}
+                        {body}
                       </p>
                     </div>
                   </div>
 
                   <button
                     type='button'
-                    onClick={() => openMessengerWindow(getUserId(user))}
+                    onClick={() => isGroup ? openGroupMessengerWindow(item.group) : openMessengerWindow(getUserId(item.user))}
                     className='btn-primary mt-auto w-full px-4 py-3 cursor-pointer'
                   >
                     <MessageSquare className='h-4 w-4' />
                     Nhắn tin
                   </button>
                 </article>
-              ))}
+                </React.Fragment>
+                )
+              })}
             </div>
           )}
         </div>
@@ -619,7 +784,7 @@ const Message = ({ onStartCall }) => {
           </div>
 
           <div className='min-h-0 flex-1 overflow-y-auto px-3 py-3'>
-            {searchTerm.trim() ? renderSidebarSearch() : filteredConversations.length === 0 ? (
+            {searchTerm.trim() && selectedUserId ? renderSidebarSearch() : filteredConversations.length === 0 ? (
               <div className='flex h-full flex-col items-center justify-center px-6 text-center text-slate-500'>
                 <UsersRound className='mb-3 h-10 w-10 text-slate-300' />
                 <p className='font-black text-slate-950'>
@@ -633,29 +798,32 @@ const Message = ({ onStartCall }) => {
               </div>
             ) : (
               filteredConversations.map((conversation) => {
-                const contactId = getUserId(conversation.user)
-                const isActive = contactId === selectedUserId
+                const isGroup = conversation.type === 'group'
+                const contactId = isGroup ? getGroupId(conversation.group) : getUserId(conversation.user)
+                const isActive = isGroup ? contactId === selectedGroupId : contactId === selectedUserId
                 const effectiveUnreadCount = isActive ? 0 : conversation.unreadCount
                 const preview = getMessagePreview(conversation.lastMessage, getUserId(currentUser))
+                const title = isGroup ? getGroupDisplayName(conversation.group) : getDisplayName(conversation.user)
+                const avatar = isGroup ? getGroupAvatarUrl(conversation.group) : getAvatarUrl(conversation.user)
 
                 return (
                   <button
-                    key={contactId}
+                    key={`${isGroup ? 'group' : 'user'}-${contactId}`}
                     type='button'
                     onClick={() => openConversation(conversation)}
                     className={`mb-2 flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left transition ${
                       isActive ? 'bg-cyan-50' : 'hover:bg-slate-100'
                     }`}
-                  >
+                    >
                     <img
-                      src={getAvatarUrl(conversation.user)}
+                      src={avatar}
                       alt=''
                       className='size-14 rounded-full object-cover'
                     />
                     <div className='min-w-0 flex-1'>
                       <div className='flex items-start gap-2'>
                         <p className={`min-w-0 flex-1 truncate ${effectiveUnreadCount > 0 ? 'font-black' : 'font-bold'} text-slate-950`}>
-                          {getDisplayName(conversation.user)}
+                          {title}
                         </p>
                         {conversation.lastMessage?.createdAt && (
                           <span className='shrink-0 text-xs text-slate-400'>
@@ -683,9 +851,11 @@ const Message = ({ onStartCall }) => {
 
         <main className='min-w-0 flex-1'>
           <ChatBox
+            key={selectedGroupId ? `group-${selectedGroupId}` : `user-${selectedUserId}`}
             onStartCall={onStartCall}
+            groupId={selectedGroupId || undefined}
             variant='embedded'
-            scrollToMessageId={highlightTarget?.userId === selectedUserId ? highlightTarget.messageId : ''}
+            scrollToMessageId={!selectedGroupId && highlightTarget?.userId === selectedUserId ? highlightTarget.messageId : ''}
             onScrolledToMessage={clearHighlightTarget}
           />
         </main>

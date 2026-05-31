@@ -34,7 +34,8 @@ export const buildMessageSearchIndex = (value = '') => {
 
 const messageSchema = new mongoose.Schema({
     from_user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    to_user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    to_user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    group_id: { type: mongoose.Schema.Types.ObjectId, ref: 'GroupChat' },
     text: { type: String, trim: true},
     searchText: { type: String, default: '' },
     searchTokens: { type: [String], default: [] },
@@ -69,6 +70,7 @@ messageSchema.index({ to_user_id: 1, searchTokens: 1, createdAt: -1 }, { name: '
 messageSchema.index({ from_user_id: 1, to_user_id: 1, searchTokens: 1, createdAt: -1 }, { name: 'message_conversation_search_index' })
 messageSchema.index({ client_message_id: 1, from_user_id: 1 }, { sparse: true })
 messageSchema.index({ from_user_id: 1, to_user_id: 1, createdAt: -1 })
+messageSchema.index({ group_id: 1, createdAt: -1 })
 messageSchema.index({ to_user_id: 1, isRead: 1, createdAt: -1 })
 messageSchema.index({ deletedFor: 1 })
 

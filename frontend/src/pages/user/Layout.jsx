@@ -16,7 +16,7 @@ const Layout = ({ onStartCall }) => {
     const dispatch = useDispatch()
     const { getToken } = useAuth()
     const { pathname } = useLocation()
-    const isMessengerWindow = /^\/messages\/[^/]+$/.test(pathname)
+    const isMessengerWindow = /^\/messages\/(?:group\/)?[^/]+$/.test(pathname)
 
     const handleDeleteStory = async (storyId) => {
         const token = await getToken()

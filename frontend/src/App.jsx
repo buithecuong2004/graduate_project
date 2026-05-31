@@ -80,11 +80,13 @@ const AppInner = () => {
   const pathnameRef = useRef(pathname)
 
   // callAcceptedSignal đã được loại bỏ — CallModal tự lắng nghe socket trực tiếp
-  const { socketRef, setSocket, openChatFromMessage } = useSocket()
+  const { socketRef, setSocket, openChatFromMessage, clearOpenChats } = useSocket()
 
   const [activeCall, setActiveCall] = useState(null)
   const activeCallRef = useRef(null)
   const currentUser = useSelector((state) => state.user.value)
+  const currentUserId = getUserId(currentUser)
+  const previousUserIdRef = useRef('')
   const dispatch = useDispatch()
 
   useEffect(() => {
@@ -103,6 +105,19 @@ const AppInner = () => {
   useEffect(() => {
     pathnameRef.current = pathname
   }, [pathname])
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUserId) {
+      previousUserIdRef.current = ''
+      clearOpenChats()
+      return
+    }
+
+    if (previousUserIdRef.current && previousUserIdRef.current !== currentUserId) {
+      clearOpenChats()
+    }
+    previousUserIdRef.current = currentUserId
+  }, [clearOpenChats, currentUserId, isAuthenticated])
 
   useEffect(() => {
     if (isAuthenticated && currentUser?.role === 'admin' && !pathname.startsWith('/admin') && !pathname.startsWith('/auth/')) {
@@ -206,7 +221,23 @@ const AppInner = () => {
         // ── Incoming Call ─────────────────────────────────────────────
         socket.on('incoming-call', (data) => {
           if (activeCallRef.current) return
-          const call = { ...data, isIncoming: true }
+          const isGroupCall = !!(
+            data?.groupCall === true ||
+            data?.groupCall === 'true' ||
+            data?.isGroupCall === true ||
+            data?.isGroupCall === 'true' ||
+            data?.groupId ||
+            data?.callScope === 'group' ||
+            data?.conversationType === 'group'
+          )
+          const call = {
+            ...data,
+            isIncoming: true,
+            groupCall: isGroupCall || data?.groupCall,
+            isGroupCall: isGroupCall || data?.isGroupCall,
+            callScope: isGroupCall ? 'group' : data?.callScope,
+            conversationType: isGroupCall ? 'group' : data?.conversationType,
+          }
           activeCallRef.current = call
           setActiveCall(call)
         })
@@ -371,6 +402,7 @@ const AppInner = () => {
           <Route index element={<HomeRedirect currentUser={currentUser} />} />
           <Route path='feed' element={<Feed />} />
           <Route path='messages' element={<Message onStartCall={handleStartCall} />} />
+          <Route path='messages/group/:groupId' element={<Message onStartCall={handleStartCall} />} />
           <Route path='messages/:userId' element={<Message onStartCall={handleStartCall} />} />
           <Route path='connections' element={<Connections />} />
           <Route path='discover' element={<Discover />} />

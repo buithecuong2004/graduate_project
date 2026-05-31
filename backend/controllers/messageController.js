@@ -2,6 +2,7 @@ import fs from "fs"
 import imagekit from "../configs/imageKit.js";
 import Message, { buildMessageSearchIndex, normalizeMessageSearchText } from "../models/Message.js";
 import User from "../models/User.js";
+import GroupChat from "../models/GroupChat.js";
 import { isConversationBlocked } from "../utils/blocking.js";
 
 const REACTION_ICONS = {
@@ -43,9 +44,43 @@ const cleanupUploadedFiles = (files = {}) => {
 
 const getMessageUserId = (value) => value?._id?.toString?.() || value?.toString?.() || ''
 
+const userSelect = 'full_name username profile_picture _id isOnline lastSeen'
+
+const getGroupId = (value) => value?._id?.toString?.() || value?.toString?.() || ''
+
 const getOtherParticipant = (message, currentUserId) => (
     getMessageUserId(message.from_user_id) === currentUserId ? message.to_user_id : message.from_user_id
 )
+
+const isGroupMember = (group, userId) => (
+    group?.members?.some((member) => getMessageUserId(member.user) === userId.toString())
+)
+
+const getGroupMemberIds = (group) => (
+    (group?.members || []).map((member) => getMessageUserId(member.user)).filter(Boolean)
+)
+
+const populateGroupChat = (query) => query
+    .populate('creator', userSelect)
+    .populate('members.user', userSelect)
+
+const emitToMessageRecipients = async (io, message, event, payload) => {
+    if (!io || !message) return
+
+    if (message.group_id) {
+        const group = await GroupChat.findById(message.group_id).select('members.user')
+        getGroupMemberIds(group).forEach((recipientId) => {
+            io.to(`user-${recipientId}`).emit(event, payload)
+        })
+        return
+    }
+
+    const recipientIds = new Set([
+        getMessageUserId(message.to_user_id),
+        getMessageUserId(message.from_user_id)
+    ].filter(Boolean))
+    recipientIds.forEach((recipientId) => io.to(`user-${recipientId}`).emit(event, payload))
+}
 
 // Helper to delete file from ImageKit using file ID
 const deleteImageKitFile = async (fileId) => {
@@ -108,6 +143,11 @@ const populateMessage = async (msgObj) => {
         msgObj.to_user_id = usersMap[String(toId)] || (await User.findById(toId))
     }
 
+    const groupId = getGroupId(msgObj.group_id)
+    if (groupId) {
+        msgObj.group_id = await populateGroupChat(GroupChat.findById(groupId).lean())
+    }
+
     // Ensure media_urls/message_type compatibility
     if (msgObj.media_url && (!msgObj.media_urls || msgObj.media_urls.length === 0)) {
         msgObj.media_urls = [msgObj.media_url]
@@ -141,7 +181,7 @@ export const sendMessage = async (req, res) => {
     try {
         const startTime = Date.now()
         const userId = req.userId
-        const { to_user_id, shared_post_id, reply_to, is_forwarded, forwarded_type, client_message_id } = req.body
+        const { to_user_id, group_id, shared_post_id, reply_to, is_forwarded, forwarded_type, client_message_id } = req.body
         let { text } = req.body
 
         const images = req.files?.images || []
@@ -162,12 +202,30 @@ export const sendMessage = async (req, res) => {
             return res.json({ success: false, message: 'Message cannot be empty' })
         }
 
-        if (to_user_id?.toString?.() === userId.toString()) {
+        if (!group_id && !to_user_id) {
+            cleanupUploadedFiles(req.files)
+            return res.json({ success: false, message: 'Missing message target' })
+        }
+
+        let targetGroup = null
+        if (group_id) {
+            targetGroup = await GroupChat.findById(group_id).select('members creator name')
+            if (!targetGroup) {
+                cleanupUploadedFiles(req.files)
+                return res.json({ success: false, message: 'Group chat not found' })
+            }
+            if (!isGroupMember(targetGroup, userId)) {
+                cleanupUploadedFiles(req.files)
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+        }
+
+        if (!group_id && to_user_id?.toString?.() === userId.toString()) {
             cleanupUploadedFiles(req.files)
             return res.json({ success: false, message: 'Không thể nhắn tin với chính bạn' })
         }
 
-        if (await isConversationBlocked(userId, to_user_id)) {
+        if (!group_id && await isConversationBlocked(userId, to_user_id)) {
             cleanupUploadedFiles(req.files)
             return res.json({ success: false, message: 'Không thể gửi tin nhắn vì một trong hai người đã chặn người còn lại' })
         }
@@ -301,7 +359,8 @@ export const sendMessage = async (req, res) => {
 
         const message = await Message.create({
             from_user_id: userId,
-            to_user_id,
+            to_user_id: group_id ? undefined : to_user_id,
+            group_id: group_id || undefined,
             client_message_id: client_message_id || undefined,
             text: text || '',
             message_type,
@@ -317,14 +376,21 @@ export const sendMessage = async (req, res) => {
         const populatedMsg = await populateMessage(msgObj)
 
         res.json({ success: true, message: populatedMsg })
-        console.log(`sendMessage: user=${userId} to=${to_user_id} saved in ${Date.now()-startTime}ms`)
+        console.log(`sendMessage: user=${userId} to=${group_id ? `group:${group_id}` : to_user_id} saved in ${Date.now()-startTime}ms`)
+
+        if (group_id) {
+            await GroupChat.findByIdAndUpdate(group_id, { updatedAt: new Date() })
+        }
 
         const io = req.app.locals.io
         if (io) {
-            const recipientIds = new Set([to_user_id.toString(), userId.toString()])
+            const recipientIds = group_id
+                ? new Set(getGroupMemberIds(targetGroup))
+                : new Set([to_user_id.toString(), userId.toString()])
             recipientIds.forEach(recipientId => {
                 io.to(`user-${recipientId}`).emit('new-message', populatedMsg)
             })
+
         }
     } catch (error) {
         console.error('❌ Error in sendMessage:', error)
@@ -339,18 +405,35 @@ export const getChatMessages = async (req, res) => {
     try {
         const startTime = Date.now()
         const userId = req.userId
-        const { to_user_id, limit = 30, before, mark_read = true } = req.body
+        const { to_user_id, group_id, limit = 30, before, mark_read = true } = req.body
 
-        if (to_user_id?.toString?.() === userId.toString()) {
+        let query
+
+        if (group_id) {
+            const group = await GroupChat.findById(group_id).select('members.user')
+            if (!group) return res.json({ success: false, message: 'Group chat not found' })
+            if (!isGroupMember(group, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+
+            query = {
+                group_id,
+                deletedFor: { $ne: userId }
+            }
+        }
+
+        if (!group_id && to_user_id?.toString?.() === userId.toString()) {
             return res.json({ success: true, messages: [], hasMore: false })
         }
 
-        const query = {
-            $or: [
-                { from_user_id: userId, to_user_id },
-                { from_user_id: to_user_id, to_user_id: userId }
-            ],
-            deletedFor: { $ne: userId }
+        if (!query) {
+            query = {
+                $or: [
+                    { from_user_id: userId, to_user_id },
+                    { from_user_id: to_user_id, to_user_id: userId }
+                ],
+                deletedFor: { $ne: userId }
+            }
         }
 
         // Cursor-based pagination: fetch messages older than `before`
@@ -374,7 +457,7 @@ export const getChatMessages = async (req, res) => {
 
         messages = await Promise.all(messages.map(populateMessage))
 
-        if (mark_read !== false && mark_read !== 'false') {
+        if (!group_id && mark_read !== false && mark_read !== 'false') {
             await Message.updateMany(
                 { from_user_id: to_user_id, to_user_id: userId, deletedFor: { $ne: userId } },
                 { isRead: true }
@@ -392,23 +475,37 @@ export const getChatMessages = async (req, res) => {
 export const getMessagesAround = async (req, res) => {
     try {
         const userId = req.userId
-        const { to_user_id, messageId, limit = 30 } = req.body
+        const { to_user_id, group_id, messageId, limit = 30 } = req.body
 
-        if (!to_user_id || !messageId) {
+        if ((!to_user_id && !group_id) || !messageId) {
             return res.json({ success: false, message: 'Missing message target' })
         }
 
-        if (to_user_id?.toString?.() === userId.toString()) {
+        if (!group_id && to_user_id?.toString?.() === userId.toString()) {
             return res.json({ success: true, messages: [], hasMore: false })
         }
 
-        const conversationQuery = {
-            $or: [
-                { from_user_id: userId, to_user_id },
-                { from_user_id: to_user_id, to_user_id: userId }
-            ],
-            deletedFor: { $ne: userId },
-            message_type: { $ne: 'reaction' }
+        let conversationQuery
+        if (group_id) {
+            const group = await GroupChat.findById(group_id).select('members.user')
+            if (!group) return res.json({ success: false, message: 'Group chat not found' })
+            if (!isGroupMember(group, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+            conversationQuery = {
+                group_id,
+                deletedFor: { $ne: userId },
+                message_type: { $ne: 'reaction' }
+            }
+        } else {
+            conversationQuery = {
+                $or: [
+                    { from_user_id: userId, to_user_id },
+                    { from_user_id: to_user_id, to_user_id: userId }
+                ],
+                deletedFor: { $ne: userId },
+                message_type: { $ne: 'reaction' }
+            }
         }
 
         const targetMessage = await Message.findOne({ _id: messageId, ...conversationQuery }).lean()
@@ -444,27 +541,38 @@ export const getMessagesAround = async (req, res) => {
 export const searchMessages = async (req, res) => {
     try {
         const userId = req.userId
-        const { query = '', to_user_id, limit = 200 } = req.body
+        const { query = '', to_user_id, group_id, limit = 200 } = req.body
         const keyword = query.trim()
 
-        if (!keyword || to_user_id?.toString?.() === userId.toString()) {
+        if (!keyword || (!group_id && to_user_id?.toString?.() === userId.toString())) {
             return res.json({ success: true, groups: [], messages: [] })
         }
 
-        const participantQuery = to_user_id
-            ? {
-                $or: [
-                    { from_user_id: userId, to_user_id },
-                    { from_user_id: to_user_id, to_user_id: userId }
-                ]
+        let participantQuery
+        if (group_id) {
+            const group = await GroupChat.findById(group_id).select('members.user')
+            if (!group) return res.json({ success: false, message: 'Group chat not found' })
+            if (!isGroupMember(group, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
             }
-            : {
-                $or: [
-                    { from_user_id: userId },
-                    { to_user_id: userId }
-                ],
-                $expr: { $ne: ['$from_user_id', '$to_user_id'] }
-            }
+
+            participantQuery = { group_id }
+        } else {
+            participantQuery = to_user_id
+                ? {
+                    $or: [
+                        { from_user_id: userId, to_user_id },
+                        { from_user_id: to_user_id, to_user_id: userId }
+                    ]
+                }
+                : {
+                    $or: [
+                        { from_user_id: userId },
+                        { to_user_id: userId }
+                    ],
+                    $expr: { $ne: ['$from_user_id', '$to_user_id'] }
+                }
+        }
 
         const limitNum = Math.min(parseInt(limit) || 200, 300)
         const { searchText, searchTokens } = buildMessageSearchIndex(keyword)
@@ -490,18 +598,20 @@ export const searchMessages = async (req, res) => {
         messages = messages.filter((message) => normalizeMessageSearchText(message.text).includes(searchText))
 
         const groupMap = new Map()
-        messages.forEach((message) => {
-            const otherUser = getOtherParticipant(message, userId)
-            const otherUserId = getMessageUserId(otherUser)
-            if (!otherUserId || otherUserId === userId) return
+        if (!group_id) {
+            messages.forEach((message) => {
+                const otherUser = getOtherParticipant(message, userId)
+                const otherUserId = getMessageUserId(otherUser)
+                if (!otherUserId || otherUserId === userId) return
 
-            const current = groupMap.get(otherUserId)
-            groupMap.set(otherUserId, {
-                user: current?.user || otherUser,
-                count: (current?.count || 0) + 1,
-                latestMessage: current?.latestMessage || message
+                const current = groupMap.get(otherUserId)
+                groupMap.set(otherUserId, {
+                    user: current?.user || otherUser,
+                    count: (current?.count || 0) + 1,
+                    latestMessage: current?.latestMessage || message
+                })
             })
-        })
+        }
 
         res.json({
             success: true,
@@ -526,6 +636,7 @@ export const getUserRecentMessages = async (req, res) => {
                 { from_user_id: userId },
                 { to_user_id: userId }
             ],
+            group_id: { $exists: false },
             deletedFor: { $ne: userId },
             $expr: { $ne: ['$from_user_id', '$to_user_id'] }
         }).sort({ createdAt: -1 }).lean()
@@ -580,6 +691,13 @@ export const deleteMessage = async (req, res) => {
             return res.json({ success: false, message: 'Unauthorized: not your message' })
         }
 
+        if (message.group_id) {
+            const group = await GroupChat.findById(message.group_id).select('members.user')
+            if (!isGroupMember(group, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+        }
+
         // Delete files from ImageKit
         if (message.media_ids && message.media_ids.length > 0) {
             for (let fileId of message.media_ids) {
@@ -596,9 +714,7 @@ export const deleteMessage = async (req, res) => {
         res.json({ success: true, messageId })
 
         const io = req.app.locals.io
-        if (io) {
-            io.to(`user-${message.to_user_id}`).emit('message-deleted', { messageId })
-        }
+        await emitToMessageRecipients(io, message, 'message-deleted', { messageId, groupId: getGroupId(message.group_id) || null })
     } catch (error) {
         res.json({ success: false, message: error.message })
     }
@@ -607,10 +723,29 @@ export const deleteMessage = async (req, res) => {
 export const deleteConversation = async (req, res) => {
     try {
         const userId = req.userId
-        const { to_user_id } = req.body
+        const { to_user_id, group_id } = req.body
 
-        if (!to_user_id) {
+        if (!to_user_id && !group_id) {
             return res.json({ success: false, message: 'Missing conversation user id' })
+        }
+
+        if (group_id) {
+            const group = await GroupChat.findById(group_id).select('members.user')
+            if (!group) return res.json({ success: false, message: 'Group chat not found' })
+            if (!isGroupMember(group, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+
+            await Message.updateMany(
+                { group_id, deletedFor: { $ne: userId } },
+                { $addToSet: { deletedFor: userId } }
+            )
+
+            res.json({ success: true, group_id })
+
+            const io = req.app.locals.io
+            if (io) io.to(`user-${userId}`).emit('conversation-deleted', { groupId: group_id })
+            return
         }
 
         await Message.updateMany(
@@ -665,9 +800,7 @@ export const editMessage = async (req, res) => {
         res.json({ success: true, messageId, text: message.text })
 
         const io = req.app.locals.io
-        if (io) {
-            io.to(`user-${message.to_user_id}`).emit('message-edited', { messageId, text: message.text })
-        }
+        await emitToMessageRecipients(io, message, 'message-edited', { messageId, text: message.text, groupId: getGroupId(message.group_id) || null })
     } catch (error) {
         res.json({ success: false, message: error.message })
     }
@@ -687,10 +820,19 @@ export const reactMessage = async (req, res) => {
             return res.json({ success: false, message: 'Message not found' })
         }
 
+        let group = null
+        if (message.group_id) {
+            group = await GroupChat.findById(message.group_id).select('members.user')
+            if (!group) return res.json({ success: false, message: 'Group chat not found' })
+            if (!isGroupMember(group, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+        }
+
         const otherParticipantId = message.from_user_id.toString() === userId
-            ? message.to_user_id.toString()
+            ? message.to_user_id?.toString()
             : message.from_user_id.toString()
-        if (await isConversationBlocked(userId, otherParticipantId)) {
+        if (!message.group_id && await isConversationBlocked(userId, otherParticipantId)) {
             return res.json({ success: false, message: 'Không thể bày tỏ cảm xúc vì một trong hai người đã chặn người còn lại' })
         }
 
@@ -704,23 +846,27 @@ export const reactMessage = async (req, res) => {
                 message.reactions.splice(existingReactionIndex, 1)
 
                 // Remove the automated reaction message
-                await Message.deleteMany({
-                    from_user_id: userId,
-                    to_user_id: message.from_user_id.toString(),
-                    message_type: 'reaction',
-                    $or: [{ reply_to: messageId }, { reply_to: null }]
-                })
+                if (!message.group_id) {
+                    await Message.deleteMany({
+                        from_user_id: userId,
+                        to_user_id: message.from_user_id.toString(),
+                        message_type: 'reaction',
+                        $or: [{ reply_to: messageId }, { reply_to: null }]
+                    })
+                }
             } else {
                 message.reactions[existingReactionIndex].type = reactionType
                 isNewReaction = true;
 
                 // If changing reaction, also delete old automated message so we can recreate
-                await Message.deleteMany({
-                    from_user_id: userId,
-                    to_user_id: message.from_user_id.toString(),
-                    message_type: 'reaction',
-                    $or: [{ reply_to: messageId }, { reply_to: null }]
-                })
+                if (!message.group_id) {
+                    await Message.deleteMany({
+                        from_user_id: userId,
+                        to_user_id: message.from_user_id.toString(),
+                        message_type: 'reaction',
+                        $or: [{ reply_to: messageId }, { reply_to: null }]
+                    })
+                }
             }
         } else {
             message.reactions.push({ user: userId, type: reactionType })
@@ -742,6 +888,17 @@ export const reactMessage = async (req, res) => {
 
         const io = req.app.locals.io
         if (io) {
+            if (message.group_id) {
+                getGroupMemberIds(group).forEach((recipientId) => {
+                    io.to(`user-${recipientId}`).emit('message-reaction-updated', {
+                        messageId,
+                        reactions: populatedMsg.reactions,
+                        groupId: getGroupId(message.group_id)
+                    })
+                })
+                return
+            }
+
             const messageOwner = message.from_user_id.toString()
             const otherUser = messageOwner === userId ? message.to_user_id.toString() : messageOwner
 
@@ -786,17 +943,28 @@ export const reactMessage = async (req, res) => {
 export const saveCall = async (req, res) => {
     try {
         const userId = req.userId
-        const { to_user_id, call_type, call_status, call_duration } = req.body
+        const { to_user_id, group_id, call_type, call_status, call_duration } = req.body
 
-        if (!to_user_id || !call_type || !call_status) {
+        if ((!to_user_id && !group_id) || !call_type || !call_status) {
             return res.json({ success: false, message: 'Missing required call fields' })
         }
 
-        if (to_user_id?.toString?.() === userId.toString()) {
+        if (!group_id && to_user_id?.toString?.() === userId.toString()) {
             return res.json({ success: false, message: 'Không thể gọi cho chính bạn' })
         }
 
-        if (await isConversationBlocked(userId, to_user_id)) {
+        let targetGroup = null
+        if (group_id) {
+            targetGroup = await GroupChat.findById(group_id).select('members.user')
+            if (!targetGroup) {
+                return res.json({ success: false, message: 'Group chat not found' })
+            }
+            if (!isGroupMember(targetGroup, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+        }
+
+        if (!group_id && await isConversationBlocked(userId, to_user_id)) {
             return res.json({ success: false, message: 'Không thể gọi vì một trong hai người đã chặn người còn lại' })
         }
 
@@ -808,7 +976,8 @@ export const saveCall = async (req, res) => {
 
         const message = await Message.create({
             from_user_id: userId,
-            to_user_id,
+            to_user_id: group_id ? undefined : to_user_id,
+            group_id: group_id || undefined,
             text: callTexts[call_status] || '📞 Cuộc gọi',
             message_type: 'call',
             call_type,
@@ -825,8 +994,14 @@ export const saveCall = async (req, res) => {
         // Emit to both parties so their ChatBox + RecentMessages update live
         const io = req.app.locals.io
         if (io) {
-            io.to(`user-${to_user_id}`).emit('new-message', populatedMsg)
-            io.to(`user-${userId}`).emit('new-message', populatedMsg)
+            if (group_id) {
+                getGroupMemberIds(targetGroup).forEach((memberId) => {
+                    io.to(`user-${memberId}`).emit('new-message', populatedMsg)
+                })
+            } else {
+                io.to(`user-${to_user_id}`).emit('new-message', populatedMsg)
+                io.to(`user-${userId}`).emit('new-message', populatedMsg)
+            }
         }
     } catch (error) {
         console.error('❌ Error in saveCall:', error)
