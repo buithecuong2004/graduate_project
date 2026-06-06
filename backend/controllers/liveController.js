@@ -63,30 +63,91 @@ export const startLiveStream = async (req, res) => {
         const currentUser = await User.findById(userId);
         if (!currentUser) return res.json({ success: false, message: 'User not found' });
 
-        const previousStreams = await LiveStream.find({ user: userId, status: 'live' }).select('_id').lean();
+        const previousLiveStreams = await LiveStream.find({ user: userId, status: 'live' }).select('_id').lean();
+        const endedAt = new Date();
 
         await LiveStream.updateMany(
-            { user: userId, status: 'live' },
-            { $set: { status: 'ended', ended_at: new Date(), viewers_count: 0 } }
+            { user: userId, status: { $in: ['preparing', 'live'] } },
+            { $set: { status: 'ended', ended_at: endedAt, viewers_count: 0 } }
         );
 
         const stream = await LiveStream.create({
             user: userId,
             title,
-            status: 'live',
-            started_at: new Date()
+            status: 'preparing'
         });
 
         const populatedStream = await populateLiveStream(LiveStream.findById(stream._id));
-        const notification = buildLiveNotification(populatedStream, currentUser);
         const recipientIds = getUniqueNotificationRecipientIds(currentUser, userId);
         const io = req.app.locals.io;
 
         if (io) {
-            previousStreams.forEach((previousStream) => {
+            previousLiveStreams.forEach((previousStream) => {
                 const payload = {
                     streamId: previousStream._id.toString(),
-                    endedAt: new Date()
+                    endedAt
+                };
+
+                io.to(`live-${previousStream._id}`).emit('live-stream-ended', payload);
+                [...new Set([userId, ...recipientIds])].forEach((recipientId) => {
+                    io.to(`user-${recipientId}`).emit('live-stream-ended', payload);
+                });
+            });
+        }
+
+        res.json({ success: true, message: 'Live stream is preparing', stream: populatedStream });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+export const goLiveStream = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { streamId } = req.params;
+        const title = (req.body.title || '').trim().slice(0, 140);
+
+        const currentUser = await User.findById(userId);
+        if (!currentUser) return res.json({ success: false, message: 'User not found' });
+
+        const stream = await LiveStream.findById(streamId);
+        if (!stream) return res.json({ success: false, message: 'Live stream not found' });
+        if (stream.user.toString() !== userId) {
+            return res.json({ success: false, message: 'You can only start your own live stream' });
+        }
+        if (stream.status === 'ended') {
+            return res.json({ success: false, message: 'Live stream has ended' });
+        }
+
+        const previousLiveStreams = await LiveStream.find({
+            _id: { $ne: streamId },
+            user: userId,
+            status: 'live'
+        }).select('_id').lean();
+        const endedAt = new Date();
+
+        await LiveStream.updateMany(
+            { _id: { $ne: streamId }, user: userId, status: { $in: ['preparing', 'live'] } },
+            { $set: { status: 'ended', ended_at: endedAt, viewers_count: 0 } }
+        );
+
+        const wasLive = stream.status === 'live';
+        if (title || req.body.title !== undefined) stream.title = title;
+        stream.status = 'live';
+        if (!stream.started_at) stream.started_at = new Date();
+        stream.ended_at = undefined;
+        await stream.save();
+
+        const populatedStream = await populateLiveStream(LiveStream.findById(stream._id));
+        const recipientIds = getUniqueNotificationRecipientIds(currentUser, userId);
+        const io = req.app.locals.io;
+
+        if (io) {
+            previousLiveStreams.forEach((previousStream) => {
+                const payload = {
+                    streamId: previousStream._id.toString(),
+                    endedAt
                 };
 
                 io.to(`live-${previousStream._id}`).emit('live-stream-ended', payload);
@@ -95,10 +156,13 @@ export const startLiveStream = async (req, res) => {
                 });
             });
 
-            recipientIds.forEach((recipientId) => {
-                io.to(`user-${recipientId}`).emit('live-stream-started', notification.data.stream);
-                io.to(`user-${recipientId}`).emit('new-live-notification', notification);
-            });
+            if (!wasLive) {
+                const notification = buildLiveNotification(populatedStream, currentUser);
+                recipientIds.forEach((recipientId) => {
+                    io.to(`user-${recipientId}`).emit('live-stream-started', notification.data.stream);
+                    io.to(`user-${recipientId}`).emit('new-live-notification', notification);
+                });
+            }
         }
 
         res.json({ success: true, message: 'Live stream started', stream: populatedStream });
@@ -119,6 +183,8 @@ export const endLiveStream = async (req, res) => {
             return res.json({ success: false, message: 'You can only end your own live stream' });
         }
 
+        const wasLive = stream.status === 'live';
+
         if (stream.status !== 'ended') {
             stream.status = 'ended';
             stream.ended_at = new Date();
@@ -138,9 +204,11 @@ export const endLiveStream = async (req, res) => {
 
         if (io) {
             io.to(`live-${stream._id}`).emit('live-stream-ended', payload);
-            [...new Set([userId, ...recipientIds])].forEach((recipientId) => {
-                io.to(`user-${recipientId}`).emit('live-stream-ended', payload);
-            });
+            if (wasLive) {
+                [...new Set([userId, ...recipientIds])].forEach((recipientId) => {
+                    io.to(`user-${recipientId}`).emit('live-stream-ended', payload);
+                });
+            }
         }
 
         res.json({ success: true, message: 'Live stream ended', streamId: stream._id });
@@ -318,6 +386,28 @@ export const reactToLiveStream = async (req, res) => {
             reactions: stream.reactions,
             reactionCounts
         });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+export const updateLiveTitle = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const { streamId } = req.params;
+        const title = (req.body.title || '').trim().slice(0, 140);
+
+        const stream = await LiveStream.findById(streamId).select('user status title');
+        if (!stream) return res.json({ success: false, message: 'Live stream not found' });
+        if (stream.user.toString() !== userId) {
+            return res.json({ success: false, message: 'Unauthorized' });
+        }
+
+        stream.title = title;
+        await stream.save();
+
+        res.json({ success: true, title: stream.title });
     } catch (error) {
         console.log(error);
         res.json({ success: false, message: error.message });

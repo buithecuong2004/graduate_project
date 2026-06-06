@@ -91,16 +91,43 @@ export const createGroupChat = async (req, res) => {
 export const getMyGroupChats = async (req, res) => {
     try {
         const userId = req.userId;
+
+        // Fetch all groups in one query with populate
         const groups = await populateGroup(
             GroupChat.find({ 'members.user': userId }).sort({ updatedAt: -1 }).lean()
         );
 
-        const groupsWithLatest = await Promise.all(groups.map(async (group) => {
-            const latestMessage = await Message.findOne({ group_id: group._id, deletedFor: { $ne: userId } })
-                .sort({ createdAt: -1 })
-                .populate('from_user_id', userSelect)
-                .lean();
-            return { ...group, latestMessage };
+        if (groups.length === 0) {
+            return res.json({ success: true, groups: [] });
+        }
+
+        // Fetch latest message for ALL groups in a single aggregation (no N+1)
+        const groupIds = groups.map((g) => g._id);
+        const latestMessages = await Message.aggregate([
+            { $match: { group_id: { $in: groupIds }, deletedFor: { $ne: userId } } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: '$group_id', latestMsg: { $first: '$$ROOT' } } }
+        ]);
+
+        // Batch-fetch senders for latest messages
+        const senderIds = [...new Set(latestMessages.map((lm) => lm.latestMsg.from_user_id?.toString()).filter(Boolean))];
+        const senderUsers = senderIds.length > 0
+            ? await User.find({ _id: { $in: senderIds } }).select(userSelect).lean()
+            : [];
+        const senderMap = Object.fromEntries(senderUsers.map((u) => [u._id.toString(), u]));
+
+        const latestMap = Object.fromEntries(
+            latestMessages.map((lm) => {
+                const msg = lm.latestMsg;
+                const senderId = msg.from_user_id?.toString();
+                if (senderId && senderMap[senderId]) msg.from_user_id = senderMap[senderId];
+                return [lm._id.toString(), msg];
+            })
+        );
+
+        const groupsWithLatest = groups.map((group) => ({
+            ...group,
+            latestMessage: latestMap[group._id.toString()] || null
         }));
 
         res.json({ success: true, groups: groupsWithLatest });

@@ -3,8 +3,8 @@ import mongoose from "mongoose";
 const liveStreamSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     title: { type: String, default: '' },
-    status: { type: String, enum: ['live', 'ended'], default: 'live' },
-    started_at: { type: Date, default: Date.now },
+    status: { type: String, enum: ['preparing', 'live', 'ended'], default: 'preparing' },
+    started_at: { type: Date },
     ended_at: { type: Date },
     viewers_count: { type: Number, default: 0 },
     reactions: [{

@@ -90,6 +90,12 @@ const LiveStream = () => {
   const [connectionState, setConnectionState] = useState('Đang kết nối')
   const [hasEnded, setHasEnded] = useState(false)
   const [hasRemoteStream, setHasRemoteStream] = useState(false)
+  // Pre-live preview states (host only)
+  const [isLiveStarted, setIsLiveStarted] = useState(false)
+  const [liveTitle, setLiveTitle] = useState('')
+  const [previewReady, setPreviewReady] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+  const [isGoingLive, setIsGoingLive] = useState(false)
 
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
@@ -100,19 +106,25 @@ const LiveStream = () => {
   const iceConfigRef = useRef(null)
   const iceConfigPromiseRef = useRef(null)
   const floatingTimersRef = useRef(new Set())
+  const pendingViewerSocketIdsRef = useRef(new Set())
+  const isLiveStartedRef = useRef(false)
 
-  const isHost = !!stream?.user && getUserId(stream.user) === getUserId(currentUser)
+  const currentUserId = getUserId(currentUser)
+  const isHost = !!stream?.user && getUserId(stream.user) === currentUserId
   const activeSocket = socket || socketRef?.current
 
   const currentUserReaction = useMemo(() => {
-    const userId = getUserId(currentUser)
-    const reaction = reactions.find((item) => getUserId(item.user) === userId)
+    const reaction = reactions.find((item) => getUserId(item.user) === currentUserId)
     return reaction?.type || null
-  }, [currentUser, reactions])
+  }, [currentUserId, reactions])
 
   const totalReactions = useMemo(() => (
     Object.values(reactionCounts).reduce((total, count) => total + count, 0)
   ), [reactionCounts])
+
+  useEffect(() => {
+    isLiveStartedRef.current = isLiveStarted
+  }, [isLiveStarted])
 
   const loadIceConfig = useCallback(async () => {
     if (iceConfigRef.current) return iceConfigRef.current
@@ -175,7 +187,10 @@ const LiveStream = () => {
   }, [])
 
   const startLocalStream = useCallback(async () => {
-    if (localStreamRef.current) return localStreamRef.current
+    if (localStreamRef.current) {
+      attachLocalStream()
+      return localStreamRef.current
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('Trình duyệt không hỗ trợ camera/micro')
@@ -379,7 +394,11 @@ const LiveStream = () => {
         setViewerCount(liveStream.viewers_count || 0)
         setReactions(liveStream.reactions || [])
         setReactionCounts(liveStream.reaction_counts || getReactionCounts(liveStream.reactions || []))
-        setHasEnded(liveStream.status !== 'live')
+        setHasEnded(liveStream.status === 'ended')
+        if (getUserId(liveStream.user) === currentUserId && liveStream.status === 'live') {
+          isLiveStartedRef.current = true
+          setIsLiveStarted(true)
+        }
 
         if (commentsResponse.data.success) {
           setComments(commentsResponse.data.comments || [])
@@ -399,16 +418,17 @@ const LiveStream = () => {
     return () => {
       cancelled = true
     }
-  }, [getToken, navigate, streamId])
+  }, [currentUserId, getToken, navigate, streamId])
 
   useEffect(() => {
     attachLocalStream()
-  }, [attachLocalStream, isCamOff])
+  }, [attachLocalStream, isCamOff, isLiveStarted, previewReady])
 
   useEffect(() => {
-    if (!activeSocket || !stream?._id || hasEnded) return undefined
+    if (!activeSocket || !stream?._id || !currentUserId || hasEnded) return undefined
 
     let cancelled = false
+    const pendingViewerSocketIds = pendingViewerSocketIdsRef.current
 
     const handleCommentCreated = (payload) => {
       if (payload?.streamId?.toString() !== streamId?.toString() || !payload.comment) return
@@ -437,11 +457,17 @@ const LiveStream = () => {
 
     const handleViewerJoined = (payload) => {
       if (payload?.streamId?.toString() !== streamId?.toString()) return
+      if (!payload.viewerSocketId) return
+      if (isHost && !isLiveStartedRef.current) {
+        pendingViewerSocketIdsRef.current.add(payload.viewerSocketId)
+        return
+      }
       createOfferForViewer(payload.viewerSocketId)
     }
 
     const handleViewerLeft = (payload) => {
       if (payload?.streamId?.toString() !== streamId?.toString()) return
+      if (payload.viewerSocketId) pendingViewerSocketIdsRef.current.delete(payload.viewerSocketId)
       closePeerConnection(payload.viewerSocketId)
       if (Number.isFinite(payload.viewers_count)) setViewerCount(payload.viewers_count)
     }
@@ -456,10 +482,12 @@ const LiveStream = () => {
 
     const joinLiveRoom = async () => {
       try {
-        if (isHost) {
+        if (isHost && isLiveStartedRef.current) {
           await startLocalStream()
           if (cancelled) return
           setConnectionState('Đang phát trực tiếp')
+        } else if (isHost) {
+          setConnectionState('Sẵn sàng phát trực tiếp')
         }
 
         activeSocket.emit('join-live-stream', {
@@ -494,6 +522,7 @@ const LiveStream = () => {
       activeSocket.off('live-viewer-left', handleViewerLeft)
       activeSocket.off('live-stream-ended', handleEnded)
       activeSocket.off('live-webrtc-signal', handleRemoteSignal)
+      pendingViewerSocketIds.clear()
       cleanupPeerConnections()
       if (isHost) cleanupLocalMedia()
     }
@@ -504,6 +533,7 @@ const LiveStream = () => {
     cleanupPeerConnections,
     closePeerConnection,
     createOfferForViewer,
+    currentUserId,
     handleRemoteSignal,
     hasEnded,
     isHost,
@@ -511,6 +541,71 @@ const LiveStream = () => {
     stream?._id,
     streamId
   ])
+
+  // Start preview camera as soon as we know user is host
+  useEffect(() => {
+    if (!stream || !isHost || isLiveStarted) return undefined
+    let cancelled = false
+
+    const startPreview = async () => {
+      try {
+        setPreviewError('')
+        const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        if (cancelled) {
+          mediaStream.getTracks().forEach((t) => t.stop())
+          return
+        }
+        localStreamRef.current = mediaStream
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = mediaStream
+          localVideoRef.current.play().catch(() => {})
+        }
+        setPreviewReady(true)
+      } catch {
+        if (!cancelled) setPreviewError('Không thể truy cập camera/micro. Vui lòng kiểm tra quyền truy cập.')
+      }
+    }
+
+    startPreview()
+    return () => { cancelled = true }
+  }, [stream, isHost, isLiveStarted])
+
+  // Handle going live: update title on server then join the socket room
+  const handleGoLive = async () => {
+    if (isGoingLive || !previewReady) return
+    try {
+      setIsGoingLive(true)
+      const token = await getToken()
+      await startLocalStream()
+      const { data } = await api.post(`/api/live/${streamId}/go-live`, { title: liveTitle.trim() }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (!data.success) {
+        toast.error(localizeMessage(data.message))
+        return
+      }
+
+      if (data.stream) {
+        setStream(data.stream)
+        setViewerCount(data.stream.viewers_count || 0)
+        setReactions(data.stream.reactions || [])
+        setReactionCounts(data.stream.reaction_counts || getReactionCounts(data.stream.reactions || []))
+        setHasEnded(data.stream.status === 'ended')
+      }
+
+      isLiveStartedRef.current = true
+      setIsLiveStarted(true)
+      setConnectionState('Đang phát trực tiếp')
+      const pendingViewerSocketIds = Array.from(pendingViewerSocketIdsRef.current)
+      pendingViewerSocketIdsRef.current.clear()
+      await Promise.all(pendingViewerSocketIds.map((viewerSocketId) => createOfferForViewer(viewerSocketId)))
+    } catch (error) {
+      toast.error(localizeMessage(error.message))
+    } finally {
+      setIsGoingLive(false)
+    }
+  }
 
   useEffect(() => () => {
     floatingTimersRef.current.forEach((timer) => clearTimeout(timer))
@@ -595,6 +690,106 @@ const LiveStream = () => {
       track.enabled = !track.enabled
     })
     setIsCamOff((value) => !value)
+  }
+
+  // ── Pre-live preview screen (host only) ──────────────────────────────────
+  if (!loading && stream && isHost && !isLiveStarted) {
+    return (
+      <div className='flex min-h-full flex-col items-center justify-center bg-slate-100 p-4 text-slate-950'>
+        <div className='w-full max-w-2xl'>
+          {/* Header */}
+          <div className='mb-6 flex items-center gap-3'>
+            <button
+              type='button'
+              onClick={() => {
+                cleanupLocalMedia()
+                navigate('/feed')
+              }}
+              className='rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50'
+            >
+              ← Hủy
+            </button>
+            <div>
+              <p className='text-xs font-black uppercase tracking-wide text-red-600'>Chuẩn bị phát trực tiếp</p>
+              <h1 className='text-xl font-black'>Xem trước Livestream</h1>
+            </div>
+          </div>
+
+          {/* Camera preview */}
+          <div className='relative mb-5 aspect-video w-full overflow-hidden rounded-3xl bg-black shadow-2xl'>
+            {previewReady ? (
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className='h-full w-full object-contain'
+                style={{ transform: 'scaleX(-1)' }}
+              />
+            ) : previewError ? (
+              <div className='flex h-full flex-col items-center justify-center gap-3 p-6 text-center'>
+                <VideoOff className='size-10 text-red-400' />
+                <p className='text-sm font-bold text-white/70'>{previewError}</p>
+                <button
+                  type='button'
+                  onClick={() => {
+                    setPreviewError('')
+                    setPreviewReady(false)
+                    // re-trigger the effect by toggling a dummy state — re-mount trick
+                    navigate(0)
+                  }}
+                  className='rounded-full bg-white/15 px-4 py-2 text-xs font-black transition hover:bg-white/25'
+                >
+                  Thử lại
+                </button>
+              </div>
+            ) : (
+              <div className='flex h-full items-center justify-center'>
+                <LoaderCircle className='size-8 animate-spin text-cyan-400' />
+              </div>
+            )}
+
+            {/* LIVE badge overlay */}
+            {previewReady && (
+              <div className='absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur'>
+                <span className='size-2 animate-pulse rounded-full bg-red-500' />
+                <span className='text-xs font-black text-white'>XEM TRƯỚC</span>
+              </div>
+            )}
+          </div>
+
+          {/* Title input */}
+          <div className='mb-5'>
+            <label className='mb-2 block text-sm font-black text-slate-700'>Tiêu đề livestream (tuỳ chọn)</label>
+            <input
+              type='text'
+              value={liveTitle}
+              onChange={(e) => setLiveTitle(e.target.value)}
+              maxLength={120}
+              placeholder='Nhập tiêu đề hấp dẫn cho buổi livestream của bạn...'
+              className='w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100'
+            />
+          </div>
+
+          {/* Tips */}
+          <div className='mb-6 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3'>
+            <p className='text-xs font-bold text-cyan-900'>💡 Mẹo: Đảm bảo ánh sáng tốt và micro hoạt động trước khi bắt đầu.</p>
+          </div>
+
+          {/* Go Live button */}
+          <button
+            type='button'
+            onClick={handleGoLive}
+            disabled={!previewReady || isGoingLive}
+            className='flex w-full items-center justify-center gap-3 rounded-2xl bg-red-600 py-4 text-base font-black text-white shadow-lg shadow-red-600/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50'
+          >
+            {isGoingLive
+              ? <><LoaderCircle className='size-5 animate-spin' /> Đang bắt đầu...</>
+              : <><Radio className='size-5' /> Bắt đầu Livestream</>}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {

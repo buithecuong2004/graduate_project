@@ -1,4 +1,5 @@
 import fs from "fs"
+import mongoose from "mongoose";
 import imagekit from "../configs/imageKit.js";
 import Message, { buildMessageSearchIndex, normalizeMessageSearchText } from "../models/Message.js";
 import User from "../models/User.js";
@@ -171,6 +172,21 @@ const populateMessage = async (msgObj) => {
         })
     }
 
+
+    // Populate shared_post_id with post data for message preview
+    if (msgObj.shared_post_id) {
+        const postId = msgObj.shared_post_id?._id || msgObj.shared_post_id
+        try {
+            const Post = (await import('../models/Post.js')).default
+            const sharedPost = await Post.findById(postId)
+                .populate('user', 'full_name username profile_picture _id')
+                .select('content image_urls video_url user _id')
+                .lean()
+            msgObj.shared_post_id = sharedPost || null
+        } catch (e) {
+            console.log('shared_post_id populate error:', e.message)
+        }
+    }
     return msgObj
 }
 
@@ -631,7 +647,8 @@ export const getUserRecentMessages = async (req, res) => {
     try {
         const userId = req.userId
 
-        let messages = await Message.find({
+        // Fetch only the most recent messages — populate in one batched query
+        const messages = await Message.find({
             $or: [
                 { from_user_id: userId },
                 { to_user_id: userId }
@@ -639,19 +656,83 @@ export const getUserRecentMessages = async (req, res) => {
             group_id: { $exists: false },
             deletedFor: { $ne: userId },
             $expr: { $ne: ['$from_user_id', '$to_user_id'] }
-        }).sort({ createdAt: -1 }).lean()
+        })
+            .sort({ createdAt: -1 })
+            .limit(300)
+            .populate('from_user_id', 'full_name username profile_picture _id isOnline lastSeen')
+            .populate('to_user_id', 'full_name username profile_picture _id isOnline lastSeen')
+            .lean()
 
-        messages = await Promise.all(
-            messages.map(async (msgObj) => {
-                const senderUser = await User.findById(msgObj.from_user_id)
-                const recipientUser = await User.findById(msgObj.to_user_id)
-                msgObj.from_user_id = senderUser
-                msgObj.to_user_id = recipientUser
-                return msgObj
+        res.json({ success: true, messages })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Chat Init — fetch recent messages + group chats in one request
+// ─────────────────────────────────────────────────────────────────
+export const getChatInit = async (req, res) => {
+    try {
+        const userId = req.userId
+        const userSelect = 'full_name username profile_picture _id isOnline lastSeen'
+        const userObjId = new mongoose.Types.ObjectId(userId)
+
+        const [messages, rawGroups] = await Promise.all([
+            // Recent DM messages — single populate query (no N+1)
+            Message.find({
+                $or: [{ from_user_id: userId }, { to_user_id: userId }],
+                group_id: { $exists: false },
+                deletedFor: { $ne: userId },
+                $expr: { $ne: ['$from_user_id', '$to_user_id'] }
+            })
+                .sort({ createdAt: -1 })
+                .limit(300)
+                .populate('from_user_id', userSelect)
+                .populate('to_user_id', userSelect)
+                .lean(),
+
+            // All groups the user belongs to
+            GroupChat.find({ 'members.user': userObjId })
+                .sort({ updatedAt: -1 })
+                .populate('creator', userSelect)
+                .populate('members.user', userSelect)
+                .lean()
+        ])
+
+        // Fetch latest message for each group in one batched query
+        const groupIds = rawGroups.map((g) => g._id)
+        const latestMessages = groupIds.length > 0
+            ? await Message.aggregate([
+                { $match: { group_id: { $in: groupIds }, deletedFor: { $ne: userId } } },
+                { $sort: { createdAt: -1 } },
+                { $group: { _id: '$group_id', latestMsg: { $first: '$$ROOT' } } }
+            ])
+            : []
+
+        // Collect unique sender IDs from latest messages
+        const senderIds = [...new Set(latestMessages.map((lm) => lm.latestMsg.from_user_id?.toString()).filter(Boolean))]
+        const senderUsers = senderIds.length > 0
+            ? await User.find({ _id: { $in: senderIds } }).select(userSelect).lean()
+            : []
+        const senderMap = Object.fromEntries(senderUsers.map((u) => [u._id.toString(), u]))
+
+        const latestMap = Object.fromEntries(
+            latestMessages.map((lm) => {
+                const msg = lm.latestMsg
+                const senderId = msg.from_user_id?.toString()
+                if (senderId && senderMap[senderId]) msg.from_user_id = senderMap[senderId]
+                return [lm._id.toString(), msg]
             })
         )
 
-        res.json({ success: true, messages })
+        const groups = rawGroups.map((group) => ({
+            ...group,
+            latestMessage: latestMap[group._id.toString()] || null
+        }))
+
+        res.json({ success: true, messages, groups })
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })

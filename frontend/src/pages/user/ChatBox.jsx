@@ -70,21 +70,40 @@ const sortMessagesByCreatedAt = (items = []) => (
   [...items].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
 )
 
-const getFloatingPanelPosition = (anchorRect, panelWidth, panelHeight, align = 'left') => {
+const getFloatingPanelPosition = (anchorRect, panelWidth, panelHeight, align = 'left', forceAbove = false) => {
   if (typeof window === 'undefined') return { top: 0, left: 0 }
 
   const margin = 10
-  const preferredTop = anchorRect.top - panelHeight - 8
-  const top = preferredTop < margin
-    ? anchorRect.bottom + 8
-    : preferredTop
+  let top
+
+  if (forceAbove) {
+    // Center the panel vertically on the trigger so it's aligned with the three-dot button.
+    const centeredTop = anchorRect.top + (anchorRect.height - panelHeight) / 2
+    const centeredLeft = anchorRect.left + (anchorRect.width - panelWidth) / 2
+    const clampedLeft = Math.max(margin, Math.min(centeredLeft, window.innerWidth - panelWidth - margin))
+    const clampedTop = Math.max(-panelHeight, Math.min(centeredTop, window.innerHeight - panelHeight - margin))
+    return { top: clampedTop, left: clampedLeft }
+  } else {
+    const spaceBelow = window.innerHeight - anchorRect.bottom - margin
+    const spaceAbove = anchorRect.top - margin
+    // Prefer showing below; only flip above when not enough space below
+    top = spaceBelow >= panelHeight || spaceBelow >= spaceAbove
+      ? anchorRect.bottom + 4
+      : anchorRect.top - panelHeight - 4
+  }
+
+  // Prefer centering the panel horizontally relative to the trigger element.
+  // If `align` is 'right' we keep the previous behavior to align to the right edge.
   const preferredLeft = align === 'right'
     ? anchorRect.right - panelWidth
-    : anchorRect.left
+    : anchorRect.left + (anchorRect.width - panelWidth) / 2
+
+  // Clamp horizontal placement to viewport bounds with margin
+  const left = Math.max(margin, Math.min(preferredLeft, window.innerWidth - panelWidth - margin))
 
   return {
-    top: Math.max(margin, Math.min(top, window.innerHeight - panelHeight - margin)),
-    left: Math.max(margin, Math.min(preferredLeft, window.innerWidth - panelWidth - margin)),
+    top: forceAbove ? top : Math.max(margin, Math.min(top, window.innerHeight - panelHeight - margin)),
+    left,
   }
 }
 
@@ -199,7 +218,10 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
   const [forwardingMsg, setForwardingMsg] = useState(null)
   const [connections, setConnections] = useState([])
   const [forwardSelected, setForwardSelected] = useState([])
+  const [forwardSelectedGroups, setForwardSelectedGroups] = useState([])
   const [forwardSearch, setForwardSearch] = useState('')
+  const [forwardTab, setForwardTab] = useState('friends')
+  const [forwardGroups, setForwardGroups] = useState([])
   const [isForwarding, setIsForwarding] = useState(false)
 
   // Media Viewer and Reaction states
@@ -619,12 +641,39 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
     }
 
     setOpenMenuId(message._id)
-    setActionMenuPosition(getFloatingPanelPosition(
-      event.currentTarget.getBoundingClientRect(),
-      FLOATING_MENU_WIDTH,
-      FLOATING_MENU_HEIGHT,
-      isOwn ? 'right' : 'left'
-    ))
+      // Force the action menu to display above the three-dot trigger so it doesn't appear far below
+      // Then apply a small offset: move down ~60px and right ~5px relative to the trigger
+      const rawPos = getFloatingPanelPosition(
+        event.currentTarget.getBoundingClientRect(),
+        FLOATING_MENU_WIDTH,
+        FLOATING_MENU_HEIGHT,
+        isOwn ? 'right' : 'left',
+        true // forceAbove
+      )
+      // Apply per-side offsets: other's messages → shift right 80px; own messages → shift up and left 80px
+      let topOffset, leftOffset
+      if (isOwn) {
+        // Keep vertical level aligned with the trigger (no extra vertical offset)
+        topOffset = 0
+        leftOffset = -80 // move left
+      } else {
+        topOffset = 0 // align vertically with trigger for other messages as well
+        leftOffset = 80 // move right
+      }
+
+      let finalTop = rawPos.top + topOffset
+      let finalLeft = rawPos.left + leftOffset
+
+      // Clamp horizontal position to viewport bounds
+      const hMargin = 10
+      finalLeft = Math.max(hMargin, Math.min(finalLeft, window.innerWidth - FLOATING_MENU_WIDTH - hMargin))
+
+      // Allow vertical overlap (can be negative) but prevent it from going extremely off-screen
+      const vMin = -FLOATING_MENU_HEIGHT
+      const vMax = window.innerHeight - FLOATING_MENU_HEIGHT - hMargin
+      finalTop = Math.max(vMin, Math.min(finalTop, vMax))
+
+      setActionMenuPosition({ top: finalTop, left: finalLeft })
   }
 
   const handleReply = (message) => {
@@ -681,13 +730,21 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
     }
   }
 
-  const handleForwardOpen = (message) => {
+  const handleForwardOpen = async (message) => {
     setForwardingMsg(message)
     setShowForwardModal(true)
     setForwardSelected([])
+    setForwardSelectedGroups([])
     setForwardSearch('')
+    setForwardTab('friends')
     setConnections(reduxConnections || [])
     if (!reduxConnections?.length) fetchConnections()
+    // Fetch groups
+    try {
+      const token = await getToken()
+      const { data } = await api.get('/api/group', { headers: { Authorization: `Bearer ${token}` } })
+      if (data.success) setForwardGroups(data.groups || [])
+    } catch (e) { console.error('fetch groups error:', e) }
     closeMessageActions()
   }
 
@@ -695,24 +752,29 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
     setShowForwardModal(false)
     setForwardingMsg(null)
     setForwardSelected([])
+    setForwardSelectedGroups([])
     setForwardSearch('')
+    setForwardTab('friends')
   }
 
   // ── FIX: forward media (images / videos / voice) by passing media_urls + message_type ──
   const handleForwardSend = async () => {
-    if (forwardSelected.length === 0) return toast.error('Vui lòng chọn ít nhất một người')
+    const totalForward = forwardSelected.length + forwardSelectedGroups.length
+    if (totalForward === 0) return toast.error('Vui lòng chọn ít nhất một người hoặc nhóm')
     if (isForwardingRef.current) return
     if (isChatBlocked && forwardSelected.includes(userId)) {
       return toast.error('Bạn không thể chuyển tiếp vào đoạn chat này')
     }
 
     const selectedIds = [...forwardSelected]
+    const selectedGroupIds = [...forwardSelectedGroups]
     const messageToForward = forwardingMsg
     if (!messageToForward) return
 
     const shouldAppendToCurrentChat = selectedIds.includes(userId)
     const tempMessageId = `temp-forward-${Date.now()}`
     const isLink = messageToForward?.text && /https?:\/\/|\/post\//.test(messageToForward.text)
+    const isStoryReply = messageToForward?.forwarded_type === 'story'
 
     isForwardingRef.current = true
     setIsForwarding(true)
@@ -724,10 +786,8 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
         from_user_id: currentUser,
         to_user_id: userId,
         text: messageToForward?.text || '',
-        media_urls: messageToForward?.forwarded_type === 'story' ? [] : (messageToForward?.media_urls || []),
-        message_type: messageToForward?.forwarded_type === 'story'
-          ? 'text'
-          : (messageToForward?.message_type || 'text'),
+        media_urls: isStoryReply ? [] : (messageToForward?.media_urls || []),
+        message_type: isStoryReply ? 'text' : (messageToForward?.message_type || 'text'),
         is_forwarded: true,
         forwarded_type: isLink ? 'link' : 'message',
         createdAt: new Date().toISOString(),
@@ -738,51 +798,54 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
 
     try {
       const token = await getToken()
+      const urls = isStoryReply ? [] : (messageToForward?.media_urls || [])
 
-      await Promise.all(
-        selectedIds.map(async uid => {
-          const formData = new FormData()
-          formData.append('to_user_id', uid)
-          formData.append('text', messageToForward?.text || '')
-          formData.append('is_forwarded', 'true')
-          formData.append('forwarded_type', isLink ? 'link' : 'message')
+      const buildFormData = (target, isGroup = false) => {
+        const formData = new FormData()
+        if (isGroup) formData.append('group_id', target)
+        else formData.append('to_user_id', target)
+        formData.append('text', messageToForward?.text || '')
+        formData.append('is_forwarded', 'true')
+        formData.append('forwarded_type', isLink ? 'link' : 'message')
+        if (urls.length > 0) {
+          urls.forEach(url => formData.append('media_urls[]', url))
+          formData.append('message_type', messageToForward?.message_type || 'images')
+        } else if (isStoryReply) {
+          formData.append('message_type', 'text')
+        }
+        return formData
+      }
 
-          // ✅ Pass pre-existing media URLs so the backend can attach them
-          // DO NOT pass media if it's a story reply, as that media belongs to the story, not the reply message itself.
-          const isStoryReply = messageToForward?.forwarded_type === 'story'
-          const urls = isStoryReply ? [] : (messageToForward?.media_urls || [])
-          if (urls.length > 0) {
-            urls.forEach(url => formData.append('media_urls[]', url))
-            formData.append('message_type', messageToForward?.message_type || 'images')
-          } else if (isStoryReply) {
-            formData.append('message_type', 'text')
-          }
-
-          const res = await api.post('/api/message/send', formData, {
+      await Promise.all([
+        // Forward to DM users
+        ...selectedIds.map(async uid => {
+          const res = await api.post('/api/message/send', buildFormData(uid, false), {
             headers: { Authorization: `Bearer ${token}` }
           })
           if (!res.data.success) throw new Error(res.data.message)
-
           if (uid === userId && res.data.success) {
             setMessages((prev) => {
-              if (prev.some((message) => message._id === res.data.message._id)) {
-                return prev.filter((message) => message._id !== tempMessageId)
-              }
-              if (prev.some((message) => message._id === tempMessageId)) {
-                return prev.map((message) => message._id === tempMessageId ? res.data.message : message)
-              }
+              if (prev.some(m => m._id === res.data.message._id)) return prev.filter(m => m._id !== tempMessageId)
+              if (prev.some(m => m._id === tempMessageId)) return prev.map(m => m._id === tempMessageId ? res.data.message : m)
               return [...prev, res.data.message]
             })
           }
-          return res
+        }),
+        // Forward to group chats
+        ...selectedGroupIds.map(async gid => {
+          const res = await api.post('/api/message/send', buildFormData(gid, true), {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+          if (!res.data.success) throw new Error(res.data.message)
         })
-      )
+      ])
+
       toast.success('Đã chuyển tiếp tin nhắn')
       dispatch(setNewMessageTrigger(Date.now()))
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
     } catch (e) {
       if (shouldAppendToCurrentChat) {
-        setMessages((prev) => prev.filter((message) => message._id !== tempMessageId))
+        setMessages((prev) => prev.filter(m => m._id !== tempMessageId))
       }
       toast.error(localizeMessage(e.message))
     } finally {
@@ -2231,6 +2294,46 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
                             </div>
                           )}
                           {message.text && renderMessageText(message.text)}
+                          {/* ── Shared post preview card ── */}
+                          {!message.is_deleted && message.shared_post_id && typeof message.shared_post_id === 'object' && (() => {
+                            const sp = message.shared_post_id
+                            const spImage = sp?.image_urls?.[0]
+                            const spHasVideo = !!sp?.video_url
+                            return (
+                              <a
+                                href={`/post/${sp._id}`}
+                                onClick={e => { e.preventDefault(); navigate(`/post/${sp._id}`) }}
+                                className={`block mt-2 rounded-2xl overflow-hidden border text-left transition hover:opacity-90 ${isOwn ? 'border-cyan-500/40 bg-cyan-600/30' : 'border-slate-200 bg-slate-50'}`}
+                              >
+                                {/* Post media */}
+                                {spHasVideo ? (
+                                  <div className='relative bg-black'>
+                                    <video src={sp.video_url} className='w-full max-h-36 object-cover opacity-80' muted preload='metadata' />
+                                    <div className='absolute inset-0 flex items-center justify-center'>
+                                      <div className='flex size-9 items-center justify-center rounded-full bg-white/90'>
+                                        <svg className='ml-0.5 size-4 fill-cyan-700' viewBox='0 0 24 24'><path d='M8 5v14l11-7z'/></svg>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : spImage ? (
+                                  <img src={spImage} alt='' className='w-full max-h-36 object-cover' />
+                                ) : null}
+                                {/* Author + text */}
+                                <div className='px-3 py-2'>
+                                  <div className='flex items-center gap-2 mb-1'>
+                                    <img src={sp.user?.profile_picture} alt='' className='size-5 rounded-full object-cover shrink-0' />
+                                    <span className={`text-[11px] font-black truncate ${isOwn ? 'text-cyan-100' : 'text-slate-700'}`}>{sp.user?.full_name}</span>
+                                  </div>
+                                  {sp.content && (
+                                    <p className={`text-xs line-clamp-2 leading-5 ${isOwn ? 'text-cyan-50' : 'text-slate-600'}`}>{sp.content}</p>
+                                  )}
+                                  {!sp.content && !spImage && !spHasVideo && (
+                                    <p className={`text-xs italic ${isOwn ? 'text-cyan-200' : 'text-slate-400'}`}>Xem bài viết</p>
+                                  )}
+                                </div>
+                              </a>
+                            )
+                          })()}
                           {message.is_edited && (
                             <span className={`text-[10px] ${isOwn ? 'text-cyan-100' : 'text-gray-400'}`}> · đã sửa</span>
                           )}
@@ -2628,15 +2731,16 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
 
       {/* ── Forward Modal ── */}
       {showForwardModal && (
-        <div className='fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50'>
-          <div className='bg-white rounded-2xl shadow-xl w-full max-w-md mx-4'>
-            <div className='flex items-center justify-between px-5 py-4 border-b border-gray-100'>
+        <div className='fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200]'>
+          <div className='bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 flex flex-col max-h-[80vh]'>
+            {/* Header */}
+            <div className='flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0'>
               <h3 className='font-semibold text-slate-800'>Chuyển tiếp tin nhắn</h3>
-              {/* ✅ closeForwardModal clears all forward state */}
               <button onClick={closeForwardModal} className='text-gray-400 hover:text-gray-600'><X size={18} /></button>
             </div>
-            <div className='px-5 py-3'>
-              {/* Preview */}
+
+            <div className='px-5 py-3 overflow-y-auto flex-1'>
+              {/* Message preview */}
               <div className='bg-gray-50 rounded-xl px-3 py-2 mb-3 text-sm text-gray-600 border border-gray-200'>
                 <p className='text-[10px] text-gray-400 mb-1 flex items-center gap-1'><CornerUpRight size={10} /> Đang chuyển tiếp</p>
                 {forwardingMsg?.message_type === 'voice' && <p>🎤 Tin nhắn thoại</p>}
@@ -2646,41 +2750,90 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
                   <p className='line-clamp-2'>{forwardingMsg?.text || '—'}</p>
                 )}
               </div>
+
               {/* Search */}
               <input
                 type='text'
-                placeholder='Tìm kiếm người bạn...'
+                placeholder='Tìm kiếm...'
                 value={forwardSearch}
                 onChange={e => setForwardSearch(e.target.value)}
-                className='w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-indigo-300 mb-2'
+                className='w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-cyan-300 mb-2'
               />
+
+              {/* Tabs */}
+              <div className='flex gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 mb-2'>
+                {[
+                  { key: 'friends', label: 'Bạn bè', count: forwardSelected.length },
+                  { key: 'groups', label: 'Nhóm chat', count: forwardSelectedGroups.length }
+                ].map(tab => (
+                  <button key={tab.key} type='button' onClick={() => setForwardTab(tab.key)}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition cursor-pointer ${forwardTab === tab.key ? 'bg-white shadow-sm text-slate-950' : 'text-slate-500 hover:text-slate-700'}`}>
+                    {tab.label}
+                    {tab.count > 0 && (
+                      <span className='flex size-4 items-center justify-center rounded-full bg-cyan-700 text-[9px] font-black text-white'>{tab.count}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
               {/* List */}
               <div className='max-h-52 overflow-y-auto space-y-1'>
-                {forwardConnections
-                  .filter(c => c.full_name.toLowerCase().includes(forwardSearch.toLowerCase()) || c.username.toLowerCase().includes(forwardSearch.toLowerCase()))
-                  .map(conn => (
-                    <label key={conn._id} className='flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 cursor-pointer'>
-                      <input type='checkbox' checked={forwardSelected.includes(conn._id)}
-                        onChange={() => setForwardSelected(prev => prev.includes(conn._id) ? prev.filter(id => id !== conn._id) : [...prev, conn._id])}
-                        className='w-4 h-4 rounded accent-indigo-500'
-                      />
-                      <img src={conn.profile_picture} alt='' className='w-8 h-8 rounded-full object-cover' />
-                      <div>
-                        <p className='text-sm font-medium text-slate-800'>{conn.full_name}</p>
-                        <p className='text-xs text-gray-500'>@{conn.username}</p>
-                      </div>
-                    </label>
-                  ))}
+                {forwardTab === 'friends' ? (
+                  forwardConnections
+                    .filter(c => c.full_name?.toLowerCase().includes(forwardSearch.toLowerCase()) || c.username?.toLowerCase().includes(forwardSearch.toLowerCase()))
+                    .length === 0 ? (
+                      <p className='text-center text-sm text-slate-400 py-6'>Không tìm thấy bạn bè</p>
+                    ) : forwardConnections
+                      .filter(c => c.full_name?.toLowerCase().includes(forwardSearch.toLowerCase()) || c.username?.toLowerCase().includes(forwardSearch.toLowerCase()))
+                      .map(conn => (
+                        <label key={conn._id} className='flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 cursor-pointer'>
+                          <input type='checkbox' checked={forwardSelected.includes(conn._id)}
+                            onChange={() => setForwardSelected(prev => prev.includes(conn._id) ? prev.filter(id => id !== conn._id) : [...prev, conn._id])}
+                            className='w-4 h-4 rounded accent-cyan-600'
+                          />
+                          <img src={conn.profile_picture} alt='' className='w-8 h-8 rounded-full object-cover' />
+                          <div>
+                            <p className='text-sm font-medium text-slate-800'>{conn.full_name}</p>
+                            <p className='text-xs text-gray-500'>@{conn.username}</p>
+                          </div>
+                        </label>
+                      ))
+                ) : (
+                  forwardGroups
+                    .filter(g => g.name?.toLowerCase().includes(forwardSearch.toLowerCase()))
+                    .length === 0 ? (
+                      <p className='text-center text-sm text-slate-400 py-6'>Bạn chưa có nhóm chat nào</p>
+                    ) : forwardGroups
+                      .filter(g => g.name?.toLowerCase().includes(forwardSearch.toLowerCase()))
+                      .map(group => (
+                        <label key={group._id} className='flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-gray-50 cursor-pointer'>
+                          <input type='checkbox' checked={forwardSelectedGroups.includes(group._id)}
+                            onChange={() => setForwardSelectedGroups(prev => prev.includes(group._id) ? prev.filter(id => id !== group._id) : [...prev, group._id])}
+                            className='w-4 h-4 rounded accent-cyan-600'
+                          />
+                          {group.avatar_url
+                            ? <img src={group.avatar_url} alt='' className='w-8 h-8 rounded-full object-cover' />
+                            : <div className='flex w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600 items-center justify-center text-[10px] font-black text-white shrink-0'>{(group.name || 'G').slice(0, 2).toUpperCase()}</div>
+                          }
+                          <div>
+                            <p className='text-sm font-medium text-slate-800'>{group.name}</p>
+                            <p className='text-xs text-gray-500'>{group.members?.length || 0} thành viên</p>
+                          </div>
+                        </label>
+                      ))
+                )}
               </div>
             </div>
-            <div className='px-5 py-4 border-t border-gray-100 flex gap-2'>
+
+            {/* Footer */}
+            <div className='px-5 py-4 border-t border-gray-100 flex gap-2 shrink-0'>
               <button onClick={closeForwardModal} className='flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition'>Hủy</button>
               <button
                 onClick={handleForwardSend}
-                disabled={forwardSelected.length === 0 || isForwarding}
+                disabled={(forwardSelected.length + forwardSelectedGroups.length) === 0 || isForwarding}
                 className='flex-1 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-sm font-medium transition disabled:opacity-50'
               >
-                {isForwarding ? 'Đang gửi...' : `Gửi (${forwardSelected.length})`}
+                {isForwarding ? 'Đang gửi...' : `Gửi (${forwardSelected.length + forwardSelectedGroups.length})`}
               </button>
             </div>
           </div>

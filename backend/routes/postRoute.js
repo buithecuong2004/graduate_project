@@ -1,5 +1,5 @@
 import express from 'express';
-import { addPost, getFeedPosts, likePost, reactPost, addComment, getComments, deleteComment, likeComment, reactComment, deletePost, hidePostForUser, hideCommentForUser, addReply, getReplies, deleteReply, getPostById, sharePost } from '../controllers/postController.js';
+import { addPost, getFeedPosts, likePost, reactPost, addComment, getComments, deleteComment, likeComment, reactComment, deletePost, hidePostForUser, hideCommentForUser, addReply, getReplies, deleteReply, getPostById, sharePost, trackView } from '../controllers/postController.js';
 import { upload } from '../configs/multer.js';
 import { protect } from '../middlewares/auth.js';
 
@@ -14,6 +14,7 @@ postRouter.get('/:postId', protect, getPostById)
 postRouter.post('/like', protect, likePost)
 postRouter.post('/react', protect, reactPost)
 postRouter.post('/share', protect, sharePost)
+postRouter.post('/view', protect, trackView)
 postRouter.post('/delete', protect, deletePost)
 postRouter.post('/hide', protect, hidePostForUser)
 postRouter.post('/comment/add', protect, addComment)

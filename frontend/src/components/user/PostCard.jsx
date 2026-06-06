@@ -17,6 +17,9 @@ import ReactionListModal from './ReactionListModal'
 import { REACTION_ICONS, REACTION_LABELS } from '../../utils/reactions'
 import { REPORT_REASON_OPTIONS } from '../../utils/reportReasons'
 
+// Module-level set so view signals are deduplicated across re-renders
+const viewedPostIds = new Set()
+
 const withHashtags = (content = '') => content.replace(/(#\w+)/g, '<span class="text-cyan-700 font-semibold">$1</span>')
 
 const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) => {
@@ -52,6 +55,44 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     const { socketRef, socket } = useSocket()
     const navigate = useNavigate()
     const isOwner = post.user._id === currentUser._id
+    const articleRef = useRef(null)
+
+    // ── View tracking ──────────────────────────────────────────────
+    useEffect(() => {
+        if (isOwner || !post._id || viewedPostIds.has(post._id)) return
+        const el = articleRef.current
+        if (!el) return
+
+        let timer = null
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    timer = setTimeout(async () => {
+                        if (viewedPostIds.has(post._id)) return
+                        viewedPostIds.add(post._id)
+                        try {
+                            const token = await getToken()
+                            await api.post('/api/post/view', { postId: post._id }, {
+                                headers: { Authorization: `Bearer ${token}` }
+                            })
+                        } catch {
+                            // Non-critical — ignore errors
+                        }
+                    }, 1500)
+                } else {
+                    clearTimeout(timer)
+                }
+            },
+            { threshold: 0.5 }
+        )
+
+        observer.observe(el)
+        return () => {
+            observer.disconnect()
+            clearTimeout(timer)
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [post._id, isOwner])
 
     useEffect(() => {
         onPostDeletedRef.current = onPostDeleted
@@ -256,7 +297,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
     if (isLocallyHidden) return null
 
     return (
-        <article className='surface w-full max-w-2xl rounded-[1.6rem] p-4 space-y-4 sm:p-5'>
+        <article ref={articleRef} className='surface w-full max-w-2xl rounded-[1.6rem] p-4 space-y-4 sm:p-5'>
             <div className='flex items-center justify-between'>
                 <div onClick={() => navigate('/profile/' + post.user._id)} className='inline-flex min-w-0 items-center gap-3 cursor-pointer'>
                     <img src={post.user.profile_picture} alt='' className='w-11 h-11 rounded-full object-cover avatar-ring' />

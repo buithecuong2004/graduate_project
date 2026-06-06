@@ -1,8 +1,8 @@
 import express from 'express'
-import { acceptConnectionRequest, blockUser, cancelConnectionRequest, changePassword, declineConnectionRequest, discoverUsers, followUser, getUserBlockStatus, getUserConnections, getUserData, getUserProfiles, removeConnection, sendConnectionRequest, unblockUser, unfollowUser, updateUserData } from '../controllers/userController.js'
+import { acceptConnectionRequest, blockUser, cancelConnectionRequest, changePassword, declineConnectionRequest, discoverUsers, followUser, getUserBlockStatus, getUserConnections, getUserData, getUserProfiles, getLikedPosts, removeConnection, sendConnectionRequest, unblockUser, unfollowUser, updateUserData } from '../controllers/userController.js'
 import { protect } from '../middlewares/auth.js'
 import { upload } from '../configs/multer.js'
-import { getUserRecentMessages, markMessagesAsRead } from '../controllers/messageController.js'
+import { getUserRecentMessages, markMessagesAsRead, getChatInit } from '../controllers/messageController.js'
 
 const userRouter = express.Router()
 
@@ -22,7 +22,9 @@ userRouter.post('/block', protect, blockUser)
 userRouter.post('/unblock', protect, unblockUser)
 userRouter.get('/connections', protect, getUserConnections)
 userRouter.post('/profiles', protect, getUserProfiles)
+userRouter.post('/liked-posts', protect, getLikedPosts)
 userRouter.get('/recent-messages', protect, getUserRecentMessages)
+userRouter.get('/chat-init', protect, getChatInit)
 userRouter.post('/mark-messages-read', protect, markMessagesAsRead)
 
 export default userRouter

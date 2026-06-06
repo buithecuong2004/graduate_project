@@ -3,8 +3,85 @@ import imagekit from "../configs/imageKit.js";
 import Post from "../models/Post.js";
 import Comment from "../models/Comment.js";
 import User from "../models/User.js";
+import UserInterest from "../models/UserInterest.js";
 import axios from "axios";
 import { getUniqueNotificationRecipientIds } from "../utils/notificationRecipients.js";
+
+// ─────────────────────────────────────────────────────────────────
+// Interest Profile Helpers
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Map a Post.post_type to a simplified content-type bucket.
+ */
+const getContentTypeKey = (postType = '') => {
+    if (postType.includes('video')) return 'video'
+    if (postType.includes('image')) return 'image'
+    return 'text'
+}
+
+/**
+ * Atomically update the viewer's interest profile after an interaction.
+ * @param {string} viewerId   - user who performed the action
+ * @param {string} authorId   - post/content author
+ * @param {object} opts       - { reactionDelta, commentDelta, shareDelta, viewDelta, postType }
+ */
+const updateInterest = async (viewerId, authorId, opts = {}) => {
+    try {
+        if (!viewerId || !authorId || viewerId === authorId.toString()) return
+
+        const {
+            reactionDelta = 0,
+            commentDelta = 0,
+            shareDelta = 0,
+            viewDelta = 0,
+            postType = ''
+        } = opts
+
+        const scoreDelta = reactionDelta * 3 + commentDelta * 2 + shareDelta * 1.5 + viewDelta * 0.5
+        const contentKey = getContentTypeKey(postType)
+
+        // Upsert the viewer's interest document
+        const interest = await UserInterest.findOneAndUpdate(
+            { viewer: viewerId },
+            { $setOnInsert: { viewer: viewerId } },
+            { upsert: true, new: true }
+        )
+
+        const idx = interest.interactions.findIndex(
+            (i) => i.author.toString() === authorId.toString()
+        )
+
+        if (idx === -1) {
+            interest.interactions.push({
+                author: authorId,
+                score: scoreDelta,
+                reactionCount: reactionDelta,
+                commentCount: commentDelta,
+                shareCount: shareDelta,
+                viewCount: viewDelta,
+                lastInteracted: new Date(),
+            })
+        } else {
+            interest.interactions[idx].score = Math.max(0, interest.interactions[idx].score + scoreDelta)
+            interest.interactions[idx].reactionCount += reactionDelta
+            interest.interactions[idx].commentCount += commentDelta
+            interest.interactions[idx].shareCount += shareDelta
+            interest.interactions[idx].viewCount += viewDelta
+            interest.interactions[idx].lastInteracted = new Date()
+        }
+
+        if (contentKey && scoreDelta > 0) {
+            interest.contentTypePreference[contentKey] = (interest.contentTypePreference[contentKey] || 0) + scoreDelta
+        }
+
+        interest.updatedAt = new Date()
+        await interest.save()
+    } catch (err) {
+        // Non-critical — never let this break the main request
+        console.error('updateInterest error:', err.message)
+    }
+}
 
 const visibleForUserFilter = (userId) => ({
     is_hidden: { $ne: true },
@@ -213,14 +290,33 @@ export const getFeedPosts = async (req, res) => {
         const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50)
         const skip = (pageNum - 1) * limitNum
 
-        const user = await User.findById(userId)
-        if (!user) {
-            return res.json({ success: false, message: 'User not found' })
-        }
+        const [user, interestProfile] = await Promise.all([
+            User.findById(userId),
+            UserInterest.findOne({ viewer: userId }).lean()
+        ])
+
+        if (!user) return res.json({ success: false, message: 'User not found' })
 
         const connectionIds = (user.connections || []).map(id => id.toString())
         const followingIds = (user.following || []).map(id => id.toString())
         const networkIdSet = new Set([userId.toString(), ...connectionIds, ...followingIds])
+
+        // Build interest lookup: authorId → score (0-100 normalised later)
+        const interestMap = new Map()
+        const totalInterestScore = (interestProfile?.interactions || []).reduce((sum, i) => sum + i.score, 0)
+        ;(interestProfile?.interactions || []).forEach(i => {
+            const normalized = totalInterestScore > 0 ? (i.score / totalInterestScore) * 100 : 0
+            interestMap.set(i.author.toString(), Math.min(normalized, 40)) // cap at 40 pts
+        })
+
+        // Content-type preference
+        const ctPref = interestProfile?.contentTypePreference || {}
+        const ctTotal = (ctPref.text || 0) + (ctPref.image || 0) + (ctPref.video || 0)
+        const getContentTypeBonus = (postType = '') => {
+            if (!ctTotal) return 0
+            const key = getContentTypeKey(postType)
+            return Math.min(((ctPref[key] || 0) / ctTotal) * 10, 10)
+        }
 
         const scorePost = (post, commentCount) => {
             const reactions = (post.reactions || []).length
@@ -241,7 +337,16 @@ export const getFeedPosts = async (req, res) => {
             else if (connectionIds.includes(postUserId)) relationshipBonus = 20
             else if (followingIds.includes(postUserId)) relationshipBonus = 10
 
-            return engagementScore + recencyBonus + relationshipBonus
+            // Interest bonus: how much has this viewer interacted with this author?
+            const interestBonus = interestMap.get(postUserId) || 0
+
+            // Content-type preference bonus
+            const contentTypeBonus = getContentTypeBonus(post.post_type)
+
+            // Small random shuffle so reload produces slightly different order
+            const shuffleJitter = (Math.random() * 10) - 5
+
+            return engagementScore + recencyBonus + relationshipBonus + interestBonus + contentTypeBonus + shuffleJitter
         }
 
         const candidatePoolSize = Math.max(skip + limitNum * 5, 100)
@@ -262,12 +367,26 @@ export const getFeedPosts = async (req, res) => {
                 const postObj = { ...post.toObject(), total_comments_count: totalComments }
                 const postUserId = (postObj.user?._id || postObj.user)?.toString()
                 const isNetworkPost = networkIdSet.has(postUserId)
+                const ageHours = (Date.now() - new Date(postObj.createdAt).getTime()) / (1000 * 60 * 60)
+                const isFresh = ageHours < 24 // posts younger than 24h
 
                 postObj.is_suggested = !isNetworkPost
-                postObj._rankGroup = isNetworkPost ? 0 : 1
-                postObj._score = isNetworkPost
-                    ? new Date(postObj.createdAt).getTime()
-                    : scorePost(postObj, totalComments)
+
+                if (isNetworkPost && isFresh) {
+                    // Tier 0: own post or friend/following post younger than 24h
+                    // Sort by createdAt descending (newest = largest timestamp = top)
+                    postObj._rankGroup = 0
+                    postObj._score = new Date(postObj.createdAt).getTime()
+                } else if (isNetworkPost) {
+                    // Tier 1: older network posts — use personalized score
+                    postObj._rankGroup = 1
+                    postObj._score = scorePost(postObj, totalComments)
+                } else {
+                    // Tier 2: suggested / non-network — use personalized score
+                    postObj._rankGroup = 2
+                    postObj._score = scorePost(postObj, totalComments)
+                }
+
                 return postObj
             }))
 
@@ -418,6 +537,9 @@ export const addComment = async (req, res) => {
             totalCommentsCount,
             actorId: userId
         })
+
+        // Update interest profile (fire-and-forget)
+        updateInterest(userId, post.user.toString(), { commentDelta: 1, postType: post.post_type })
 
         // Send comment notification via socket to post owner (only if not self-comment)
         const io = req.app.locals.io
@@ -712,6 +834,27 @@ export const hidePostForUser = async (req, res) => {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Track Post View — lightweight signal for personalization
+// ─────────────────────────────────────────────────────────────────
+export const trackView = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { postId } = req.body
+        if (!postId) return res.json({ success: false, message: 'postId required' })
+
+        const post = await Post.findById(postId).select('user post_type').lean()
+        if (!post) return res.json({ success: true }) // silently ignore missing posts
+
+        // Fire-and-forget interest update
+        updateInterest(userId, post.user.toString(), { viewDelta: 1, postType: post.post_type })
+
+        res.json({ success: true })
+    } catch (error) {
+        // Non-critical endpoint — always return 200
+        res.json({ success: true })
+    }
+}
 export const hideCommentForUser = async (req, res) => {
     try {
         const userId = req.userId
@@ -778,6 +921,12 @@ export const addReply = async (req, res) => {
             totalCommentsCount,
             actorId: userId
         })
+
+        // Update interest profile for replying to a post author's content (fire-and-forget)
+        const replyParentPost = await Post.findById(parentComment.post).select('user post_type').lean()
+        if (replyParentPost) {
+            updateInterest(userId, replyParentPost.user.toString(), { commentDelta: 1, postType: replyParentPost.post_type })
+        }
 
         // Send reply notification via socket to post owner and comment author
         const post = await Post.findById(parentComment.post)
@@ -862,6 +1011,8 @@ export const sharePost = async (req, res) => {
             await post.save()
             res.json({ success: true, message: 'Post shared', shares_count: post.shares_count })
             emitPostRoomEvent(req, postId, 'post-share-updated', { shares_count: post.shares_count })
+            // Update interest profile
+            updateInterest(userId, post.user.toString(), { shareDelta: 1, postType: post.post_type })
         } else {
             post.shares_count = post.shares_count.filter(user => user.toString() !== userId)
             await post.save()
@@ -985,6 +1136,11 @@ export const reactPost = async (req, res) => {
                 }
                 io.to(`user-${postOwner}`).emit('new-reaction-notification', reactionNotification)
             }
+        }
+
+        // Update interest profile (fire-and-forget)
+        if (isNewReaction) {
+            updateInterest(userId, postOwner, { reactionDelta: 1, postType: post.post_type })
         }
     } catch (error) {
         console.log(error)

@@ -160,10 +160,10 @@ const Message = ({ onStartCall }) => {
   const { connections, followers, following } = useSelector((state) => state.connections)
   const newMessageTrigger = useSelector((state) => state.messages.newMessageTrigger)
   const [recentMessages, setRecentMessages] = useState([])
+  const [groupUnreadCounts, setGroupUnreadCounts] = useState({})
   const [groupChats, setGroupChats] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
-  const [groupsLoading, setGroupsLoading] = useState(false)
   const [conversationFilter, setConversationFilter] = useState('all')
   const [messageSearch, setMessageSearch] = useState({ groups: [], messages: [], loading: false })
   const [selectedSearchUserId, setSelectedSearchUserId] = useState('')
@@ -239,23 +239,54 @@ const Message = ({ onStartCall }) => {
     }
   }, [currentUserId, navigate, selectedUserId])
 
+  // Reset group unread count whenever the active group changes (e.g. direct URL navigation)
+  useEffect(() => {
+    if (!selectedGroupId) return
+    setGroupUnreadCounts((prev) => ({ ...prev, [selectedGroupId]: 0 }))
+  }, [selectedGroupId])
+
   useEffect(() => {
     if (!currentUser?._id) return undefined
 
     let cancelled = false
-    const fetchRecentMessages = async () => {
+    const fetchChatInit = async () => {
       try {
         setLoading(true)
         const token = await getToken()
-        const { data } = await api.get('/api/user/recent-messages', {
+        const { data } = await api.get('/api/user/chat-init', {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (cancelled) return
-        data.success
-          ? setRecentMessages((data.messages || [])
-            .filter((message) => !isSelfMessage(message, currentUserId))
-            .map((message) => hydrateMessageUsers(message, currentUser, [], knownUsersByIdRef.current)))
-          : toast.error(data.message)
+        if (data.success) {
+          setRecentMessages((prevMessages) => {
+            // Build a map of currently-tracked unread messages (isRead: false) keyed by _id.
+            // We keep these as unread so bold isn't reset when the embedded ChatBox triggers
+            // a re-fetch but the server has already marked them read in the DB.
+            const prevUnreadIds = new Set(
+              prevMessages
+                .filter((m) => !m.isRead && getUserId(m.to_user_id) === currentUserId)
+                .map((m) => m._id?.toString())
+                .filter(Boolean)
+            )
+
+            return (data.messages || [])
+              .filter((message) => !isSelfMessage(message, currentUserId))
+              .map((message) => {
+                const hydrated = hydrateMessageUsers(message, currentUser, prevMessages, knownUsersByIdRef.current)
+                // If we were tracking this message as unread and the active conversation
+                // is NOT this message's sender, preserve the unread state so bold stays.
+                const senderId = getUserId(hydrated.from_user_id)
+                const isFromActiveContact = senderId === selectedUserId
+                if (prevUnreadIds.has(hydrated._id?.toString()) && !isFromActiveContact) {
+                  return { ...hydrated, isRead: false }
+                }
+                return hydrated
+              })
+          })
+          setGroupChats(data.groups || [])
+        } else {
+          toast.error(data.message)
+        }
       } catch (error) {
         if (!cancelled) toast.error(error.message)
       } finally {
@@ -263,33 +294,9 @@ const Message = ({ onStartCall }) => {
       }
     }
 
-    fetchRecentMessages()
+    fetchChatInit()
     return () => { cancelled = true }
-  }, [currentUser, currentUserId, getToken, newMessageTrigger])
-
-  useEffect(() => {
-    if (!currentUserId) return undefined
-
-    let cancelled = false
-    const fetchGroupChats = async () => {
-      try {
-        setGroupsLoading(true)
-        const token = await getToken()
-        const { data } = await api.get('/api/group', {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        if (cancelled) return
-        data.success ? setGroupChats(data.groups || []) : toast.error(data.message)
-      } catch (error) {
-        if (!cancelled) toast.error(error.message)
-      } finally {
-        if (!cancelled) setGroupsLoading(false)
-      }
-    }
-
-    fetchGroupChats()
-    return () => { cancelled = true }
-  }, [currentUserId, getToken, newMessageTrigger])
+  }, [currentUser, currentUserId, getToken, newMessageTrigger, selectedUserId])
 
   useEffect(() => {
     const activeSocket = socket || socketRef?.current
@@ -326,6 +333,15 @@ const Message = ({ onStartCall }) => {
             ...currentGroups.filter((group) => group._id !== messageGroupId)
           ]
         })
+        // Increment unread count if this group is not the currently active one
+        // and the message was not sent by the current user
+        const fromId = getUserId(message.from_user_id)
+        if (messageGroupId !== selectedGroupId && fromId !== currentUserId) {
+          setGroupUnreadCounts((prev) => ({
+            ...prev,
+            [messageGroupId]: (prev[messageGroupId] || 0) + 1,
+          }))
+        }
         return
       }
 
@@ -392,13 +408,13 @@ const Message = ({ onStartCall }) => {
         type: 'group',
         group,
         lastMessage: group.latestMessage || null,
-        unreadCount: 0,
+        unreadCount: groupUnreadCounts[group._id?.toString()] || 0,
       }))
       .sort((a, b) => (
         new Date(b.lastMessage?.createdAt || b.group.updatedAt || 0) -
         new Date(a.lastMessage?.createdAt || a.group.updatedAt || 0)
       ))
-  ), [groupChats])
+  ), [groupChats, groupUnreadCounts])
 
   const cardUsers = useMemo(() => {
     const recentUsers = recentConversations.map((conversation) => conversation.user)
@@ -409,7 +425,11 @@ const Message = ({ onStartCall }) => {
     const baseConversations = [
       ...groupConversations,
       ...recentConversations.map((conversation) => ({ ...conversation, type: 'user' })),
-    ]
+    ].sort((a, b) => {
+      const timeA = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0
+      const timeB = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0
+      return timeB - timeA
+    })
 
     if (selectedGroupId) {
       return baseConversations.some((conversation) => getGroupId(conversation.group) === selectedGroupId)
@@ -502,6 +522,8 @@ const Message = ({ onStartCall }) => {
   const openGroupInCurrentWindow = (group) => {
     if (!group?._id) return
     setHighlightTarget(null)
+    const gId = group._id?.toString()
+    if (gId) setGroupUnreadCounts((prev) => ({ ...prev, [gId]: 0 }))
     navigate(`/messages/group/${group._id}`)
   }
 
@@ -667,7 +689,7 @@ const Message = ({ onStartCall }) => {
             </div>
           </section>
 
-          {(loading || groupsLoading) && cardUsers.length === 0 && groupChats.length === 0 ? (
+          {loading && cardUsers.length === 0 && groupChats.length === 0 ? (
             <div className='surface flex min-h-72 items-center justify-center rounded-[2rem] p-10 text-sm font-bold text-slate-400'>
               Đang tải cuộc trò chuyện...
             </div>

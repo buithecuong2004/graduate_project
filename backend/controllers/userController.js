@@ -679,3 +679,36 @@ export const getUserProfiles = async (req, res) =>{
         res.json({success: false, message: error.message })
     }
 }
+
+/**
+ * Get all posts that a given user has liked or reacted to.
+ * Only returns posts visible to the requesting viewer.
+ */
+export const getLikedPosts = async (req, res) => {
+    try {
+        const { profileId } = req.body
+        const viewerId = req.userId
+
+        const targetUser = await User.findById(profileId)
+        if (!targetUser) return res.json({ success: false, message: 'User not found' })
+
+        // Posts where the target user has reacted OR is in legacy likes_count
+        const likedPosts = await Post.find({
+            is_hidden: { $ne: true },
+            hidden_for: { $ne: viewerId },
+            $or: [
+                { 'reactions.user': profileId },
+                { likes_count: profileId },
+            ]
+        })
+            .populate('user')
+            .populate({ path: 'shared_from', populate: { path: 'user' } })
+            .populate('reactions.user', 'full_name username profile_picture _id')
+            .sort({ updatedAt: -1 })
+            .limit(100)
+
+        res.json({ success: true, posts: likedPosts })
+    } catch (error) {
+        res.json({ success: false, message: error.message })
+    }
+}

@@ -3,6 +3,7 @@ import User from '../models/User.js';
 import LiveStream from '../models/LiveStream.js';
 import GroupChat from '../models/GroupChat.js';
 import { isConversationBlocked } from '../utils/blocking.js';
+import { getUniqueNotificationRecipientIds } from '../utils/notificationRecipients.js';
 
 const getUserId = (value) => value?._id?.toString?.() || value?.toString?.() || '';
 
@@ -35,6 +36,8 @@ export const setupSocket = (server) => {
     // Store connected users with all active socket IDs so multiple tabs stay online.
     const connectedUsers = new Map();
     const liveViewersByStream = new Map();
+    const liveHostsByStream = new Map();
+    const hostedLiveStreamsBySocket = new Map();
     const activeGroupCalls = new Map();
 
     const emitUserPresence = async (userId, isOnline) => {
@@ -61,6 +64,95 @@ export const setupSocket = (server) => {
         });
 
         return viewers_count;
+    };
+
+    const unregisterLiveHost = (streamId, socketId) => {
+        const normalizedStreamId = streamId?.toString?.() || streamId;
+        const normalizedSocketId = socketId?.toString?.() || socketId;
+        if (!normalizedStreamId || !normalizedSocketId) return;
+
+        const host = liveHostsByStream.get(normalizedStreamId);
+        if (host?.socketId === normalizedSocketId) {
+            liveHostsByStream.delete(normalizedStreamId);
+        }
+
+        const hostedStreams = hostedLiveStreamsBySocket.get(normalizedSocketId);
+        if (!hostedStreams) return;
+
+        hostedStreams.delete(normalizedStreamId);
+        if (hostedStreams.size === 0) hostedLiveStreamsBySocket.delete(normalizedSocketId);
+    };
+
+    const registerLiveHost = (streamId, socket, userId) => {
+        const normalizedStreamId = streamId?.toString?.() || streamId;
+        const normalizedUserId = userId?.toString?.() || userId;
+        if (!normalizedStreamId || !normalizedUserId) return;
+
+        const previousHost = liveHostsByStream.get(normalizedStreamId);
+        if (previousHost?.socketId && previousHost.socketId !== socket.id) {
+            unregisterLiveHost(normalizedStreamId, previousHost.socketId);
+        }
+
+        liveHostsByStream.set(normalizedStreamId, {
+            socketId: socket.id,
+            userId: normalizedUserId
+        });
+
+        const hostedStreams = hostedLiveStreamsBySocket.get(socket.id) || new Set();
+        hostedStreams.add(normalizedStreamId);
+        hostedLiveStreamsBySocket.set(socket.id, hostedStreams);
+    };
+
+    const endLiveStreamForHost = async (streamId, hostUserId) => {
+        const normalizedStreamId = streamId?.toString?.() || streamId;
+        const normalizedHostUserId = hostUserId?.toString?.() || hostUserId;
+        if (!normalizedStreamId || !normalizedHostUserId) return false;
+
+        const stream = await LiveStream.findById(normalizedStreamId);
+        if (!stream || stream.user.toString() !== normalizedHostUserId) return false;
+
+        const host = liveHostsByStream.get(normalizedStreamId);
+        if (host) unregisterLiveHost(normalizedStreamId, host.socketId);
+        liveViewersByStream.delete(normalizedStreamId);
+
+        const wasLive = stream.status === 'live';
+        if (stream.status === 'ended') return true;
+
+        stream.status = 'ended';
+        stream.ended_at = new Date();
+        stream.viewers_count = 0;
+        await stream.save();
+
+        const currentUser = await User.findById(normalizedHostUserId);
+        const recipientIds = currentUser
+            ? getUniqueNotificationRecipientIds(currentUser, normalizedHostUserId)
+            : [];
+        const payload = {
+            streamId: normalizedStreamId,
+            endedAt: stream.ended_at
+        };
+
+        io.to(`live-${normalizedStreamId}`).emit('live-stream-ended', payload);
+        if (wasLive) {
+            [...new Set([normalizedHostUserId, ...recipientIds])].forEach((recipientId) => {
+                io.to(`user-${recipientId}`).emit('live-stream-ended', payload);
+            });
+        }
+
+        return true;
+    };
+
+    const endLiveStreamHostedBySocket = async (socket, streamId) => {
+        const normalizedStreamId = streamId?.toString?.() || streamId;
+        const host = liveHostsByStream.get(normalizedStreamId);
+        if (!host || host.socketId !== socket.id) return false;
+
+        return endLiveStreamForHost(normalizedStreamId, host.userId);
+    };
+
+    const endLiveStreamsHostedBySocket = async (socket) => {
+        const hostedStreamIds = Array.from(hostedLiveStreamsBySocket.get(socket.id) || []);
+        await Promise.all(hostedStreamIds.map((streamId) => endLiveStreamHostedBySocket(socket, streamId)));
     };
 
     const removeLiveViewer = async (socket, streamId) => {
@@ -128,17 +220,25 @@ export const setupSocket = (server) => {
 
             try {
                 const stream = await LiveStream.findById(streamId).select('user status');
-                if (!stream || stream.status !== 'live') {
+                if (!stream) {
                     socket.emit('live-stream-ended', { streamId });
                     return;
                 }
 
                 const normalizedStreamId = streamId.toString();
                 const normalizedUserId = socket.data.userId?.toString?.() || '';
+                const isHost = role === 'host' && normalizedUserId === stream.user.toString();
+
+                if (stream.status !== 'live' && !(isHost && stream.status === 'preparing')) {
+                    socket.emit('live-stream-ended', { streamId });
+                    return;
+                }
 
                 socket.join(`live-${normalizedStreamId}`);
 
-                if (role === 'host' && normalizedUserId === stream.user.toString()) {
+                if (isHost) {
+                    registerLiveHost(normalizedStreamId, socket, normalizedUserId);
+
                     const currentViewers = liveViewersByStream.get(normalizedStreamId);
                     if (currentViewers) {
                         currentViewers.forEach((viewerId, viewerSocketId) => {
@@ -173,7 +273,8 @@ export const setupSocket = (server) => {
             if (!streamId) return;
 
             try {
-                await removeLiveViewer(socket, streamId.toString());
+                const endedByHost = await endLiveStreamHostedBySocket(socket, streamId.toString());
+                if (!endedByHost) await removeLiveViewer(socket, streamId.toString());
                 socket.leave(`live-${streamId}`);
             } catch (error) {
                 console.log('Leave live stream error:', error.message);
@@ -399,6 +500,12 @@ export const setupSocket = (server) => {
         // Handle disconnect
         socket.on('disconnect', async () => {
             const userId = socket.data.userId;
+
+            try {
+                await endLiveStreamsHostedBySocket(socket);
+            } catch (error) {
+                console.log('Hosted live stream disconnect cleanup error:', error.message);
+            }
 
             try {
                 await removeSocketFromLiveStreams(socket);
