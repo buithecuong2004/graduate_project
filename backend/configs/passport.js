@@ -3,12 +3,13 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import { Strategy as FacebookStrategy } from 'passport-facebook'
 import User from '../models/User.js'
 import { getDefaultProfilePictureUrl } from '../utils/defaultProfilePicture.js'
+import { getBackendBaseUrl } from '../utils/appUrl.js'
 
 // ─── Google OAuth Strategy ──────────────────────────────────────────────────
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: `${process.env.BACKEND_URL || 'http://localhost:4000'}/api/auth/google/callback`,
+    callbackURL: `${getBackendBaseUrl()}/api/auth/google/callback`,
     scope: ['profile', 'email']
 }, async (accessToken, refreshToken, profile, done) => {
     try {
@@ -60,7 +61,7 @@ passport.use(new GoogleStrategy({
 passport.use(new FacebookStrategy({
     clientID: process.env.FACEBOOK_APP_ID,
     clientSecret: process.env.FACEBOOK_APP_SECRET,
-    callbackURL: `${process.env.BACKEND_URL || 'http://localhost:4000'}/api/auth/facebook/callback`,
+    callbackURL: `${getBackendBaseUrl()}/api/auth/facebook/callback`,
     profileFields: ['id', 'displayName', 'emails', 'photos']
 }, async (accessToken, refreshToken, profile, done) => {
     try {
