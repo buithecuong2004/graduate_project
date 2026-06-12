@@ -12,6 +12,7 @@ import ReactionListModal from './ReactionListModal'
 import StoryModal from './StoryModal'
 import toast from 'react-hot-toast'
 import { REACTION_ICONS } from '../../utils/reactions'
+import VideoPlayer from './VideoPlayer'
 
 const STORY_DURATION = 10000
 
@@ -36,6 +37,8 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
 
     const storyOwnerId = getStoryUserId(viewStory)
     const isOwner = storyOwnerId === currentUser?._id
+    // Story đang được upload lên server — disable các action cho đến khi hoàn thành
+    const isUploading = Boolean(viewStory?._isUploading)
 
     const { getToken } = useAuth()
     const dispatch = useDispatch()
@@ -240,16 +243,18 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
                 )
              case 'video':
                 return (
-                    <video
+                    <VideoPlayer
+                        src={viewStory.media_url}
+                        autoPlay
+                        muted={false}
+                        playsInline
+                        controls={false}
+                        className='h-full w-full'
                         onEnded={goToNextStory}
                         onTimeUpdate={(e) => {
                             const video = e.currentTarget
-                            if(video.duration) setProgress(video.currentTime / video.duration)
+                            if (video.duration) setProgress(video.currentTime / video.duration)
                         }}
-                        src={viewStory.media_url}
-                        className='h-full w-full object-contain bg-black'
-                        autoPlay
-                        playsInline
                     />
                 )
              case 'text':
@@ -407,15 +412,22 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
                     </div>
 
                     {isOwner && (
-                        <button
-                            type='button'
-                            onClick={handleDeleteClick}
-                            disabled={isDeleting}
-                            className='text-white hover:text-red-400 transition disabled:opacity-50 p-2 cursor-pointer'
-                            title='Xóa tin'
-                        >
-                            <Trash2 className='w-6 h-6'/>
-                        </button>
+                        isUploading ? (
+                            <span className='flex items-center gap-1.5 rounded-full bg-white/15 backdrop-blur-md px-3 py-1.5 text-xs font-bold text-white'>
+                                <span className='size-3 rounded-full border-2 border-white/40 border-t-white animate-spin shrink-0' />
+                                Đang tải lên...
+                            </span>
+                        ) : (
+                            <button
+                                type='button'
+                                onClick={handleDeleteClick}
+                                disabled={isDeleting}
+                                className='text-white hover:text-red-400 transition disabled:opacity-50 p-2 cursor-pointer'
+                                title='Xóa tin'
+                            >
+                                <Trash2 className='w-6 h-6'/>
+                            </button>
+                        )
                     )}
                 </div>
 
@@ -453,7 +465,7 @@ const StoryViewer = ({viewStory, setViewStory, currentUser, onDeleteStory}) => {
                     </button>
                 )}
 
-                {!isOwner && (
+                {!isOwner && !isUploading && (
                     <div className='absolute bottom-5 left-0 right-0 px-4 flex gap-3 items-center z-50' onClick={e => e.stopPropagation()}>
                         <div className='flex-1 relative'>
                             <input

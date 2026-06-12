@@ -1,10 +1,15 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, ImagePlus, Sparkle, TextIcon, Upload, X } from 'lucide-react'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import toast from 'react-hot-toast'
 import { useAuth } from '../../context/AuthContext'
-import { createStoryAction } from '../../features/stories/storiesSlice'
+import {
+    addStoryLocal,
+    setViewStory,
+    fetchStories,
+} from '../../features/stories/storiesSlice'
+import api from '../../api/axios'
 
 const BG_COLORS = ['#0f766e', '#0891b2', '#2563eb', '#7c3aed', '#f97316', '#e11d48']
 const MAX_VIDEO_DURATION = 60
@@ -13,6 +18,7 @@ const MAX_VIDEO_SIZE_MB = 50
 const StoryModal = ({ setShowModal }) => {
     const dispatch = useDispatch()
     const { getToken } = useAuth()
+    const currentUser = useSelector((state) => state.user.value)
 
     const [mode, setMode] = useState('text')
     const [background, setBackground] = useState(BG_COLORS[0])
@@ -21,16 +27,22 @@ const StoryModal = ({ setShowModal }) => {
     const [previewUrl, setPreviewUrl] = useState(null)
     const [isSaving, setIsSaving] = useState(false)
 
+    // Ref để track blob URL — chỉ revoke nếu chưa được chuyển sang viewer
+    const blobHandedOff = useRef(false)
+
     useEffect(() => {
         return () => {
-            if (previewUrl) URL.revokeObjectURL(previewUrl)
+            if (previewUrl && !blobHandedOff.current) {
+                URL.revokeObjectURL(previewUrl)
+            }
         }
     }, [previewUrl])
 
     const closeModal = () => setShowModal(false)
 
     const setPreviewFromFile = (file) => {
-        if (previewUrl) URL.revokeObjectURL(previewUrl)
+        if (previewUrl && !blobHandedOff.current) URL.revokeObjectURL(previewUrl)
+        blobHandedOff.current = false
         setMedia(file)
         setPreviewUrl(URL.createObjectURL(file))
         setText('')
@@ -38,7 +50,8 @@ const StoryModal = ({ setShowModal }) => {
     }
 
     const clearMedia = () => {
-        if (previewUrl) URL.revokeObjectURL(previewUrl)
+        if (previewUrl && !blobHandedOff.current) URL.revokeObjectURL(previewUrl)
+        blobHandedOff.current = false
         setMedia(null)
         setPreviewUrl(null)
     }
@@ -82,35 +95,91 @@ const StoryModal = ({ setShowModal }) => {
         toast.error('Vui lòng chọn ảnh hoặc video')
     }
 
-    const handleCreateStory = async () => {
-        if (isSaving) return Promise.resolve()
+    const handleCreateStory = () => {
+        if (isSaving) return
 
         if (mode === 'media' && !media) {
-            throw new Error('Vui lòng chọn ảnh hoặc video')
+            toast.error('Vui lòng chọn ảnh hoặc video')
+            return
         }
 
         if (mode === 'text' && !text.trim()) {
-            throw new Error('Vui lòng nhập nội dung tin')
+            toast.error('Vui lòng nhập nội dung tin')
+            return
         }
 
         const mediaType = mode === 'media'
             ? (media.type.startsWith('image') ? 'image' : 'video')
             : 'text'
 
-        const formData = new FormData()
-        formData.append('content', text.trim())
-        formData.append('media_type', mediaType)
-        formData.append('background_color', background)
-        if (media) formData.append('media', media)
+        const capturedText = text.trim()
+        const capturedBg = background
+        const capturedBlobUrl = previewUrl   // blob URL để xem ngay
+        const capturedMedia = media
 
-        setIsSaving(true)
-        try {
-            const token = await getToken()
-            await dispatch(createStoryAction({ formData, token })).unwrap()
-            closeModal()
-        } finally {
-            setIsSaving(false)
+        // ── Bước 1: Hiển thị story ngay lập tức với blob URL ──────────────
+        // Tạo story "tạm" với ID giả để render StoryViewer ngay
+        const tempStory = {
+            _id: `temp_${Date.now()}`,
+            _isUploading: true,          // flag để biết đang upload
+            user: currentUser,
+            media_type: mediaType,
+            media_url: capturedBlobUrl,  // blob URL — phát ngay không cần CDN
+            content: capturedText,
+            background_color: capturedBg,
+            createdAt: new Date().toISOString(),
+            reactions: [],
         }
+
+        if (capturedBlobUrl) {
+            // Đánh dấu blob đã được dùng — không revoke khi modal đóng
+            blobHandedOff.current = true
+        }
+
+        // Dispatch ngay lập tức, đóng modal
+        dispatch(addStoryLocal(tempStory))
+        dispatch(setViewStory(tempStory))
+        closeModal()
+
+        // ── Bước 2: Upload lên server ở background ──────────────────────────
+        setIsSaving(true)
+        const uploadInBackground = async () => {
+            try {
+                const formData = new FormData()
+                formData.append('content', capturedText)
+                formData.append('media_type', mediaType)
+                formData.append('background_color', capturedBg)
+                if (capturedMedia) formData.append('media', capturedMedia)
+
+                const token = await getToken()
+                const { data } = await api.post('/api/story/create', formData, {
+                    headers: { Authorization: `Bearer ${token}` }
+                })
+
+                if (data.success) {
+                    // Thay thế story tạm bằng story thực từ server
+                    dispatch({ type: 'stories/replaceTempStory', payload: { tempId: tempStory._id, story: data.story } })
+                    // Fetch lại để đồng bộ
+                    dispatch(fetchStories(token))
+                    toast.success('Tin đã được tạo')
+                } else {
+                    // Upload thất bại — xóa story tạm
+                    dispatch({ type: 'stories/removeTempStory', payload: tempStory._id })
+                    toast.error(data.message || 'Không thể tạo tin')
+                }
+            } catch (err) {
+                dispatch({ type: 'stories/removeTempStory', payload: tempStory._id })
+                toast.error(err.message || 'Không thể tạo tin')
+            } finally {
+                setIsSaving(false)
+                // Revoke blob URL sau khi story thực đã lên (hoặc thất bại)
+                if (capturedBlobUrl) {
+                    setTimeout(() => URL.revokeObjectURL(capturedBlobUrl), 5000)
+                }
+            }
+        }
+
+        uploadInBackground()
     }
 
     return createPortal(
@@ -218,11 +287,7 @@ const StoryModal = ({ setShowModal }) => {
 
                         <button
                             type='button'
-                            onClick={() => toast.promise(handleCreateStory(), {
-                                loading: 'Đang tạo tin...',
-                                success: 'Tin đã được tạo',
-                                error: (error) => error.message || 'Không thể tạo tin'
-                            })}
+                            onClick={handleCreateStory}
                             disabled={isSaving}
                             className='btn-primary w-full justify-center px-5 py-3 disabled:opacity-60 cursor-pointer'
                         >

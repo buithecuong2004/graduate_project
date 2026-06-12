@@ -86,7 +86,7 @@ const StoriesBar = ({ refreshTrigger }) => {
                         {story.media_type === 'image' ? (
                             <img src={story.media_url} alt='' className='absolute inset-0 h-full w-full object-cover transition duration-700 group-hover/card:scale-110'/>
                         ) : story.media_type === 'video' ? (
-                            <video src={story.media_url} className='absolute inset-0 h-full w-full object-cover transition duration-700 group-hover/card:scale-110'/>
+                            <video src={story.media_url} preload='metadata' muted playsInline className='absolute inset-0 h-full w-full object-cover transition duration-700 group-hover/card:scale-110'/>
                         ) : (
                             <div className='absolute inset-0 p-3 pt-14 text-xs font-semibold leading-relaxed text-white' style={{backgroundColor: story.background_color || '#0891b2'}}>
                                 <p className='line-clamp-5'>{story.content}</p>

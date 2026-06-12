@@ -1,4 +1,4 @@
-import { BadgeCheck, EyeOff, Flag, Heart, MessageCircle, MoreVertical, Share2, Trash2 } from 'lucide-react'
+import { BadgeCheck, EyeOff, Flag, MessageCircle, MoreVertical, Share2, ThumbsUp, Trash2 } from 'lucide-react'
 import moment from '../../utils/moment'
 import React, { useCallback, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -16,6 +16,7 @@ import ReactionPicker from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
 import { REACTION_ICONS, REACTION_LABELS } from '../../utils/reactions'
 import { REPORT_REASON_OPTIONS } from '../../utils/reportReasons'
+import VideoPlayer from './VideoPlayer'
 
 // Module-level set so view signals are deduplicated across re-renders
 const viewedPostIds = new Set()
@@ -364,7 +365,11 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
             {post.content && <div className='text-slate-800 text-[15px] leading-7 whitespace-pre-line' dangerouslySetInnerHTML={{ __html: postWithHashtags }} />}
 
             {post.video_url && (
-                <video src={post.video_url} controls className='w-full h-auto rounded-2xl bg-black' />
+                <VideoPlayer
+                    src={post.video_url}
+                    controls
+                    className='w-full rounded-2xl overflow-hidden bg-black'
+                />
             )}
 
             {post.image_urls && post.image_urls.length > 0 && (
@@ -389,7 +394,11 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                     </div>
                     {post.shared_from.content && <div className='text-slate-800 text-sm whitespace-pre-line' dangerouslySetInnerHTML={{ __html: withHashtags(post.shared_from.content) }} />}
                     {post.shared_from.video_url && (
-                        <video src={post.shared_from.video_url} controls className='w-full h-auto rounded-2xl bg-black mt-2' />
+                        <VideoPlayer
+                            src={post.shared_from.video_url}
+                            controls
+                            className='w-full rounded-2xl overflow-hidden bg-black mt-2'
+                        />
                     )}
                     {post.shared_from.image_urls && post.shared_from.image_urls.length > 0 && (
                         <div className='grid grid-cols-2 gap-2 mt-2'>
@@ -442,7 +451,7 @@ const PostCard = ({ post, onPostDeleted, autoOpenComments, targetCommentId }) =>
                             {currentUserReaction ? (
                                 <span className='text-xl leading-none'>{REACTION_ICONS[currentUserReaction]}</span>
                             ) : (
-                                <Heart className={`w-4 h-4 ${likes.includes(currentUser._id) && 'text-red-500 fill-red-500'}`} />
+                                <ThumbsUp className={`w-4 h-4 ${likes.includes(currentUser._id) ? 'text-cyan-700 fill-cyan-700' : ''}`} />
                             )}
                             <span className='capitalize'>{REACTION_LABELS[currentUserReaction] || 'Thích'}</span>
                         </button>

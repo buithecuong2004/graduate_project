@@ -129,8 +129,10 @@ export const addPost = async (req, res) => {
         // Trim content
         content = (content || '').trim()
 
+        const hasSharedPost = Boolean(shared_from)
+
         // Validate post_type and content
-        if(!images.length && !video && !content) {
+        if(!images.length && !video && !content && !hasSharedPost) {
             return res.json({ success: false, message: 'Please add content, images, or a video' })
         }
 

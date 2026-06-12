@@ -115,11 +115,12 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
             const token = await getToken()
             await api.post('/api/post/share', { postId: originalPostId }, { headers: { Authorization: `Bearer ${token}` } })
             const formData = new FormData()
-            formData.append('content', captionText.trim())
+            const caption = captionText.trim()
+            formData.append('content', caption)
             formData.append('post_type', 'text')
             formData.append('shared_from', originalPostId)
             const { data } = await api.post('/api/post/add', formData, { headers: { Authorization: `Bearer ${token}` } })
-            if (!data.success) { toast.error('Không thể tạo bài viết được chia sẻ'); return }
+            if (!data.success) throw new Error(data.message || 'Không thể tạo bài viết được chia sẻ')
             if (data.post) dispatch(addPost(data.post))
             toast.success('Bài viết đã được chia sẻ')
             onShareAdded?.()
@@ -204,7 +205,7 @@ const ShareModal = ({ isOpen, onClose, post, onShareAdded }) => {
                                     <ArrowLeft className='size-4' /> Quay lại
                                 </button>
                                 <div>
-                                    <label className='mb-2 block text-sm font-bold text-slate-700'>Nội dung kèm theo</label>
+                                    <label className='mb-2 block text-sm font-bold text-slate-700'>Nội dung kèm theo <span className='font-semibold text-slate-400'>(không bắt buộc)</span></label>
                                     <textarea value={captionText} onChange={e => setCaptionText(e.target.value)}
                                         placeholder='Bạn muốn nói gì về bài viết này?' maxLength={500}
                                         className='input-modern min-h-36 resize-none px-4 py-3 text-sm' />

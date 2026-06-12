@@ -16,6 +16,8 @@ const CreatePost = () => {
   const [content, setContent] = useState('')
   const [images, setImages] = useState([])
   const [video, setVideo] = useState(null)
+  const [imagePreviews, setImagePreviews] = useState([])
+  const [videoPreview, setVideoPreview] = useState('')
   const [loading, setLoading] = useState(false)
   const [sharedPost, setSharedPost] = useState(null)
 
@@ -28,6 +30,34 @@ const CreatePost = () => {
       window.history.replaceState({}, document.title)
     }
   }, [location])
+
+  useEffect(() => {
+    if (!images.length) {
+      setImagePreviews((current) => current.length ? [] : current)
+      return undefined
+    }
+
+    const previews = images.map((image) => URL.createObjectURL(image))
+    setImagePreviews(previews)
+
+    return () => {
+      previews.forEach((preview) => URL.revokeObjectURL(preview))
+    }
+  }, [images])
+
+  useEffect(() => {
+    if (!video) {
+      setVideoPreview((current) => current ? '' : current)
+      return undefined
+    }
+
+    const preview = URL.createObjectURL(video)
+    setVideoPreview(preview)
+
+    return () => {
+      URL.revokeObjectURL(preview)
+    }
+  }, [video])
 
   const validateVideo = (file) => {
     const maxSize = 500 * 1024 * 1024
@@ -108,16 +138,12 @@ const CreatePost = () => {
   const handleSubmit = async () => {
     const trimmedContent = content.trim()
 
-    if(!images.length && !video && !trimmedContent) {
+    if(!images.length && !video && !trimmedContent && !sharedPost) {
       throw new Error('Vui lòng thêm nội dung, hình ảnh hoặc video.')
     }
 
     if(trimmedContent.length > MAX_CONTENT_LENGTH) {
       throw new Error(`Nội dung không được vượt quá ${MAX_CONTENT_LENGTH} ký tự.`)
-    }
-
-    if(video && trimmedContent.length === 0) {
-      throw new Error('Vui lòng thêm một số văn bản với video của bạn.')
     }
 
     setLoading(true)
@@ -209,9 +235,9 @@ const CreatePost = () => {
               <div className='mt-5'>
                 <p className='mb-2 text-xs font-bold text-slate-500'>Hình ảnh ({images.length}/4)</p>
                 <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
-                  {images.map((image,i)=>(
-                    <div key={i} className='relative group overflow-hidden rounded-2xl'>
-                      <img src={URL.createObjectURL(image)} alt='' className='h-28 w-full object-cover'/>
+                  {imagePreviews.map((preview,i)=>(
+                    <div key={preview} className='relative group overflow-hidden rounded-2xl'>
+                      <img src={preview} alt='' className='h-28 w-full object-cover'/>
                       <button type='button' onClick={()=>setImages(images.filter((_,index)=>index !== i))} className='absolute inset-0 hidden items-center justify-center bg-black/45 group-hover:flex cursor-pointer'>
                         <X className='w-6 h-6 text-white'/>
                       </button>
@@ -224,8 +250,8 @@ const CreatePost = () => {
             {video && (
               <div className='mt-5'>
                 <p className='mb-2 text-xs font-bold text-slate-500'>Video ({(video.size / (1024 * 1024)).toFixed(2)}MB)</p>
-                <div className='relative group overflow-hidden rounded-2xl bg-black'>
-                  <video src={URL.createObjectURL(video)} className='max-h-64 w-full object-contain' />
+                <div className='relative group flex aspect-video max-h-64 items-center justify-center overflow-hidden rounded-2xl bg-black'>
+                  {videoPreview && <video src={videoPreview} className='h-full w-full object-contain' preload='metadata' />}
                   <button type='button' onClick={()=>setVideo(null)} className='absolute inset-0 hidden items-center justify-center bg-black/45 group-hover:flex cursor-pointer'>
                     <X className='w-7 h-7 text-white'/>
                   </button>

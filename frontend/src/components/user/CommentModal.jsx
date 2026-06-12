@@ -14,6 +14,7 @@ import ReactionPicker from './ReactionPicker'
 import ReactionListModal from './ReactionListModal'
 import ReportPopover from './ReportPopover'
 import { REACTION_ICONS, REACTION_LABELS } from '../../utils/reactions'
+import VideoPlayer from './VideoPlayer'
 
 const getReactionSummary = (reactions = []) => {
     const counts = reactions.reduce((acc, reaction) => {
@@ -653,7 +654,13 @@ const CommentModal = ({ isOpen, onClose, post, onCommentAdded, onReplyAdded, onT
                         </div>
 
                         {post.content && <p className='mb-4 whitespace-pre-line text-sm leading-7 text-slate-700'>{post.content}</p>}
-                        {post.video_url && <video src={post.video_url} controls className='mb-4 w-full max-h-64 rounded-2xl bg-black object-contain' />}
+                        {post.video_url && (
+                            <VideoPlayer
+                                src={post.video_url}
+                                controls
+                                className='mb-4 w-full max-h-64 rounded-2xl overflow-hidden bg-black'
+                            />
+                        )}
                         {post.image_urls?.length > 0 && (
                             <div className={`grid gap-2 ${post.image_urls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                                 {post.image_urls.map((img, idx) => (
