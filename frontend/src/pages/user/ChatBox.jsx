@@ -3217,7 +3217,6 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
             {/* Footer */}
             {!isSummarizing && (
               <div className='flex items-center justify-between border-t border-slate-100 bg-slate-50/80 px-6 py-3'>
-                <p className='text-[11px] text-slate-400'>✨ Được tạo bởi Gemini AI</p>
                 <div className='flex gap-2'>
                   <button
                     type='button'
