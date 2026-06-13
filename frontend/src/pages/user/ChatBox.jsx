@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, VideoIcon, ChevronDown, UserRound, Ban, Flag, Search, Camera, UsersRound, UserMinus, LogOut, UserPlus } from 'lucide-react'
+import { ArrowLeft, ImageIcon, SendHorizonal, X, Video, Mic, Square, Trash2, MoreVertical, Reply, CornerUpRight, Check, Pencil, Phone, VideoIcon, ChevronDown, UserRound, Ban, Flag, Search, Camera, UsersRound, UserMinus, LogOut, UserPlus, Sparkles } from 'lucide-react'
 import { useSocket } from '../../context/SocketContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { setViewStory } from '../../features/stories/storiesSlice'
@@ -69,6 +69,31 @@ const updateMessagesValue = (currentMessages, updater) => (
 const sortMessagesByCreatedAt = (items = []) => (
   [...items].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
 )
+
+const SUMMARIZABLE_MESSAGE_TYPES = new Set(['text', 'image', 'images', 'video', 'videos'])
+
+const isSummarizableMessage = (message) => (
+  !!message &&
+  !message.is_deleted &&
+  SUMMARIZABLE_MESSAGE_TYPES.has(message.message_type) &&
+  !!message.text?.trim()
+)
+
+const getLatestIncomingMessageSegment = (items = [], currentUserId = '') => {
+  const segment = []
+
+  for (let i = items.length - 1; i >= 0; i--) {
+    const message = items[i]
+    if (!message || message.is_deleted || message.message_type === 'reaction') continue
+
+    const senderId = getMessageUserId(message.from_user_id)
+    if (senderId === currentUserId) break
+
+    if (isSummarizableMessage(message) && message._id) segment.push(message)
+  }
+
+  return segment.reverse()
+}
 
 const getFloatingPanelPosition = (anchorRect, panelWidth, panelHeight, align = 'left', forceAbove = false) => {
   if (typeof window === 'undefined') return { top: 0, left: 0 }
@@ -246,6 +271,11 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
   const [addMemberSearch, setAddMemberSearch] = useState('')
   const [addMemberSelectedIds, setAddMemberSelectedIds] = useState([])
   const [isAddingMembers, setIsAddingMembers] = useState(false)
+
+  // AI Summary states
+  const [showSummaryModal, setShowSummaryModal] = useState(false)
+  const [summaryText, setSummaryText] = useState('')
+  const [isSummarizing, setIsSummarizing] = useState(false)
 
   useEffect(() => {
     imagePreviewsRef.current = imagePreviews
@@ -530,6 +560,40 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
     }
   }, [])
+
+  // ── AI Summarize handler ─────────────────────────────────────
+  const handleSummarize = async () => {
+    const segmentMessageIds = summarySegment.map((message) => message._id).filter(Boolean)
+    if (segmentMessageIds.length < 10) {
+      setShowSummaryModal(true)
+      setSummaryText('❌ Chưa có đủ tin nhắn liên tiếp để tóm tắt')
+      setIsSummarizing(false)
+      return
+    }
+
+    setShowSummaryModal(true)
+    setSummaryText('')
+    setIsSummarizing(true)
+    try {
+      const token = await getToken()
+      const { data } = await api.post('/api/message/summarize',
+        isGroupChat
+          ? { group_id: groupId, message_ids: segmentMessageIds }
+          : { to_user_id: userId, message_ids: segmentMessageIds },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (data.success) {
+        setSummaryText(data.summary)
+      } else {
+        setSummaryText('❌ ' + (data.message || 'Không thể tạo tóm tắt'))
+      }
+    } catch {
+      setSummaryText('❌ Đã xảy ra lỗi khi kết nối AI')
+    } finally {
+      setIsSummarizing(false)
+    }
+  }
+
 
   // ── Message action handlers ──────────────────────────────────
   async function fetchConnections() {
@@ -1850,6 +1914,7 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
     ))
     : addableGroupContacts
   const sortedMessages = sortMessagesByCreatedAt(messages)
+  const summarySegment = getLatestIncomingMessageSegment(sortedMessages, currentUserId)
   const confirmDialogContent = pendingDialog === 'delete-conversation'
     ? {
       title: 'Xóa đoạn chat?',
@@ -2368,6 +2433,60 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
           <div ref={messagesEndRef}></div>
         </div>
       </div>
+
+      {/* ── AI Summary Banner: hiển thị khi nhận 10+ tin liên tiếp gần nhất ── */}
+      {(() => {
+        if (isChatBlocked || sortedMessages.length === 0) return null
+
+        // Đếm ngược từ tin mới nhất, dừng khi gặp tin của chính mình
+        const consecutiveCount = summarySegment.length
+        /*
+        for (let i = sortedMessages.length - 1; i >= 0; i--) {
+          const m = sortedMessages[i]
+          // Bỏ qua tin đã xóa, call, reaction, và tin không có nội dung
+          if (m.is_deleted) continue
+          if (m.message_type === 'call' || m.message_type === 'reaction') continue
+          const hasContent = (m.text && m.text.trim()) || m.media_urls?.length || m.image_url || m.video_url
+          if (!hasContent) continue
+
+          const senderId = getMessageUserId(m.from_user_id)
+          if (senderId !== currentUserId) {
+            consecutiveCount++
+          } else {
+            break // Gặp tin của mình → dừng đếm
+          }
+        }
+
+        */
+        if (consecutiveCount < 10) return null
+
+        return (
+          <div className={isMini
+            ? 'flex items-center justify-between gap-2 mx-3 mb-2 px-3 py-2 bg-gradient-to-r from-violet-50 to-cyan-50 border border-violet-100 rounded-xl'
+            : 'flex items-center justify-between gap-3 mx-auto max-w-2xl mb-2 px-4 py-2.5 bg-gradient-to-r from-violet-50 via-purple-50 to-cyan-50 border border-violet-100 rounded-2xl shadow-sm'
+          }>
+            <div className='flex items-center gap-2 min-w-0'>
+              <span className='text-violet-500 shrink-0'><Sparkles size={isMini ? 14 : 16} /></span>
+              <p className={`${isMini ? 'text-[11px]' : 'text-xs'} font-semibold text-slate-600 truncate`}>
+                {isGroupChat
+                  ? `Bạn nhận ${consecutiveCount} tin liên tiếp — AI có thể tóm tắt`
+                  : `${user?.full_name || 'Người kia'} gửi ${consecutiveCount} tin liên tiếp — AI có thể tóm tắt`
+                }
+              </p>
+            </div>
+            <button
+              type='button'
+              onClick={handleSummarize}
+              className={`shrink-0 flex items-center gap-1.5 font-bold text-white rounded-full transition-all
+                bg-gradient-to-r from-violet-500 to-cyan-500 hover:from-violet-600 hover:to-cyan-600 active:scale-95 shadow-sm
+                ${isMini ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'}`}
+            >
+              <Sparkles size={isMini ? 10 : 12} />
+              Tóm tắt
+            </button>
+          </div>
+        )
+      })()}
 
       {/* ── Input area ── */}
       <div className={isMini ? 'border-t border-slate-100 bg-white px-3 pb-3 pt-2' : 'px-4 pb-5 pt-2 bg-slate-100'}>
@@ -3025,12 +3144,113 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
 
 
 
+      {/* ── AI Summary Modal ── */}
+      {showSummaryModal && canUsePortal && createPortal(
+        <div
+          className='fixed inset-0 z-[99999] flex items-center justify-center p-4'
+          style={{ backdropFilter: 'blur(8px)', backgroundColor: 'rgba(15,23,42,0.55)' }}
+          onClick={() => { if (!isSummarizing) setShowSummaryModal(false) }}
+        >
+          <div
+            className='relative w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl'
+            style={{ animation: 'summaryModalIn 0.28s cubic-bezier(0.34,1.56,0.64,1)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Gradient header */}
+            <div className='relative bg-gradient-to-br from-violet-600 via-purple-600 to-cyan-500 px-6 py-5'>
+              <div className='flex items-center gap-3'>
+                <div className='flex size-10 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm'>
+                  <Sparkles size={20} className='text-white' />
+                </div>
+                <div>
+                  <p className='text-[11px] font-semibold uppercase tracking-widest text-white/70'>Tarous AI</p>
+                  <h2 className='text-lg font-black text-white'>Tóm tắt cuộc trò chuyện</h2>
+                </div>
+              </div>
+              <p className='mt-1.5 text-xs text-white/60'>
+                {isGroupChat ? `Nhóm: ${user?.full_name}` : `Cuộc trò chuyện với ${user?.full_name}`}
+              </p>
+              <button
+                type='button'
+                onClick={() => setShowSummaryModal(false)}
+                className='absolute right-4 top-4 flex size-8 items-center justify-center rounded-full bg-white/20 text-white transition hover:bg-white/30'
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className='px-6 py-5 min-h-[140px]'>
+              {isSummarizing ? (
+                <div className='flex flex-col items-center justify-center gap-3 py-6'>
+                  <div className='relative'>
+                    <div className='size-12 rounded-full border-4 border-violet-100 border-t-violet-500 animate-spin' />
+                    <Sparkles size={16} className='absolute inset-0 m-auto text-violet-500' />
+                  </div>
+                  <div className='space-y-2 w-full max-w-xs'>
+                    <div className='h-3 bg-slate-100 rounded-full animate-pulse' />
+                    <div className='h-3 bg-slate-100 rounded-full animate-pulse w-4/5' />
+                    <div className='h-3 bg-slate-100 rounded-full animate-pulse w-3/5' />
+                  </div>
+                  <p className='text-sm text-slate-400 font-medium'>AI đang phân tích tin nhắn...</p>
+                </div>
+              ) : (
+                <div className='space-y-2'>
+                  {summaryText.split('\n').filter(Boolean).map((line, idx) => {
+                    const isBullet = line.trim().startsWith('*') || line.trim().startsWith('-') || line.trim().startsWith('•')
+                    const cleanLine = line.replace(/^[*•-]\s*/, '').replace(/\*\*(.*?)\*\*/g, '$1')
+                    return isBullet ? (
+                      <div key={idx} className='flex items-start gap-2.5'>
+                        <span className='mt-1.5 size-1.5 shrink-0 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500' />
+                        <p className='text-sm leading-relaxed text-slate-700'>{cleanLine}</p>
+                      </div>
+                    ) : (
+                      <p key={idx} className={`text-sm leading-relaxed ${line.startsWith('❌') ? 'text-red-500 font-medium' : 'text-slate-600 font-medium'}`}>
+                        {line.replace(/\*\*(.*?)\*\*/g, '$1')}
+                      </p>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            {!isSummarizing && (
+              <div className='flex items-center justify-between border-t border-slate-100 bg-slate-50/80 px-6 py-3'>
+                <p className='text-[11px] text-slate-400'>✨ Được tạo bởi Gemini AI</p>
+                <div className='flex gap-2'>
+                  <button
+                    type='button'
+                    onClick={handleSummarize}
+                    className='flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-bold text-violet-600 transition hover:bg-violet-50'
+                  >
+                    <Sparkles size={11} /> Tóm tắt lại
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setShowSummaryModal(false)}
+                    className='rounded-full bg-gradient-to-r from-violet-500 to-cyan-500 px-4 py-1.5 text-xs font-bold text-white transition hover:from-violet-600 hover:to-cyan-600'
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* scroll-to highlight keyframe */}
       <style>{`
         .msg-highlight { animation: msgFlash 1.4s ease-out; }
         @keyframes msgFlash {
           0%,20% { background-color: rgba(99,102,241,0.18); border-radius: 12px; }
           100%    { background-color: transparent; }
+        }
+        @keyframes summaryModalIn {
+          from { opacity: 0; transform: scale(0.88) translateY(12px); }
+          to   { opacity: 1; transform: scale(1) translateY(0); }
         }
       `}</style>
     </div>

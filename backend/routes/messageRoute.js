@@ -10,7 +10,8 @@ import {
     deleteConversation,
     editMessage,
     reactMessage,
-    saveCall
+    saveCall,
+    summarizeConversation
 } from '../controllers/messageController.js'
 import { upload } from '../configs/multer.js'
 import { protect } from '../middlewares/auth.js'
@@ -32,5 +33,6 @@ messageRouter.post('/delete-conversation', protect, deleteConversation)
 messageRouter.post('/edit', protect, editMessage)
 messageRouter.post('/react', protect, reactMessage)
 messageRouter.post('/save-call', protect, saveCall)
+messageRouter.post('/summarize', protect, summarizeConversation)
 
 export default messageRouter

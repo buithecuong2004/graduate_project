@@ -15,6 +15,14 @@ const REACTION_ICONS = {
     angry: '😡'
 };
 
+const SUMMARIZABLE_MESSAGE_TYPES = ['text', 'images', 'image', 'video', 'videos']
+
+const getPopulatedSenderId = (message) => (
+    message?.from_user_id?._id?.toString?.() ||
+    message?.from_user_id?.toString?.() ||
+    ''
+)
+
 const getVoiceFileExtension = (file) => {
     const mimeType = file.mimetype?.split(';')[0]?.toLowerCase()
     const extensionByMime = {
@@ -35,7 +43,7 @@ const getVoiceFileExtension = (file) => {
 
 const cleanupUploadedFiles = (files = {}) => {
     Object.values(files).flat().forEach(file => {
-        if(file?.path) {
+        if (file?.path) {
             fs.unlink(file.path, (err) => {
                 if (err) console.log('File cleanup error:', err)
             })
@@ -111,7 +119,7 @@ const populateMessage = async (msgObj) => {
     if (toId) userIdsToFetch.add(String(toId))
 
     if (msgObj.reply_to) {
-        // reply_to may be an id — fetch the reply message to find its sender
+        // reply_to may be an id â€” fetch the reply message to find its sender
         const replyMsg = await Message.findById(msgObj.reply_to).lean()
         if (replyMsg) {
             const replyFromId = replyMsg.from_user_id
@@ -392,7 +400,7 @@ export const sendMessage = async (req, res) => {
         const populatedMsg = await populateMessage(msgObj)
 
         res.json({ success: true, message: populatedMsg })
-        console.log(`sendMessage: user=${userId} to=${group_id ? `group:${group_id}` : to_user_id} saved in ${Date.now()-startTime}ms`)
+        console.log(`sendMessage: user=${userId} to=${group_id ? `group:${group_id}` : to_user_id} saved in ${Date.now() - startTime}ms`)
 
         if (group_id) {
             await GroupChat.findByIdAndUpdate(group_id, { updatedAt: new Date() })
@@ -409,7 +417,7 @@ export const sendMessage = async (req, res) => {
 
         }
     } catch (error) {
-        console.error('❌ Error in sendMessage:', error)
+        console.error('âŒ Error in sendMessage:', error)
         res.json({ success: false, message: error.message })
     }
 }
@@ -481,7 +489,7 @@ export const getChatMessages = async (req, res) => {
         }
 
         res.json({ success: true, messages, hasMore })
-        console.log(`getChatMessages: user=${userId} with=${to_user_id} returned ${messages.length} messages in ${Date.now()-startTime}ms`)
+        console.log(`getChatMessages: user=${userId} with=${to_user_id} returned ${messages.length} messages in ${Date.now() - startTime}ms`)
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
@@ -670,9 +678,9 @@ export const getUserRecentMessages = async (req, res) => {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Chat Init — fetch recent messages + group chats in one request
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Chat Init â€” fetch recent messages + group chats in one request
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getChatInit = async (req, res) => {
     try {
         const userId = req.userId
@@ -887,9 +895,9 @@ export const editMessage = async (req, res) => {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // React to Message
-// ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const reactMessage = async (req, res) => {
     try {
         const startTime = Date.now()
@@ -965,7 +973,7 @@ export const reactMessage = async (req, res) => {
         const populatedMsg = await populateMessage(msgObj)
 
         res.json({ success: true, message: 'Reaction updated', messageData: populatedMsg })
-        console.log(`reactMessage: user=${userId} message=${messageId} processed in ${Date.now()-startTime}ms`)
+        console.log(`reactMessage: user=${userId} message=${messageId} processed in ${Date.now() - startTime}ms`)
 
         const io = req.app.locals.io
         if (io) {
@@ -992,7 +1000,7 @@ export const reactMessage = async (req, res) => {
                 const reactor = await User.findById(userId)
                 if (reactor) {
                     const reactionIcon = REACTION_ICONS[reactionType] || reactionType
-                    
+
                     const automatedMessage = await Message.create({
                         from_user_id: userId,
                         to_user_id: messageOwner,
@@ -1090,3 +1098,176 @@ export const saveCall = async (req, res) => {
     }
 }
 
+
+// ─────────────────────────────────────────────────────────────────
+// Summarize Conversation with Gemini AI
+// ─────────────────────────────────────────────────────────────────
+export const summarizeConversation = async (req, res) => {
+    try {
+        const userId = req.userId
+        const { to_user_id, group_id } = req.body
+
+        if (!to_user_id && !group_id) {
+            return res.json({ success: false, message: 'Missing conversation target' })
+        }
+
+        const { count_only, message_ids } = req.body
+
+        let query
+        if (group_id) {
+            const group = await GroupChat.findById(group_id).select('members.user')
+            if (!group) return res.json({ success: false, message: 'Group chat not found' })
+            if (!isGroupMember(group, userId)) {
+                return res.json({ success: false, message: 'You are not a member of this group' })
+            }
+            query = { group_id, is_deleted: { $ne: true }, deletedFor: { $ne: userId } }
+        } else {
+            query = {
+                $or: [
+                    { from_user_id: userId, to_user_id },
+                    { from_user_id: to_user_id, to_user_id: userId }
+                ],
+                is_deleted: { $ne: true },
+                deletedFor: { $ne: userId }
+            }
+        }
+
+        const hasRequestedMessageIds = Array.isArray(message_ids)
+        const requestedMessageIds = hasRequestedMessageIds
+            ? [...new Set(message_ids.map(id => id?.toString?.() || '').filter(id => mongoose.Types.ObjectId.isValid(id)))]
+            : []
+
+        const summarizableQuery = {
+            message_type: { $in: SUMMARIZABLE_MESSAGE_TYPES },
+            text: { $exists: true, $ne: '' }
+        }
+
+        let rawMessages = []
+
+        if (hasRequestedMessageIds) {
+            rawMessages = await Message.find({
+                ...query,
+                ...summarizableQuery,
+                _id: { $in: requestedMessageIds },
+                from_user_id: { $ne: userId }
+            })
+                .sort({ createdAt: 1 })
+                .populate('from_user_id', 'full_name username _id')
+                .lean()
+        } else {
+            const recentMessages = await Message.find({
+                ...query,
+                message_type: { $ne: 'reaction' }
+            })
+                .sort({ createdAt: -1 })
+                .limit(80)
+                .populate('from_user_id', 'full_name username _id')
+                .lean()
+
+            const latestIncomingSegment = []
+            for (const message of recentMessages) {
+                if (getPopulatedSenderId(message) === userId) break
+                if (
+                    SUMMARIZABLE_MESSAGE_TYPES.includes(message.message_type) &&
+                    message.text?.trim()
+                ) {
+                    latestIncomingSegment.push(message)
+                }
+            }
+            rawMessages = latestIncomingSegment.reverse()
+        }
+
+        const otherCount = rawMessages.length
+
+        // count_only mode: just return the count without calling AI
+        if (count_only) {
+            return res.json({ success: true, otherCount })
+        }
+
+        if (otherCount === 0) {
+            return res.json({ success: false, message: 'Kh\u00f4ng c\u00f3 tin nh\u1eafn \u0111\u1ec3 t\u00f3m t\u1eaft', otherCount: 0 })
+        }
+
+        if (rawMessages.length === 0) {
+            return res.json({ success: false, message: 'Kh\u00f4ng c\u00f3 tin nh\u1eafn \u0111\u1ec3 t\u00f3m t\u1eaft' })
+        }
+
+        if (rawMessages.length < 10) {
+            return res.json({ success: false, message: 'Ch\u01b0a c\u00f3 \u0111\u1ee7 tin nh\u1eafn li\u00ean ti\u1ebfp \u0111\u1ec3 t\u00f3m t\u1eaft', otherCount })
+        }
+
+        const lines = rawMessages.map((msg) => {
+            const sender = msg.from_user_id
+            const isOwn = sender?._id?.toString() === userId
+            const name = isOwn ? 'Ban' : (sender?.full_name || sender?.username || 'Nguoi dung')
+            return `${name}: ${msg.text}`
+        })
+
+        const conversationText = lines.join('\n')
+        const otherMsg = rawMessages.find(m => m.from_user_id?._id?.toString() !== userId)
+        const otherName = otherMsg?.from_user_id?.full_name || otherMsg?.from_user_id?.username || 'nguoi kia'
+
+        const isGroup = !!group_id
+        const prompt = isGroup
+            ? `Duoi day la doan hoi thoai nhom. Hay tom tat ngan gon noi dung chinh cua cuoc tro chuyen bang tieng Viet, duoi dang cac diem chinh (bullet points), toi da 5 diem. Chi tra ve noi dung tom tat, khong giai thich them.\n\n${conversationText}`
+            : `Duoi day la doan hoi thoai. Hay tom tat ngan gon nhung gi ${otherName} da noi va muon truyen dat trong cuoc tro chuyen nay bang tieng Viet, duoi dang cac diem chinh (bullet points), toi da 5 diem. Chi tra ve noi dung tom tat, khong giai thich them.\n\n${conversationText}`
+
+        const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+        if (!GEMINI_API_KEY) {
+            return res.json({ success: false, message: 'AI chua duoc cau hinh' })
+        }
+
+        // Try multiple model + API version combinations as fallback
+        const CANDIDATES = [
+            { api: 'v1beta', model: 'gemini-flash-lite-latest' },
+            { api: 'v1beta', model: 'gemini-flash-lite-latest' },
+            { api: 'v1', model: 'gemini-flash-lite-latest' },
+            { api: 'v1', model: 'gemini-flash-lite-latest' },
+            { api: 'v1', model: 'gemini-flash-lite-latest' },
+        ]
+
+        let summary = null
+        let lastError = ''
+
+        for (const { api, model } of CANDIDATES) {
+            try {
+                const url = `https://generativelanguage.googleapis.com/${api}/models/${model}:generateContent?key=${GEMINI_API_KEY}`
+                const geminiRes = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: { temperature: 0.3, maxOutputTokens: 512 }
+                    })
+                })
+
+                if (!geminiRes.ok) {
+                    const errBody = await geminiRes.json().catch(() => ({}))
+                    lastError = errBody?.error?.message || geminiRes.statusText
+                    console.warn(`Gemini ${api}/${model} failed (${geminiRes.status}): ${lastError.substring(0, 120)}`)
+                    // Always try next candidate regardless of error type
+                    continue
+                }
+
+                const geminiData = await geminiRes.json()
+                summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text
+                if (summary) {
+                    console.log(`Gemini summarize OK: api=${api} model=${model}`)
+                    break
+                }
+            } catch (fetchErr) {
+                lastError = fetchErr.message
+                console.error(`Gemini ${api}/${model} fetch error:`, fetchErr.message)
+            }
+        }
+
+        if (!summary) {
+            return res.json({ success: false, message: `Kh\u00f4ng th\u1ec3 t\u1ea1o t\u00f3m t\u1eaft: ${lastError || 'Vui l\u00f2ng th\u1eed l\u1ea1i sau'}` })
+        }
+
+        res.json({ success: true, summary: summary.trim(), messageCount: rawMessages.length, otherCount })
+    } catch (error) {
+        console.error('Error in summarizeConversation:', error)
+        res.json({ success: false, message: error.message })
+    }
+}
