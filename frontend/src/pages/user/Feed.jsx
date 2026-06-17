@@ -191,7 +191,7 @@ const Feed = () => {
                 </button>
               </div>
               <div className='mt-5'>
-                <StoriesBar refreshTrigger={location.state?.refresh}/>
+                <StoriesBar refreshTrigger={location.state?.refresh} />
               </div>
             </section>
 
@@ -231,44 +231,35 @@ const Feed = () => {
 
             <div className='space-y-6'>
               {loading && page === 1
-                ? <Loading height='60vh'/>
+                ? <Loading height='60vh' />
                 : <>
-                    {interleavedFeed.map((item, idx) => (
-                      item.type === 'suggested'
-                        ? (
-                          <div key={`suggested-${item.data._id}-${idx}`}>
-                            <PostCard post={item.data} onPostDeleted={handlePostDeleted}/>
-                          </div>
-                        )
-                        : (
-                          <PostCard key={item.data._id} post={item.data} onPostDeleted={handlePostDeleted}/>
-                        )
-                    ))}
-                    {hasMore && (
-                      <div ref={sentinelRef} className='h-8 flex items-center justify-center py-2'>
-                        {loading && page > 1 && <Loading height='6vh' />}
-                      </div>
-                    )}
-                    {!hasMore && posts.length > 0 && (
-                      <div className='rounded-2xl border border-slate-200 bg-white/70 py-6 text-center text-sm text-slate-500'>
-                        Không còn bài viết để tải
-                      </div>
-                    )}
-                  </>
+                  {interleavedFeed.map((item, idx) => (
+                    item.type === 'suggested'
+                      ? (
+                        <div key={`suggested-${item.data._id}-${idx}`}>
+                          <PostCard post={item.data} onPostDeleted={handlePostDeleted} />
+                        </div>
+                      )
+                      : (
+                        <PostCard key={item.data._id} post={item.data} onPostDeleted={handlePostDeleted} />
+                      )
+                  ))}
+                  {hasMore && (
+                    <div ref={sentinelRef} className='h-8 flex items-center justify-center py-2'>
+                      {loading && page > 1 && <Loading height='6vh' />}
+                    </div>
+                  )}
+                  {!hasMore && posts.length > 0 && (
+                    <div className='rounded-2xl border border-slate-200 bg-white/70 py-6 text-center text-sm text-slate-500'>
+                      Không còn bài viết để tải
+                    </div>
+                  )}
+                </>
               }
             </div>
           </main>
 
           <aside className='max-xl:hidden sticky top-6 max-h-[calc(100vh-3rem)] space-y-5 overflow-y-auto pb-6 pr-1'>
-            <div className='surface overflow-hidden rounded-[1.5rem] p-4 text-sm text-slate-700'>
-              <div className='mb-3 flex items-center justify-between'>
-                <h3 className='font-black text-slate-900'>Được tài trợ</h3>
-                <span className='rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700'>Ad</span>
-              </div>
-              <img src={assets.sponsored_img} className='h-44 w-full rounded-2xl object-cover' alt='' />
-              <p className='mt-4 font-bold text-slate-900'>Email Marketing</p>
-              <p className='mt-1 leading-6 text-slate-500'>Tăng cường tiếp thị email với nền tảng mạnh mẽ, dễ sử dụng và tối ưu cho kết quả.</p>
-            </div>
             <RecentMessages />
           </aside>
         </div>
