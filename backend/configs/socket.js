@@ -1,9 +1,11 @@
 import { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
 import User from '../models/User.js';
 import LiveStream from '../models/LiveStream.js';
 import GroupChat from '../models/GroupChat.js';
 import { isConversationBlocked } from '../utils/blocking.js';
 import { getUniqueNotificationRecipientIds } from '../utils/notificationRecipients.js';
+import { getRedisClient, getRedisSubscriber } from './redis.js';
 
 const getUserId = (value) => value?._id?.toString?.() || value?.toString?.() || '';
 
@@ -28,10 +30,35 @@ const isGroupCallPayload = (data = {}) => (
 export const setupSocket = (server) => {
     const io = new Server(server, {
         cors: {
-            origin: "*",
-            methods: ["GET", "POST"]
-        }
+            origin: process.env.FRONTEND_URL || 'https://tarouss.io.vn',
+            methods: ['GET', 'POST'],
+            credentials: true,
+        },
+        // Tối ưu cho 500–1000 users đồng thời
+        pingTimeout: 60000,
+        pingInterval: 25000,
+        transports: ['websocket', 'polling'],
+        // Tăng buffer size cho group calls và livestream
+        maxHttpBufferSize: 2e6, // 2MB
     });
+
+    // ─── Redis Adapter ────────────────────────────────────────────────────────
+    // Cho phép nhiều PM2 workers chia sẻ cùng Socket.IO event bus.
+    // Khi worker A gọi io.to('user-X').emit(...), Redis sẽ broadcast
+    // đến tất cả workers khác để đảm bảo user-X nhận được event dù
+    // kết nối vào worker nào.
+    try {
+        const pubClient = getRedisClient();
+        const subClient = getRedisSubscriber();
+        if (pubClient && subClient) {
+            io.adapter(createAdapter(pubClient, subClient));
+            console.log('✅ Socket.IO Redis adapter attached');
+        } else {
+            console.log('ℹ️  Redis not available — Socket.IO using in-memory adapter (local dev mode)');
+        }
+    } catch (err) {
+        console.warn('⚠️  Socket.IO Redis adapter failed, falling back to in-memory:', err.message);
+    }
 
     // Store connected users with all active socket IDs so multiple tabs stay online.
     const connectedUsers = new Map();
