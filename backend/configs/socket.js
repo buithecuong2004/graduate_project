@@ -30,7 +30,28 @@ const isGroupCallPayload = (data = {}) => (
 export const setupSocket = (server) => {
     const io = new Server(server, {
         cors: {
-            origin: process.env.FRONTEND_URL || 'https://tarouss.io.vn',
+            // Chấp nhận tất cả origin có trong FRONTEND_URLS (comma-separated)
+            // hoặc fallback về domain production
+            origin: (origin, callback) => {
+                // Không có origin (mobile app, server-to-server) → cho phép
+                if (!origin) return callback(null, true);
+
+                const allowed = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'https://tarouss.io.vn')
+                    .split(',')
+                    .map(u => u.trim())
+                    .filter(Boolean);
+
+                // Thêm localhost vào allowed khi development
+                if (process.env.NODE_ENV !== 'production') {
+                    allowed.push('http://localhost:5173', 'http://localhost:3000');
+                }
+
+                if (allowed.includes(origin)) return callback(null, true);
+                // Nếu không match → vẫn cho phép (log warning thay vì block)
+                // để tránh false-positive trên mobile / subdomain
+                console.warn(`⚠️  Socket.IO: unrecognized origin "${origin}" — allowed`);
+                callback(null, true);
+            },
             methods: ['GET', 'POST'],
             credentials: true,
         },

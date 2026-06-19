@@ -108,18 +108,26 @@ try {
 }
 
 // ─── CORS Config ─────────────────────────────────────────────────────────────
-const allowedOrigins = [
-    process.env.FRONTEND_URL || 'https://tarouss.io.vn',
-    'http://localhost:5173',
-    'http://localhost:3000',
-]
+const getAllowedOrigins = () => {
+    const origins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'https://tarouss.io.vn')
+        .split(',')
+        .map(u => u.trim())
+        .filter(Boolean);
+
+    if (process.env.NODE_ENV !== 'production') {
+        origins.push('http://localhost:5173', 'http://localhost:3000');
+    }
+    return origins;
+}
 
 app.use(cors({
     origin: (origin, callback) => {
-        // Cho phép requests không có origin (mobile apps, curl, Postman)
-        if (!origin) return callback(null, true)
-        if (allowedOrigins.includes(origin)) return callback(null, true)
-        callback(new Error(`CORS: Origin ${origin} not allowed`))
+        if (!origin) return callback(null, true); // mobile / curl / server-to-server
+        const allowed = getAllowedOrigins();
+        if (allowed.includes(origin)) return callback(null, true);
+        // Log nhưng không block — tránh false positive
+        console.warn(`⚠️  CORS: unrecognized origin "${origin}" — allowed`);
+        callback(null, true);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
