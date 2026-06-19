@@ -130,10 +130,16 @@ const AppInner = () => {
     if (currentUser?._id) {
       if (!socketRef.current) {
         const socket = io(import.meta.env.VITE_BASEURL, {
+          // Chỉ dùng WebSocket, bỏ polling.
+          // PM2 cluster: polling requests round-robin giữa workers →
+          // worker nhận POST không có session của GET → 400 error.
+          // WebSocket là TCP persistent → luôn vào đúng 1 worker.
+          transports: ['websocket'],
           reconnection: true,
           reconnectionDelay: 1000,
           reconnectionDelayMax: 5000,
-          reconnectionAttempts: 5
+          reconnectionAttempts: 10,
+          timeout: 20000,
         })
 
         socketRef.current = socket

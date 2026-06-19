@@ -55,10 +55,13 @@ export const setupSocket = (server) => {
             methods: ['GET', 'POST'],
             credentials: true,
         },
+        // Chỉ dùng WebSocket — không dùng polling.
+        // Polling với PM2 cluster gây lỗi 400 do sticky session:
+        // mỗi polling request có thể vào worker khác không có session.
+        transports: ['websocket'],
         // Tối ưu cho 500–1000 users đồng thời
         pingTimeout: 60000,
         pingInterval: 25000,
-        transports: ['websocket', 'polling'],
         // Tăng buffer size cho group calls và livestream
         maxHttpBufferSize: 2e6, // 2MB
     });
