@@ -28,6 +28,7 @@ const userSchema = new mongoose.Schema({
 
 // Compound unique index: same provider + providerId combo must be unique
 userSchema.index({ provider: 1, providerId: 1 }, { unique: true })
+userSchema.index({ email: 1 }, { unique: true })
 
 const User = mongoose.model('User', userSchema)
 
