@@ -4,7 +4,7 @@ import Connection from "../models/Connection.js";
 import sendEmail from "../configs/nodeMailer.js";
 import Story from "../models/Story.js";
 import Message from "../models/Message.js";
-import imagekit from "../configs/imageKit.js";
+import { deleteFile } from "../configs/storage.js";
 import { getFrontendUrl } from "../utils/appUrl.js";
 
 export const inngest = new Inngest({ id: "tarous-app" });
@@ -99,18 +99,18 @@ const deleteStory = inngest.createFunction(
         const { storyId } = event.data
         const in24Hours = new Date(Date.now() + 24 * 60 * 60 * 1000)
         await step.sleepUntil('wait-for-24-hours', in24Hours)
-        await step.run("delete-story", async() => {
+        await step.run("delete-story", async () => {
             const story = await Story.findById(storyId)
-            
-            // Delete media file from ImageKit if it exists
-            if(story && story.media_id) {
+
+            // Delete media file from S3 if it exists
+            if (story && story.media_id) {
                 try {
-                    await imagekit.deleteFile(story.media_id)
+                    await deleteFile(story.media_id)
                 } catch (error) {
-                    console.log('ImageKit delete error:', error.message)
+                    console.log('S3 delete error:', error.message)
                 }
             }
-            
+
             await Story.findByIdAndDelete(storyId)
             return { message: "Story deleted" }
         })

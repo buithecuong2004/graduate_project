@@ -1,4 +1,4 @@
-import imagekit from "../configs/imageKit.js"
+import { uploadFile } from "../configs/storage.js"
 import { inngest } from "../inngest/index.js"
 import Connection from "../models/Connection.js"
 import Post from "../models/Post.js"
@@ -111,30 +111,21 @@ export const updateUserData = async (req,res) => {
         const profile = files.profile && files.profile[0]
         const cover = files.cover && files.cover[0]
 
-        const uploadImage = async (file, folder, width) => {
+        const uploadImage = async (file, folder) => {
             const fileBuffer = fs.readFileSync(file.path)
-            const response = await imagekit.upload({
-                file: fileBuffer,
+            const response = await uploadFile({
+                fileBuffer,
                 fileName: file.originalname,
-                folder
+                folder,
+                mimeType: file.mimetype,
             })
-
-            return response.filePath
-                ? imagekit.url({
-                    path: response.filePath,
-                    transformation: [
-                        {quality: 'auto'},
-                        {format: 'webp'},
-                        {width}
-                    ]
-                })
-                : response.url
+            return response.url
         }
 
         try {
             const [profileUrl, coverUrl] = await Promise.all([
-                profile ? uploadImage(profile, 'users/profile', '400') : Promise.resolve(null),
-                cover ? uploadImage(cover, 'users/cover', '1280') : Promise.resolve(null)
+                profile ? uploadImage(profile, 'users/profile') : Promise.resolve(null),
+                cover ? uploadImage(cover, 'users/cover') : Promise.resolve(null)
             ])
 
             if(profileUrl) updatedData.profile_picture = profileUrl

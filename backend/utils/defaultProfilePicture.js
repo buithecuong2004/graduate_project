@@ -1,7 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import imagekit from '../configs/imageKit.js'
+import { uploadFile, getPublicUrl } from '../configs/storage.js'
 import { getFrontendUrl } from './appUrl.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -10,12 +10,16 @@ const DEFAULT_AVATAR_PATHS = [
     path.resolve(__dirname, '../../frontend/public/assets/default.jpg')
 ]
 
+// S3 key where the default avatar lives (uploaded once, reused)
+const DEFAULT_AVATAR_S3_KEY = 'users/default/default.jpg'
+
 let defaultProfilePicturePromise = null
 
-const isImageKitConfigured = () => (
-    Boolean(process.env.IMAGEKIT_PUBLIC_KEY) &&
-    Boolean(process.env.IMAGEKIT_PRIVATE_KEY) &&
-    Boolean(process.env.IMAGEKIT_URL_ENDPOINT)
+const isS3Configured = () => (
+    Boolean(process.env.AWS_ACCESS_KEY_ID) &&
+    Boolean(process.env.AWS_SECRET_ACCESS_KEY) &&
+    Boolean(process.env.AWS_S3_BUCKET) &&
+    Boolean(process.env.AWS_S3_REGION)
 )
 
 const findDefaultAvatarFile = async () => {
@@ -31,50 +35,31 @@ const findDefaultAvatarFile = async () => {
     return null
 }
 
-const getImageKitDefaultProfilePictureUrl = () => {
-    if (!isImageKitConfigured()) return ''
-
-    return imagekit.url({
-        path: '/users/default/default.jpg',
-        transformation: [
-            { quality: 'auto' },
-            { format: 'webp' },
-            { width: '400' }
-        ]
-    })
+const getS3DefaultProfilePictureUrl = () => {
+    if (!isS3Configured()) return ''
+    return getPublicUrl(DEFAULT_AVATAR_S3_KEY)
 }
 
 const getFallbackDefaultProfilePictureUrl = () => (
     process.env.DEFAULT_PROFILE_PICTURE_URL ||
-    getImageKitDefaultProfilePictureUrl() ||
+    getS3DefaultProfilePictureUrl() ||
     getFrontendUrl('/assets/default.jpg')
 )
 
 const uploadDefaultProfilePicture = async () => {
     if (process.env.DEFAULT_PROFILE_PICTURE_URL) return process.env.DEFAULT_PROFILE_PICTURE_URL
-    if (!isImageKitConfigured()) return getFallbackDefaultProfilePictureUrl()
+    if (!isS3Configured()) return getFallbackDefaultProfilePictureUrl()
 
     const avatarPath = await findDefaultAvatarFile()
     if (!avatarPath) return getFallbackDefaultProfilePictureUrl()
 
     const fileBuffer = await fs.readFile(avatarPath)
-    const response = await imagekit.upload({
-        file: fileBuffer,
+    const response = await uploadFile({
+        fileBuffer,
         fileName: 'default.jpg',
-        folder: '/users/default',
-        useUniqueFileName: false
+        fixedKey: DEFAULT_AVATAR_S3_KEY,  // always stored at the same S3 path
+        mimeType: 'image/jpeg',
     })
-
-    if (response.filePath) {
-        return imagekit.url({
-            path: response.filePath,
-            transformation: [
-                { quality: 'auto' },
-                { format: 'webp' },
-                { width: '400' }
-            ]
-        })
-    }
 
     return response.url || getFallbackDefaultProfilePictureUrl()
 }

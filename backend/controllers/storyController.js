@@ -1,5 +1,5 @@
 import fs from "fs"
-import imagekit from "../configs/imageKit.js"
+import { uploadFile, deleteFile } from "../configs/storage.js"
 import Story from "../models/Story.js"
 import User from "../models/User.js"
 import Message from "../models/Message.js"
@@ -7,16 +7,14 @@ import { inngest } from "../inngest/index.js"
 import axios from "axios"
 import { getUniqueNotificationRecipientIds } from "../utils/notificationRecipients.js"
 
-// Helper to delete file from ImageKit using file ID
-const deleteImageKitFile = async (fileId) => {
+// Helper to delete file from S3 using object key
+const deleteS3File = async (fileKey) => {
     try {
-        if(!fileId) return true
-
-        // Use ImageKit SDK to delete file by ID
-        await imagekit.deleteFile(fileId)
+        if(!fileKey) return true
+        await deleteFile(fileKey)
         return true
     } catch (error) {
-        console.log('ImageKit delete error:', error.message)
+        console.log('S3 delete error:', error.message)
         return false
     }
 }
@@ -42,9 +40,11 @@ export const addUserStory = async (req, res) => {
         if(media && (media_type === 'image' || media_type === 'video')) {
             try {
                 const fileBuffer = fs.readFileSync(media.path)
-                const response = await imagekit.upload({
-                    file: fileBuffer,
-                    fileName: media.originalname
+                const response = await uploadFile({
+                    fileBuffer,
+                    fileName: media.originalname,
+                    folder: 'stories',
+                    mimeType: media.mimetype,
                 })
                 media_url = response.url || ''
                 media_id = response.fileId || ''
@@ -186,9 +186,9 @@ export const deleteStory = async (req, res) => {
             return res.json({ success: false, message: 'You can only delete your own stories' })
         }
 
-        // Delete media file from ImageKit if it exists
+        // Delete media file from S3 if it exists
         if(story.media_id) {
-            await deleteImageKitFile(story.media_id)
+            await deleteS3File(story.media_id)
         }
 
         // Delete the story

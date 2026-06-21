@@ -22,8 +22,8 @@ export const generalLimiter = rateLimit({
     legacyHeaders: false,
     handler: jsonHandler,
     skip: (req) => {
-        // Bỏ qua health check
-        return req.path === '/' || req.path === '/health';
+        // Bỏ qua health check và Inngest callbacks
+        return req.path === '/' || req.path === '/health' || req.path.startsWith('/inngest');
     },
 });
 

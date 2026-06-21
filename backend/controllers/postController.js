@@ -1,5 +1,5 @@
 import fs from "fs";
-import imagekit from "../configs/imageKit.js";
+import { uploadFile, deleteFile } from "../configs/storage.js";
 import Post from "../models/Post.js";
 import Comment from "../models/Comment.js";
 import User from "../models/User.js";
@@ -103,16 +103,14 @@ const emitPostRoomEvent = (req, postId, event, payload = {}) => {
     })
 }
 
-// Helper to delete file from ImageKit using file ID
-const deleteImageKitFile = async (fileId) => {
+// Helper to delete file from S3 using object key
+const deleteS3File = async (fileKey) => {
     try {
-        if(!fileId) return true
-
-        // Use ImageKit SDK to delete file by ID
-        await imagekit.deleteFile(fileId)
+        if(!fileKey) return true
+        await deleteFile(fileKey)
         return true
     } catch (error) {
-        console.log('ImageKit delete error:', error.message)
+        console.log('S3 delete error:', error.message)
         return false
     }
 }
@@ -155,21 +153,15 @@ export const addPost = async (req, res) => {
                 const uploadedImages = await Promise.all(
                     images.map(async (image) => {
                         const fileBuffer = fs.readFileSync(image.path)
-                        const response = await imagekit.upload({
-                            file: fileBuffer,
+                        const response = await uploadFile({
+                            fileBuffer,
                             fileName: image.originalname,
                             folder: "posts",
+                            mimeType: image.mimetype,
                         })
 
                         return {
-                            url: response.url || imagekit.url({
-                                path: response.filePath,
-                                transformation: [
-                                    {quality: 'auto'},
-                                    {format: 'webp'},
-                                    {width: '1280'}
-                                ]
-                            }),
+                            url: response.url,
                             id: response.fileId
                         }
                     })
@@ -196,15 +188,14 @@ export const addPost = async (req, res) => {
                 }
 
                 const fileBuffer = fs.readFileSync(video.path)
-                const response = await imagekit.upload({
-                    file: fileBuffer,
+                const response = await uploadFile({
+                    fileBuffer,
                     fileName: video.originalname,
                     folder: "posts/videos",
+                    mimeType: video.mimetype,
                 })
 
-                video_url = response.url || imagekit.url({
-                    path: response.filePath
-                })
+                video_url = response.url
                 video_id = response.fileId
 
                 // Cleanup uploaded video
@@ -791,15 +782,15 @@ export const deletePost = async (req, res) => {
             return res.json({ success: false, message: 'You can only delete your own posts' })
         }
 
-        // Delete files from ImageKit
+        // Delete files from S3
         if(post.image_ids && post.image_ids.length > 0) {
-            for(let fileId of post.image_ids) {
-                await deleteImageKitFile(fileId)
+            for(let fileKey of post.image_ids) {
+                await deleteS3File(fileKey)
             }
         }
 
         if(post.video_id) {
-            await deleteImageKitFile(post.video_id)
+            await deleteS3File(post.video_id)
         }
 
         // Delete all comments associated with the post

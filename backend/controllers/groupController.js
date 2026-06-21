@@ -1,5 +1,5 @@
 import fs from "fs";
-import imagekit from "../configs/imageKit.js";
+import { uploadFile, deleteFile } from "../configs/storage.js";
 import GroupChat from "../models/GroupChat.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
@@ -37,13 +37,13 @@ const emitGroupUpdated = async (req, groupId) => {
     });
 };
 
-const deleteImageKitFile = async (fileId) => {
-    if (!fileId) return true;
+const deleteS3File = async (fileKey) => {
+    if (!fileKey) return true;
     try {
-        await imagekit.deleteFile(fileId);
+        await deleteFile(fileKey);
         return true;
     } catch (error) {
-        console.log('ImageKit delete error:', error.message);
+        console.log('S3 delete error:', error.message);
         return false;
     }
 };
@@ -173,21 +173,15 @@ export const updateGroupChat = async (req, res) => {
 
         if (avatar) {
             const fileBuffer = fs.readFileSync(avatar.path);
-            const response = await imagekit.upload({
-                file: fileBuffer,
+            const response = await uploadFile({
+                fileBuffer,
                 fileName: avatar.originalname,
-                folder: 'groups/avatars'
+                folder: 'groups/avatars',
+                mimeType: avatar.mimetype,
             });
 
-            await deleteImageKitFile(group.avatar_id);
-            group.avatar_url = response.url || imagekit.url({
-                path: response.filePath,
-                transformation: [
-                    { quality: 'auto' },
-                    { format: 'webp' },
-                    { width: '400' }
-                ]
-            });
+            await deleteS3File(group.avatar_id);
+            group.avatar_url = response.url;
             group.avatar_id = response.fileId;
 
             fs.unlink(avatar.path, (err) => {

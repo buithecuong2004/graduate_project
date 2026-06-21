@@ -1,6 +1,6 @@
 import fs from "fs"
 import mongoose from "mongoose";
-import imagekit from "../configs/imageKit.js";
+import { uploadFile, deleteFile } from "../configs/storage.js";
 import Message, { buildMessageSearchIndex, normalizeMessageSearchText } from "../models/Message.js";
 import User from "../models/User.js";
 import GroupChat from "../models/GroupChat.js";
@@ -91,16 +91,14 @@ const emitToMessageRecipients = async (io, message, event, payload) => {
     recipientIds.forEach((recipientId) => io.to(`user-${recipientId}`).emit(event, payload))
 }
 
-// Helper to delete file from ImageKit using file ID
-const deleteImageKitFile = async (fileId) => {
+// Helper to delete file from S3 using object key
+const deleteS3File = async (fileKey) => {
     try {
-        if (!fileId) return true
-
-        // Use ImageKit SDK to delete file by ID
-        await imagekit.deleteFile(fileId)
+        if (!fileKey) return true
+        await deleteFile(fileKey)
         return true
     } catch (error) {
-        console.log('ImageKit delete error:', error.message)
+        console.log('S3 delete error:', error.message)
         return false
     }
 }
@@ -273,17 +271,18 @@ export const sendMessage = async (req, res) => {
                 try {
                     const fileBuffer = fs.readFileSync(voiceFile.path)
                     const extension = getVoiceFileExtension(voiceFile)
-                    const response = await imagekit.upload({
-                        file: fileBuffer,
+                    const response = await uploadFile({
+                        fileBuffer,
                         fileName: `voice_${Date.now()}.${extension}`,
-                        folder: 'messages/voice'
+                        folder: 'messages/voice',
+                        mimeType: voiceFile.mimetype,
                     })
-                    const voiceUrl = response.url || (response.filePath ? imagekit.url({ path: response.filePath }) : '')
+                    const voiceUrl = response.url
                     if (!voiceUrl) throw new Error('Voice upload did not return a URL')
                     media_urls.push(voiceUrl)
                     media_ids.push(response.fileId)
                 } catch (uploadError) {
-                    console.error('ImageKit voice upload error:', uploadError)
+                    console.error('S3 voice upload error:', uploadError)
                     throw uploadError
                 } finally {
                     fs.unlink(voiceFile.path, (err) => {
@@ -299,24 +298,18 @@ export const sendMessage = async (req, res) => {
                     images.map(async (image) => {
                         try {
                             const fileBuffer = fs.readFileSync(image.path)
-                            const response = await imagekit.upload({
-                                file: fileBuffer,
+                            const response = await uploadFile({
+                                fileBuffer,
                                 fileName: image.originalname,
-                                folder: 'messages/images'
+                                folder: 'messages/images',
+                                mimeType: image.mimetype,
                             })
                             return {
-                                url: response.url || imagekit.url({
-                                    path: response.filePath,
-                                    transformation: [
-                                        { quality: 'auto' },
-                                        { format: 'webp' },
-                                        { width: '800' }
-                                    ]
-                                }),
+                                url: response.url,
                                 id: response.fileId
                             }
                         } catch (uploadError) {
-                            console.error('ImageKit upload error:', uploadError)
+                            console.error('S3 upload error:', uploadError)
                             throw uploadError
                         }
                     })
@@ -332,17 +325,18 @@ export const sendMessage = async (req, res) => {
                     videos.map(async (video) => {
                         try {
                             const fileBuffer = fs.readFileSync(video.path)
-                            const response = await imagekit.upload({
-                                file: fileBuffer,
+                            const response = await uploadFile({
+                                fileBuffer,
                                 fileName: video.originalname,
-                                folder: 'messages/videos'
+                                folder: 'messages/videos',
+                                mimeType: video.mimetype,
                             })
                             return {
-                                url: response.url || imagekit.url({ path: response.filePath }),
+                                url: response.url,
                                 id: response.fileId
                             }
                         } catch (uploadError) {
-                            console.error('ImageKit video upload error:', uploadError)
+                            console.error('S3 video upload error:', uploadError)
                             throw uploadError
                         }
                     })
@@ -787,10 +781,10 @@ export const deleteMessage = async (req, res) => {
             }
         }
 
-        // Delete files from ImageKit
+        // Delete files from S3
         if (message.media_ids && message.media_ids.length > 0) {
-            for (let fileId of message.media_ids) {
-                await deleteImageKitFile(fileId)
+            for (let fileKey of message.media_ids) {
+                await deleteS3File(fileKey)
             }
         }
 
