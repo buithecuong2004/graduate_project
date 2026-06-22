@@ -535,6 +535,7 @@ const Admin = () => {
   const [refreshKey, setRefreshKey] = useState(0)
   const [hideModal, setHideModal] = useState({ open: false, postId: null, reason: '', description: '' })
   const hideDescRef = useRef(null)
+  const [deleteModal, setDeleteModal] = useState({ open: false, postId: null, postContent: '' })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState('password')
   const [passwordForm, setPasswordForm] = useState({ current: '', newPwd: '', confirm: '' })
@@ -899,8 +900,18 @@ const Admin = () => {
     }
   }, [authHeaders])
 
-  const deletePost = useCallback(async (postId) => {
-    if (!window.confirm('Xóa bài viết vi phạm này?')) return
+  const openDeleteModal = useCallback((postId, postContent) => {
+    setDeleteModal({ open: true, postId, postContent: postContent || '' })
+  }, [])
+
+  const closeDeleteModal = useCallback(() => {
+    setDeleteModal({ open: false, postId: null, postContent: '' })
+  }, [])
+
+  const confirmDeletePost = useCallback(async () => {
+    const { postId } = deleteModal
+    if (!postId) return
+    closeDeleteModal()
 
     setActionId(postId)
     try {
@@ -916,7 +927,7 @@ const Admin = () => {
     } finally {
       setActionId('')
     }
-  }, [authHeaders])
+  }, [authHeaders, closeDeleteModal, deleteModal])
 
   const updateReport = useCallback(async (reportId, action) => {
     const note = REPORT_ACTION_LABELS[action] || 'Đã xử lý'
@@ -1296,7 +1307,7 @@ const Admin = () => {
                             {post.is_hidden ? <Eye className='size-4' /> : <EyeOff className='size-4' />}
                             {post.is_hidden ? 'Hiển thị' : 'Ẩn'}
                           </button>
-                          <button type='button' onClick={(event) => { event.stopPropagation(); deletePost(post._id) }} disabled={actionId === post._id} className='inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 cursor-pointer'>
+                          <button type='button' onClick={(event) => { event.stopPropagation(); openDeleteModal(post._id, post.content) }} disabled={actionId === post._id} className='inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 cursor-pointer'>
                             <Trash2 className='size-4' />
                             Xóa
                           </button>
@@ -1485,6 +1496,57 @@ const Admin = () => {
                   }`}
               >
                 Xác nhận ẩn
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteModal.open && (
+        <div className='fixed inset-0 z-[60] flex items-center justify-center' onClick={closeDeleteModal}>
+          <div className='absolute inset-0 bg-slate-950/40 backdrop-blur-sm' style={{ animation: 'adminFadeIn 0.18s ease-out' }} />
+          <div
+            className='relative z-10 mx-4 w-full max-w-sm rounded-2xl border border-slate-200 bg-white shadow-2xl'
+            style={{ animation: 'adminSlideUp 0.22s ease-out' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className='flex items-center justify-between border-b border-slate-200 px-5 py-4'>
+              <div className='flex items-center gap-3'>
+                <span className='flex size-9 items-center justify-center rounded-lg bg-rose-50 text-rose-600'>
+                  <Trash2 className='size-4' />
+                </span>
+                <div>
+                  <p className='text-sm font-black text-slate-950'>Xóa bài viết</p>
+                  <p className='text-xs text-slate-500'>Hành động này không thể hoàn tác</p>
+                </div>
+              </div>
+              <button type='button' onClick={closeDeleteModal} className='flex size-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 cursor-pointer'>
+                <X className='size-4' />
+              </button>
+            </div>
+
+            <div className='px-5 py-5'>
+              <p className='text-sm text-slate-600 leading-6'>Bạn có chắc chắn muốn xóa vĩnh viễn bài viết này không?</p>
+              {deleteModal.postContent && (
+                <div className='mt-3 rounded-xl border border-rose-100 bg-rose-50/60 px-4 py-3'>
+                  <p className='line-clamp-3 text-sm font-semibold italic text-rose-800'>
+                    &ldquo;{shortText(deleteModal.postContent, 160)}&rdquo;
+                  </p>
+                </div>
+              )}
+              <p className='mt-3 text-xs font-bold text-slate-400'>Toàn bộ bình luận liên quan cũng sẽ bị xóa theo.</p>
+            </div>
+
+            <div className='flex items-center justify-end gap-3 border-t border-slate-100 px-5 py-4'>
+              <button type='button' onClick={closeDeleteModal} className='rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 cursor-pointer'>
+                Hủy
+              </button>
+              <button
+                type='button'
+                onClick={confirmDeletePost}
+                className='rounded-lg bg-rose-600 px-5 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-rose-700 cursor-pointer'
+              >
+                Xóa bài viết
               </button>
             </div>
           </div>

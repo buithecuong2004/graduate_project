@@ -29,6 +29,7 @@ import { SocketProvider, useSocket } from './context/SocketContext'
 import CallModal from './components/user/CallModal'
 import Loading from './components/user/Loading'
 import api from './api/axios'
+import { ACCOUNT_LOCKED_MESSAGE, ACCOUNT_LOCKED_STORAGE_KEY } from './utils/authMessages'
 
 const getUserId = (userOrId) => userOrId?._id?.toString?.() || userOrId?.toString?.() || ''
 
@@ -74,7 +75,7 @@ const AdminRoute = ({ currentUser }) => {
 
 // ─── Inner App (needs SocketProvider to be parent) ───────────────────────────
 const AppInner = () => {
-  const { isAuthenticated, getToken, loading } = useAuth()
+  const { isAuthenticated, getToken, loading, logout } = useAuth()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const pathnameRef = useRef(pathname)
@@ -362,6 +363,17 @@ const AppInner = () => {
 
         socket.on('new-story-reaction-notification', (notification) => {
           dispatch(addNotification(notification))
+        })
+
+        // Khi admin lock tài khoản → force logout ngay lập tức
+        socket.on('account-locked', () => {
+          sessionStorage.setItem(ACCOUNT_LOCKED_STORAGE_KEY, ACCOUNT_LOCKED_MESSAGE)
+          logout()
+          dispatch(clearUser())
+          socket.disconnect()
+          socketRef.current = null
+          setSocket(null)
+          window.location.replace('/')
         })
 
         socket.on('disconnect', () => {

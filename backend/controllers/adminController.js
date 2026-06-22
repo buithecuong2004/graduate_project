@@ -4,6 +4,7 @@ import Message from '../models/Message.js';
 import Post from '../models/Post.js';
 import Report from '../models/Report.js';
 import User from '../models/User.js';
+import { invalidateAuthCache } from '../middlewares/auth.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USER_PUBLIC_FIELDS = 'full_name username email profile_picture role account_status isOnline lastSeen createdAt locked_at locked_reason';
@@ -490,6 +491,23 @@ export const updateAdminUser = async (req, res) => {
         const user = await User.findByIdAndUpdate(userId, update, { new: true, runValidators: true }).select(USER_PUBLIC_FIELDS);
         if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
+        // Xóa Redis cache để thay đổi trạng thái có hiệu lực ngay lập tức
+        if (account_status) {
+            await invalidateAuthCache(userId);
+
+            // Emit socket event để force logout ngay nếu bị khoá
+            const io = req.app.locals.io;
+            if (io) {
+                if (account_status === 'locked') {
+                    io.to(`user-${userId}`).emit('account-locked', {
+                        message: user.locked_reason || 'Tài khoản bị khoá do vi phạm tiêu chuẩn cộng đồng'
+                    });
+                } else if (account_status === 'active') {
+                    io.to(`user-${userId}`).emit('account-unlocked', {});
+                }
+            }
+        }
+
         res.json({ success: true, user });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -709,12 +727,22 @@ export const updateAdminReport = async (req, res) => {
                     media_urls: [],
                     media_ids: []
                 }),
-                user: () => User.findByIdAndUpdate(report.target_id, {
-                    account_status: 'locked',
-                    locked_at: new Date(),
-                    locked_reason: resolution_note || 'Report approved',
-                    isOnline: false
-                })
+                user: async () => {
+                    await User.findByIdAndUpdate(report.target_id, {
+                        account_status: 'locked',
+                        locked_at: new Date(),
+                        locked_reason: resolution_note || 'Report approved',
+                        isOnline: false
+                    });
+                    // Xóa Redis cache và emit socket để force logout ngay
+                    await invalidateAuthCache(report.target_id.toString());
+                    const io = req.app.locals.io;
+                    if (io) {
+                        io.to(`user-${report.target_id}`).emit('account-locked', {
+                            message: resolution_note || 'Tài khoản bị khoá do vi phạm tiêu chuẩn cộng đồng'
+                        });
+                    }
+                }
             }[report.target_type];
 
             await Promise.all([
