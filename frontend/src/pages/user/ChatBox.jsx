@@ -2039,6 +2039,7 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
                   callScope: 'group',
                   conversationType: 'group',
                   isIncoming: true,
+                  isJoiningActiveCall: true, // User chủ động join → auto-accept, không hiện màn hình incoming
                 })
               }}
               className='shrink-0 rounded-full bg-green-500 px-4 py-1.5 text-sm font-black text-white shadow-sm transition hover:bg-green-600 active:scale-95'

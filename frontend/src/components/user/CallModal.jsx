@@ -188,6 +188,9 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         callInfo.conversationType === 'group' ||
         callInfo.groupId
     )
+    // isJoiningActiveCall: user chủ động bấm "Tham gia" từ banner — không phải đang bị gọi
+    // Khi đó cần auto-accept ngay, không hiển thị màn hình "incoming"
+    const isJoiningActiveCall = isGroupCall && isIncoming && !!callInfo.isJoiningActiveCall
     const groupId = callInfo.groupId || ''
     const callId = callInfo.callId || `${groupId || 'direct'}-${normalizeId(callInfo.from) || currentUserId}`
     const callerId = normalizeId(callInfo.from)
@@ -202,8 +205,10 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         : (callInfo.callerAvatar || null)
     const callerName = callInfo.callerName || 'Unknown'
 
-    const [callState, setCallState] = useState(isIncoming ? 'incoming' : 'outgoing')
-    const callStateRef = useRef(isIncoming ? 'incoming' : 'outgoing')
+    // Nếu join chủ động từ banner → vào thẳng state 'active', không hiện incoming screen
+    const initialCallState = isJoiningActiveCall ? 'active' : (isIncoming ? 'incoming' : 'outgoing')
+    const [callState, setCallState] = useState(initialCallState)
+    const callStateRef = useRef(initialCallState)
     const [isMuted, setIsMuted] = useState(false)
     const [isCamOff, setIsCamOff] = useState(false)
     const [duration, setDuration] = useState(0)
@@ -760,6 +765,44 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         if (!pc) return
 
         if (signal.type === 'offer') {
+            // ── Perfect Negotiation: giải quyết glare (cả 2 bên cùng gửi offer) ──
+            // "Impolite peer" (userId lớn hơn) bỏ qua offer đến nếu đang có local offer
+            // "Polite peer" (userId nhỏ hơn) rollback local offer và chấp nhận offer đến
+            const isImpolite = currentUserId > peerId
+            const hasLocalOffer = pc.signalingState === 'have-local-offer'
+
+            if (hasLocalOffer && isImpolite) {
+                // Impolite peer: bỏ qua — ta đã gửi offer, đợi answer của mình
+                return
+            }
+
+            if (hasLocalOffer && !isImpolite) {
+                // Polite peer: rollback local offer, chấp nhận offer của bên kia
+                try {
+                    await pc.setLocalDescription({ type: 'rollback' })
+                } catch (e) {
+                    console.warn('Rollback failed, recreating PC for', peerId, e)
+                    closePeerConnection(pc)
+                    groupPcRefs.current.delete(peerId)
+                    groupPcCreatePromisesRef.current.delete(peerId)
+                    groupPendingCandidatesRef.current.delete(peerId)
+                    groupOfferInFlightRef.current.delete(peerId)
+                    const newPc = await createGroupPC(peerId)
+                    if (!newPc) return
+                    await newPc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
+                    await flushGroupPendingCandidates(peerId, newPc)
+                    const answer = await newPc.createAnswer()
+                    await newPc.setLocalDescription(answer)
+                    sendGroupSignal(peerId, { type: 'answer', sdp: answer.sdp })
+                    return
+                }
+            }
+
+            if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-remote-offer') {
+                // Trạng thái không hợp lệ để nhận offer, bỏ qua
+                return
+            }
+
             await pc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
             await flushGroupPendingCandidates(peerId, pc)
             const answer = await pc.createAnswer()
@@ -923,6 +966,15 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             if (!peerId || peerId === currentUserId) return
             addGroupParticipants([currentUserId, peerId, ...(data.participantIds || [])])
             markActive()
+            // Thành viên cũ cũng chủ động gửi offer đến người mới join.
+            // Nếu người mới cũng gửi offer lại → glare được xử lý bởi Perfect Negotiation.
+            // Cách này loại bỏ single-point-of-failure: nếu offer của 1 bên bị mất,
+            // bên kia vẫn sẽ thiết lập được kết nối.
+            try {
+                await startGroupOffer(peerId)
+            } catch (error) {
+                console.warn('startGroupOffer (participant-joined) error:', error)
+            }
         }
 
         const onGroupExistingParticipants = async (data) => {
@@ -1042,8 +1094,29 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
 
         const init = async () => {
             ensureListeners()
-            ringtoneRef.current = createRingtone()
+
+            // Tạo ringtone TRƯỚC khi await để tránh race condition:
+            // Nếu user bấm Chấp nhận trong khi loadIceConfig() đang chờ,
+            // acceptCall() sẽ gọi ringtoneRef.current?.stop() — nếu ringtone
+            // chưa được tạo thì stop() là no-op, sau đó init() tiếp tục tạo
+            // ringtone mới không ai stop được nữa.
+            if (!isJoiningActiveCall) {
+                ringtoneRef.current = createRingtone()
+            }
+
             await loadIceConfig()
+
+            // User chủ động join từ banner "Tham gia" → auto-accept ngay, không đổ chuông
+            if (isJoiningActiveCall) {
+                await acceptCall()
+                return
+            }
+
+            // Guard: nếu user đã accept trong khi loadIceConfig() đang await → stop ringtone và thoát
+            if (callStateRef.current === 'active') {
+                ringtoneRef.current?.stop()
+                return
+            }
 
             if (!isIncoming) {
                 await getMedia()
