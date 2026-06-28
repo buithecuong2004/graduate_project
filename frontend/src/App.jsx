@@ -81,7 +81,7 @@ const AppInner = () => {
   const pathnameRef = useRef(pathname)
 
   // callAcceptedSignal đã được loại bỏ — CallModal tự lắng nghe socket trực tiếp
-  const { socketRef, setSocket, openChatFromMessage, clearOpenChats } = useSocket()
+  const { socketRef, setSocket, openChatFromMessage, clearOpenChats, setActiveGroupCallsMap } = useSocket()
 
   const [activeCall, setActiveCall] = useState(null)
   const activeCallRef = useRef(null)
@@ -258,6 +258,25 @@ const AppInner = () => {
         // NOTE: 'call-accepted' KHÔNG được xử lý ở App level nữa.
         // CallModal của caller tự đăng ký listener trực tiếp trên socket.
 
+        // ── Group Call Active Banner (global) ────────────────────────────────
+        // Lắng nghe globally: dù user đang ở trang nào cũng lưu vào context
+        socket.on('group-call-active', (data) => {
+          if (!data?.groupId) return
+          const gid = data.groupId.toString()
+          setActiveGroupCallsMap((prev) => ({ ...prev, [gid]: data }))
+        })
+
+        socket.on('call-ended', (data) => {
+          if (data?.groupId && data?.endForAll) {
+            const gid = data.groupId.toString()
+            setActiveGroupCallsMap((prev) => {
+              const next = { ...prev }
+              delete next[gid]
+              return next
+            })
+          }
+        })
+
         // Listen for friend requests
         socket.on('friend-request', (notification) => {
           dispatch(addNotification(notification))
@@ -393,7 +412,7 @@ const AppInner = () => {
         setSocket(null)
       }
     }
-  }, [currentUser?._id, dispatch, getToken, openChatFromMessage, setSocket, socketRef])
+  }, [currentUser?._id, dispatch, getToken, openChatFromMessage, setSocket, socketRef, setActiveGroupCallsMap])
 
   const handleStartCall = useCallback((callData) => {
     activeCallRef.current = callData

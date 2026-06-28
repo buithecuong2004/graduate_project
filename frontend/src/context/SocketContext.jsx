@@ -15,6 +15,9 @@ export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null)
     const [incomingCall, setIncomingCall] = useState(null)
     const [openChats, setOpenChats] = useState([])
+    // Map: groupId (string) → callInfo object
+    // Dùng để hiển thị banner "đang có cuộc gọi nhóm" globally
+    const [activeGroupCallsMap, setActiveGroupCallsMap] = useState({})
 
     const openChat = useCallback((contact, options = {}) => {
         const contactId = getUserId(contact)
@@ -77,8 +80,9 @@ export const SocketProvider = ({ children }) => {
     const value = useMemo(() => ({
         socketRef, socket, setSocket,
         incomingCall, setIncomingCall,
+        activeGroupCallsMap, setActiveGroupCallsMap,
         openChats, openChat, closeChat, clearOpenChats, openChatFromMessage,
-    }), [clearOpenChats, closeChat, incomingCall, openChat, openChatFromMessage, openChats, socket])
+    }), [clearOpenChats, closeChat, incomingCall, openChat, openChatFromMessage, openChats, socket, activeGroupCallsMap])
 
     return (
         <SocketContext.Provider value={value}>

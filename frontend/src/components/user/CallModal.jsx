@@ -833,6 +833,9 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                 clearTimeout(timeoutRef.current)
                 addGroupParticipants([currentUserId, peerId, ...(data.participantIds || [])])
                 markActive()
+                // Người vừa accept sẽ tự gửi WebRTC offer đến caller
+                // qua onGroupExistingParticipants → startGroupOffer.
+                // Caller chỉ cần answer lại — KHÔNG gửi offer để tránh glare.
                 return
             }
 

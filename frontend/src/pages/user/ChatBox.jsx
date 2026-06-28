@@ -175,7 +175,7 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
   const { getToken } = useAuth()
   const navigate = useNavigate()
   const dispatch = useDispatch()
-  const { socketRef, socket } = useSocket()
+  const { socketRef, socket, activeGroupCallsMap: activeGroupCallsMapCtx = {} } = useSocket()
 
   const [hasMoreMessages, setHasMoreMessages] = useState(true)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -276,6 +276,9 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
   const [showSummaryModal, setShowSummaryModal] = useState(false)
   const [summaryText, setSummaryText] = useState('')
   const [isSummarizing, setIsSummarizing] = useState(false)
+
+  // Active group call banner: đọc từ global SocketContext (cập nhật bởi App.jsx)
+  const activeGroupCall = isGroupChat ? (activeGroupCallsMapCtx[groupId?.toString()] || null) : null
 
   useEffect(() => {
     imagePreviewsRef.current = imagePreviews
@@ -1945,7 +1948,18 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
           }
           : null
 
-  return user && (
+  // user chưa được load (race condition giữa setLoading(false) và setUser)
+  if (!user) {
+    return isMini
+      ? (
+        <div className='flex h-[33rem] w-[25rem] items-center justify-center rounded-t-2xl border border-slate-200 bg-white shadow-2xl'>
+          <Loading height='10rem' />
+        </div>
+      )
+      : <Loading height={isEmbedded ? '100%' : '100vh'} />
+  }
+
+  return (
     <div className={shellClass} onFocusCapture={markMiniMessagesAsRead} onPointerDown={markMiniMessagesAsRead}>
       {/* ── Header ── */}
       <div className={isMini ? 'flex items-center border-b border-slate-200 bg-white px-3 py-2' : 'surface m-3 mb-0 flex items-center rounded-[1.4rem] px-4 py-3'}>
@@ -2001,6 +2015,39 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
           )}
         </div>
       </div>
+
+      {/* ── Active Group Call Banner (for late joiners) ── */}
+      {isGroupChat && activeGroupCall && !isMini && (
+        <div className='flex items-center gap-3 border-b border-green-200 bg-gradient-to-r from-green-50 to-emerald-50 px-4 py-2.5'>
+          <span className='flex size-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-white shadow-sm'>
+            <Phone size={15} />
+          </span>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-black text-green-800'>Đang có cuộc gọi nhóm</p>
+            <p className='text-xs text-green-600'>
+              {activeGroupCall.callerName ? `${activeGroupCall.callerName} đã bắt đầu` : 'Cuộc gọi đang diễn ra'} · {activeGroupCall.participantCount || 1} người tham gia
+            </p>
+          </div>
+          {onStartCall && (
+            <button
+              type='button'
+              onClick={() => {
+                onStartCall({
+                  ...activeGroupCall,
+                  groupCall: true,
+                  isGroupCall: true,
+                  callScope: 'group',
+                  conversationType: 'group',
+                  isIncoming: true,
+                })
+              }}
+              className='shrink-0 rounded-full bg-green-500 px-4 py-1.5 text-sm font-black text-white shadow-sm transition hover:bg-green-600 active:scale-95'
+            >
+              Tham gia
+            </button>
+          )}
+        </div>
+      )}
 
       {chatSearchOpen && (
         <div className={isMini ? 'border-b border-slate-100 bg-white px-3 py-3' : 'border-b border-slate-200 bg-white/90 px-4 py-3'}>

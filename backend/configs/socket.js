@@ -90,6 +90,8 @@ export const setupSocket = (server) => {
     const liveHostsByStream = new Map();
     const hostedLiveStreamsBySocket = new Map();
     const activeGroupCalls = new Map();
+    // Index phụ: groupId → callId, để tra cứu active call theo groupId
+    const activeGroupCallsByGroupId = new Map();
 
     const emitUserPresence = async (userId, isOnline) => {
         const lastSeen = new Date();
@@ -254,6 +256,28 @@ export const setupSocket = (server) => {
                     console.log('Presence update error:', error.message);
                 }
             }
+
+            // Push các cuộc gọi nhóm đang diễn ra mà user này là thành viên
+            // Để banner hiển thị ngay khi user login hoặc reconnect
+            activeGroupCalls.forEach((call, callId) => {
+                const isRecipient = call.recipientIds.has(normalizedUserId);
+                const isParticipant = call.participantIds.has(normalizedUserId);
+                const isCaller = call.callerId === normalizedUserId;
+                if ((isRecipient || isParticipant) && !isCaller) {
+                    socket.emit('group-call-active', {
+                        callId,
+                        groupId: call.groupId,
+                        groupName: call.groupName,
+                        groupAvatar: call.groupAvatar,
+                        groupMembers: call.groupMembers,
+                        callType: call.callType,
+                        callerName: call.callerName,
+                        callerAvatar: call.callerAvatar,
+                        from: call.callerId,
+                        participantCount: call.participantIds.size,
+                    });
+                }
+            });
         });
 
         // Join a post room for real-time comments
@@ -369,12 +393,21 @@ export const setupSocket = (server) => {
                     }
 
                     const callId = data.callId || `${data.groupId}-${Date.now()}-${from}`;
+                    const normalizedGroupId = data.groupId.toString();
                     activeGroupCalls.set(callId, {
-                        groupId: data.groupId.toString(),
+                        groupId: normalizedGroupId,
                         callerId: from.toString(),
                         participantIds: new Set([from.toString()]),
                         recipientIds: new Set(recipientIds),
+                        callType: data.callType || 'voice',
+                        callerName: data.callerName || '',
+                        callerAvatar: data.callerAvatar || '',
+                        groupName: data.groupName || group.name,
+                        groupAvatar: data.groupAvatar || group.avatar_url || '',
+                        groupMembers: group.members?.map((member) => member.user).filter(Boolean) || [],
                     });
+                    // Lưu index ngược groupId → callId để tra cứu khi người join muộn
+                    activeGroupCallsByGroupId.set(normalizedGroupId, callId);
 
                     const incomingCall = {
                         ...data,
@@ -396,6 +429,26 @@ export const setupSocket = (server) => {
                             ...incomingCall,
                             to: recipientId,
                         });
+                    });
+
+                    // Push banner "đang có cuộc gọi nhóm" đến TẤT CẢ thành viên nhóm đang online
+                    // (kể cả những người không được gọi trực tiếp, giống Messenger)
+                    const callActiveBanner = {
+                        callId,
+                        groupId: normalizedGroupId,
+                        groupName: data.groupName || group.name,
+                        groupAvatar: data.groupAvatar || group.avatar_url || '',
+                        groupMembers: group.members?.map((member) => member.user).filter(Boolean) || [],
+                        callType: data.callType || 'voice',
+                        callerName: data.callerName || '',
+                        callerAvatar: data.callerAvatar || '',
+                        from: from.toString(),
+                        participantCount: 1,
+                    };
+                    const allGroupMemberIds = getGroupMemberIds(group);
+                    allGroupMemberIds.forEach((memberId) => {
+                        if (memberId === from.toString()) return; // caller không cần nhận banner
+                        io.to(`user-${memberId}`).emit('group-call-active', callActiveBanner);
                     });
                 } catch (error) {
                     console.log('Group call error:', error.message);
@@ -456,6 +509,27 @@ export const setupSocket = (server) => {
                     groupId: call.groupId,
                     participantIds: existingParticipantIds,
                 });
+
+                // Cập nhật banner cho những thành viên chưa tham gia cuộc gọi
+                const nonParticipants = Array.from(call.recipientIds)
+                    .filter((id) => !call.participantIds.has(id));
+                if (nonParticipants.length > 0) {
+                    const updatedBanner = {
+                        callId: data.callId,
+                        groupId: call.groupId,
+                        groupName: call.groupName,
+                        groupAvatar: call.groupAvatar,
+                        groupMembers: call.groupMembers,
+                        callType: call.callType,
+                        callerName: call.callerName,
+                        callerAvatar: call.callerAvatar,
+                        from: call.callerId,
+                        participantCount: call.participantIds.size,
+                    };
+                    nonParticipants.forEach((id) => {
+                        io.to(`user-${id}`).emit('group-call-active', updatedBanner);
+                    });
+                }
                 return;
             }
 
@@ -516,6 +590,8 @@ export const setupSocket = (server) => {
                         });
                     });
                     activeGroupCalls.delete(data.callId);
+                    // Xóa index ngược khi cuộc gọi kết thúc hoàn toàn
+                    activeGroupCallsByGroupId.delete(call.groupId);
                     return;
                 }
 
@@ -545,6 +621,32 @@ export const setupSocket = (server) => {
         // Generic WebRTC signal relay (for robust SimplePeer signaling)
         socket.on('webrtc-signal', (data) => {
             io.to(`user-${data.to}`).emit('webrtc-signal', data);
+        });
+
+        // Kiểm tra xem nhóm có đang có cuộc gọi active không
+        // Client emit khi mở group chat, server trả về thông tin cuộc gọi nếu có
+        socket.on('check-group-call', ({ groupId } = {}) => {
+            if (!groupId) return;
+            const normalizedGroupId = groupId.toString();
+            const callId = activeGroupCallsByGroupId.get(normalizedGroupId);
+            if (!callId) return;
+            const call = activeGroupCalls.get(callId);
+            if (!call) {
+                activeGroupCallsByGroupId.delete(normalizedGroupId);
+                return;
+            }
+            socket.emit('group-call-active', {
+                callId,
+                groupId: normalizedGroupId,
+                groupName: call.groupName,
+                groupAvatar: call.groupAvatar,
+                groupMembers: call.groupMembers,
+                callType: call.callType,
+                callerName: call.callerName,
+                callerAvatar: call.callerAvatar,
+                from: call.callerId,
+                participantCount: call.participantIds.size,
+            });
         });
         // ─────────────────────────────────────────────────────────────────
 
