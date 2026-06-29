@@ -207,10 +207,10 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
     const groupMembers = useMemo(() => callInfo.groupMembers || [], [callInfo.groupMembers])
     const callTitle = isGroupCall
         ? (callInfo.groupName || 'Nhom chat')
-        : (callInfo.callerName || 'Unknown')
+        : (isIncoming ? (callInfo.callerName || 'Unknown') : (callInfo.calleeName || 'Unknown'))
     const callAvatar = isGroupCall
         ? (callInfo.groupAvatar || callInfo.callerAvatar || null)
-        : (callInfo.callerAvatar || null)
+        : (isIncoming ? (callInfo.callerAvatar || null) : (callInfo.calleeAvatar || null))
     const callerName = callInfo.callerName || 'Unknown'
 
     // Nếu join chủ động từ banner → vào thẳng state 'active', không hiện incoming screen
@@ -270,7 +270,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         const id = normalizeId(userId)
         if (id === currentUserId) {
             return {
-                name: currentUser?.full_name || currentUser?.username || 'You',
+                name: currentUser?.full_name || currentUser?.username || 'Bạn',
                 avatar: currentUser?.profile_picture || null,
             }
         }
@@ -279,7 +279,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         }
         const member = groupMembers.find((item) => normalizeId(item) === id)
         return {
-            name: member?.full_name || member?.username || 'Thanh vien',
+            name: member?.full_name || member?.username || 'Thành viên',
             avatar: member?.profile_picture || null,
         }
     }, [callInfo.callerAvatar, callerId, callerName, currentUser, currentUserId, groupMembers])
@@ -1325,7 +1325,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                         <video ref={localVideoRef} autoPlay playsInline muted
                             className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
                         {isCamOff && <div className="absolute inset-0 bg-gray-900 flex items-center justify-center"><VideoOff size={20} className="text-gray-400" /></div>}
-                        <span className="absolute bottom-1 w-full text-center text-white text-[10px] opacity-70">You</span>
+                        <span className="absolute bottom-1 w-full text-center text-white text-[10px] opacity-70">Bạn</span>
                     </div>
                     <div className="absolute top-5 left-1/2 -translate-x-1/2 bg-black/50 text-white text-sm px-4 py-1 rounded-full z-10">{fmt(duration)}</div>
                     <div className="absolute top-12 left-1/2 -translate-x-1/2 text-white/70 text-sm z-10">{callTitle}</div>

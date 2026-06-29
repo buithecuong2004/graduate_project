@@ -1870,6 +1870,8 @@ const ChatBox = ({ onStartCall, chatUserId, groupId, variant = 'page', onClose, 
       callType,
       callerName: currentUser.full_name,
       callerAvatar: currentUser.profile_picture,
+      calleeName: user.full_name,
+      calleeAvatar: user.profile_picture,
     }
     // Notify receiver immediately (no WebRTC offer yet — that comes after receiver accepts)
     socketRef.current.emit('call-user', callData)
