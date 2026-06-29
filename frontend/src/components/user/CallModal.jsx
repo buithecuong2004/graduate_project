@@ -152,7 +152,7 @@ const GroupVideoTile = React.memo(function GroupVideoTile({ isLocal, stream, par
             )}
 
             <span className="absolute bottom-2 left-2 max-w-[calc(100%-1rem)] truncate rounded-full bg-black/60 px-3 py-1 text-xs font-semibold text-white">
-                {isLocal ? 'You' : name}
+                {isLocal ? 'Bạn' : name}
             </span>
         </div>
     )
@@ -983,7 +983,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             if (!peerId || peerId === currentUserId) return
             addGroupParticipants([currentUserId, peerId, ...(data.participantIds || [])])
             markActive()
-            
+
             // Deterministic offer initiation: only offer if currentUserId < peerId.
             // This prevents glare (both sides offering at the same time), which leads
             // to rollback race conditions and black screens.
@@ -999,7 +999,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                 .filter((id) => id && id !== currentUserId)
             addGroupParticipants([currentUserId, ...existingParticipantIds])
             markActive()
-            
+
             // Deterministic offer initiation: only offer if currentUserId < id.
             // The user with the larger ID will wait for the offer from the smaller ID.
             await Promise.all(existingParticipantIds.map(async (id) => {
@@ -1109,7 +1109,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
     useEffect(() => {
         if (!socketInstance) return
         ensureListenersRef.current()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [socketInstance])
 
     useEffect(() => {
@@ -1226,9 +1226,9 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         ]
         : []
     const incomingSubtitle = isGroupCall
-        ? `${callerName} dang goi nhom`
-        : (callType === 'video' ? 'Cuoc goi video den' : 'Cuoc goi thoai den')
-    const outgoingSubtitle = isGroupCall ? 'Dang goi nhom...' : 'Dang goi...'
+        ? `${callerName} đang gọi nhóm`
+        : (callType === 'video' ? 'Cuộc gọi video đến' : 'Cuộc gọi thoại đến')
+    const outgoingSubtitle = isGroupCall ? 'Đang gọi nhóm...' : 'Đang gọi...'
 
     const avatarContent = (
         callAvatar

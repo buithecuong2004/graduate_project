@@ -663,7 +663,7 @@ export const getUserProfiles = async (req, res) =>{
         const postFilter = viewer?.role === 'admin'
             ? { user: profileId }
             : { user: profileId, is_hidden: { $ne: true } }
-        const posts = await Post.find(postFilter).populate('user')
+        const posts = await Post.find(postFilter).populate('user').sort({ createdAt: -1 })
         res.json({success: true, profile, posts})
 
     } catch (error) {
