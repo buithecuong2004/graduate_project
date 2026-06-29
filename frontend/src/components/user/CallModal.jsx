@@ -98,13 +98,19 @@ const getGroupGridColumns = (count) => {
     return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
 }
 
-const GroupVideoTile = React.memo(function GroupVideoTile({ isLocal, stream, participant, isCamOff }) {
+const GroupVideoTile = React.memo(function GroupVideoTile({ isLocal, stream, participant, isCamOff, isConfirmedParticipant, trackHash }) {
     const videoRef = useRef(null)
     const videoTracks = stream?.getVideoTracks?.() || []
     const hasLiveVideo = videoTracks.some((track) => track.readyState !== 'ended' && (!isLocal || track.enabled))
     const showVideo = hasLiveVideo && (!isLocal || !isCamOff)
     const name = participant?.name || 'Thanh vien'
     const initial = name[0] || '?'
+
+    // Only show 'Dang ket noi' for remote peers not yet confirmed as participants
+    // Confirmed participants with no video just have camera off
+    const statusText = isLocal
+        ? (isCamOff || !hasLiveVideo ? 'Camera off' : '')
+        : (isConfirmedParticipant ? 'Camera tắt' : 'Đang kết nối...')
 
     useEffect(() => {
         const video = videoRef.current
@@ -117,7 +123,7 @@ const GroupVideoTile = React.memo(function GroupVideoTile({ isLocal, stream, par
         }
 
         if (video.srcObject) video.srcObject = null
-    }, [stream])
+    }, [stream, trackHash])
 
     return (
         <div className="relative min-h-0 overflow-hidden rounded-xl bg-slate-950">
@@ -125,7 +131,7 @@ const GroupVideoTile = React.memo(function GroupVideoTile({ isLocal, stream, par
                 ref={videoRef}
                 autoPlay
                 playsInline
-                muted
+                muted={isLocal}
                 className={`h-full w-full object-cover ${showVideo ? '' : 'hidden'}`}
                 style={isLocal ? { transform: 'scaleX(-1)' } : undefined}
             />
@@ -137,9 +143,11 @@ const GroupVideoTile = React.memo(function GroupVideoTile({ isLocal, stream, par
                             ? <img src={participant.avatar} alt="" className="h-full w-full object-cover" />
                             : <div className="flex h-full w-full items-center justify-center text-2xl font-bold">{initial}</div>}
                     </div>
-                    <p className="max-w-[80%] truncate text-sm font-semibold">
-                        {isLocal && (isCamOff || !hasLiveVideo) ? 'Camera off' : 'Dang ket noi'}
-                    </p>
+                    {statusText && (
+                        <p className="max-w-[80%] truncate text-sm font-semibold">
+                            {statusText}
+                        </p>
+                    )}
                 </div>
             )}
 
@@ -176,7 +184,7 @@ const GroupVoiceTile = React.memo(function GroupVoiceTile({ isLocal, participant
 })
 
 export default function CallModal({ callInfo, onClose, isIncoming }) {
-    const { socketRef } = useSocket()
+    const { socketRef, socket: socketInstance } = useSocket()
     const currentUser = useSelector(s => s.user.value)
     const { getToken } = useAuth()
 
@@ -682,7 +690,10 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             const pc = new RTCPeerConnection(iceConfig)
             groupPcRefs.current.set(peerId, pc)
 
-            addLocalMediaToPeer(pc)
+            // NOTE: addLocalMediaToPeer is NOT called here to avoid a race condition
+            // where loadIceConfig() resolves before getMedia() and localStreamRef is still null.
+            // Callers (startGroupOffer, handleGroupSignal) are responsible for adding media
+            // after they have confirmed localStreamRef.current is set via getMedia().
 
             pc.onicecandidate = ({ candidate }) => {
                 if (candidate) sendGroupSignal(peerId, { type: 'candidate', candidate })
@@ -729,19 +740,30 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         } finally {
             groupPcCreatePromisesRef.current.delete(peerId)
         }
-    }, [addLocalMediaToPeer, attachGroupRemote, currentUserId, getParticipantInfo, loadIceConfig, markActive, sendGroupSignal])
+    }, [attachGroupRemote, currentUserId, getParticipantInfo, loadIceConfig, markActive, sendGroupSignal])
 
     const startGroupOffer = useCallback(async (peerId) => {
         if (!peerId || peerId === currentUserId) return
         if (groupOfferInFlightRef.current.has(peerId)) return
         groupOfferInFlightRef.current.add(peerId)
         try {
+            // Ensure media is ready BEFORE creating/accessing the PC
+            // so that addLocalMediaToPeer always has tracks to add
             if (!localStreamRef.current) {
                 const stream = await getMedia()
                 if (!stream) return
             }
             const pc = await createGroupPC(peerId)
-            if (!pc || pc.localDescription?.type === 'offer' || pc.signalingState !== 'stable') return
+            if (!pc) return
+
+            // Add local tracks if not already added (PC may have been created empty
+            // by handleGroupSignal before our stream was ready)
+            const senders = pc.getSenders()
+            if (senders.length === 0) {
+                addLocalMediaToPeer(pc)
+            }
+
+            if (pc.localDescription?.type === 'offer' || pc.signalingState !== 'stable') return
 
             const offer = await pc.createOffer()
             await pc.setLocalDescription(offer)
@@ -749,13 +771,14 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         } finally {
             groupOfferInFlightRef.current.delete(peerId)
         }
-    }, [createGroupPC, currentUserId, getMedia, sendGroupSignal])
+    }, [addLocalMediaToPeer, createGroupPC, currentUserId, getMedia, sendGroupSignal])
 
     const handleGroupSignal = useCallback(async (data) => {
         const peerId = normalizeId(data?.from)
         const signal = data?.signal
         if (!peerId || peerId === currentUserId || !signal) return
 
+        // Ensure stream is ready before creating PC so addLocalMediaToPeer has tracks
         if (!localStreamRef.current) {
             const stream = await getMedia()
             if (!stream) return
@@ -763,6 +786,11 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
 
         const pc = await createGroupPC(peerId)
         if (!pc) return
+
+        // Ensure local tracks are on this PC (may have been created before stream was ready)
+        if (pc.getSenders().length === 0) {
+            addLocalMediaToPeer(pc)
+        }
 
         if (signal.type === 'offer') {
             // ── Perfect Negotiation: giải quyết glare (cả 2 bên cùng gửi offer) ──
@@ -789,6 +817,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                     groupOfferInFlightRef.current.delete(peerId)
                     const newPc = await createGroupPC(peerId)
                     if (!newPc) return
+                    if (newPc.getSenders().length === 0) addLocalMediaToPeer(newPc)
                     await newPc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
                     await flushGroupPendingCandidates(peerId, newPc)
                     const answer = await newPc.createAnswer()
@@ -864,33 +893,31 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
 
     const ensureListeners = useCallback(() => {
         const socket = socketRef.current
-        if (!socket || handlersAttachedRef.current) return
-
-        handlersAttachedRef.current = true
+        if (!socket) return
+        const existing = handlersAttachedRef.current
+        if (existing && existing.socket === socket) return
+        if (existing) removeListeners()
 
         const onCallAccepted = async (data) => {
             if (isGroupCall) {
-                if (!sameGroupCall(data) || normalizeId(data.to) !== currentUserId) return
+                if (!sameGroupCall(data)) return
+                const toId = normalizeId(data.to)
+                if (toId && toId !== currentUserId) return
                 const peerId = normalizeId(data.from)
+                if (!peerId || peerId === currentUserId) return
                 ringtoneRef.current?.stop()
                 clearTimeout(timeoutRef.current)
                 addGroupParticipants([currentUserId, peerId, ...(data.participantIds || [])])
                 markActive()
-                // Người vừa accept sẽ tự gửi WebRTC offer đến caller
-                // qua onGroupExistingParticipants → startGroupOffer.
-                // Caller chỉ cần answer lại — KHÔNG gửi offer để tránh glare.
                 return
             }
-
             if (normalizeId(data?.from) !== otherUserId || normalizeId(data?.to) !== currentUserId) return
             if (isIncoming) return
             if (callStateRef.current !== 'outgoing') return
-
             ringtoneRef.current?.stop()
             clearTimeout(timeoutRef.current)
             setState('active')
             startTimer()
-
             if (!localStreamRef.current) {
                 const stream = await getMedia()
                 if (!stream) return
@@ -902,26 +929,18 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             if (isGroupCall) {
                 const signalIsGroupCall = isTruthyFlag(data?.groupCall) || isTruthyFlag(data?.isGroupCall) || data?.groupId || data?.callScope === 'group'
                 if (!signalIsGroupCall || !sameGroupCall(data) || normalizeId(data.to) !== currentUserId) return
-                try {
-                    await handleGroupSignal(data)
-                } catch (error) {
-                    console.error('Group WebRTC signal error:', error)
-                }
+                try { await handleGroupSignal(data) } catch (error) { console.error('Group WebRTC signal error:', error) }
                 return
             }
-
             if (normalizeId(data?.from) !== otherUserId || normalizeId(data?.to) !== currentUserId) return
             if (!data?.signal) return
-
             try {
                 if (!localStreamRef.current) {
                     const stream = await getMedia()
                     if (!stream) return
                 }
                 await handleRemoteSignal(data.signal)
-            } catch (error) {
-                console.error('WebRTC signal error:', error)
-            }
+            } catch (error) { console.error('WebRTC signal error:', error) }
         }
 
         const onRejected = async (data) => {
@@ -929,7 +948,6 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                 if (!sameGroupCall(data) || normalizeId(data.to) !== currentUserId) return
                 return
             }
-
             if (normalizeId(data?.from) !== otherUserId || normalizeId(data?.to) !== currentUserId) return
             ringtoneRef.current?.stop()
             clearTimeout(timeoutRef.current)
@@ -952,7 +970,6 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                 removeGroupPeer(endedBy)
                 return
             }
-
             if (normalizeId(data?.from) !== otherUserId || normalizeId(data?.to) !== currentUserId) return
             const dur = callStartTimeRef.current ? Math.round((Date.now() - callStartTimeRef.current) / 1000) : 0
             if (callStateRef.current === 'active') await saveCallRecord('completed', dur)
@@ -966,14 +983,12 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             if (!peerId || peerId === currentUserId) return
             addGroupParticipants([currentUserId, peerId, ...(data.participantIds || [])])
             markActive()
-            // Thành viên cũ cũng chủ động gửi offer đến người mới join.
-            // Nếu người mới cũng gửi offer lại → glare được xử lý bởi Perfect Negotiation.
-            // Cách này loại bỏ single-point-of-failure: nếu offer của 1 bên bị mất,
-            // bên kia vẫn sẽ thiết lập được kết nối.
-            try {
-                await startGroupOffer(peerId)
-            } catch (error) {
-                console.warn('startGroupOffer (participant-joined) error:', error)
+            
+            // Deterministic offer initiation: only offer if currentUserId < peerId.
+            // This prevents glare (both sides offering at the same time), which leads
+            // to rollback race conditions and black screens.
+            if (currentUserId < peerId) {
+                try { await startGroupOffer(peerId) } catch (error) { console.warn('startGroupOffer (participant-joined) error:', error) }
             }
         }
 
@@ -981,14 +996,15 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             if (!isGroupCall || !sameGroupCall(data)) return
             const existingParticipantIds = (data.participantIds || [])
                 .map(normalizeId)
-                .filter((participantId) => participantId && participantId !== currentUserId)
+                .filter((id) => id && id !== currentUserId)
             addGroupParticipants([currentUserId, ...existingParticipantIds])
             markActive()
-            await Promise.all(existingParticipantIds.map(async (participantId) => {
-                try {
-                    await startGroupOffer(participantId)
-                } catch (error) {
-                    console.error('Group existing participant offer error:', error)
+            
+            // Deterministic offer initiation: only offer if currentUserId < id.
+            // The user with the larger ID will wait for the offer from the smaller ID.
+            await Promise.all(existingParticipantIds.map(async (id) => {
+                if (currentUserId < id) {
+                    try { await startGroupOffer(id) } catch (error) { console.error('Group existing participant offer error:', error) }
                 }
             }))
         }
@@ -1008,16 +1024,17 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         socket.on('group-call-participant-left', onGroupParticipantLeft)
 
         handlersAttachedRef.current = {
-            socket,
-            onCallAccepted,
-            onWebRTCSignal,
-            onRejected,
-            onEnded,
-            onGroupParticipantJoined,
-            onGroupExistingParticipants,
-            onGroupParticipantLeft,
+            socket, onCallAccepted, onWebRTCSignal, onRejected, onEnded,
+            onGroupParticipantJoined, onGroupExistingParticipants, onGroupParticipantLeft,
         }
     }, [addGroupParticipants, callerId, cleanup, currentUserId, getMedia, handleGroupSignal, handleRemoteSignal, isGroupCall, isIncoming, markActive, otherUserId, removeGroupPeer, removeListeners, sameGroupCall, saveCallRecord, setState, socketRef, startGroupOffer, startOffer, startTimer])
+
+    // Keep a ref to the latest ensureListeners so socket-watching effect
+    // always calls the fresh version without stale closures
+    const ensureListenersRef = useRef(ensureListeners)
+    ensureListenersRef.current = ensureListeners
+
+
 
     const acceptCall = useCallback(async () => {
         ringtoneRef.current?.stop()
@@ -1088,11 +1105,19 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
         setIsCamOff(c => !c)
     }
 
+    // Re-attach listeners whenever socket changes (handles reconnect and initial load race)
+    useEffect(() => {
+        if (!socketInstance) return
+        ensureListenersRef.current()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [socketInstance])
+
     useEffect(() => {
         if (initDoneRef.current) return
         initDoneRef.current = true
 
         const init = async () => {
+            // Try to attach listeners immediately; also covered by the socketInstance effect above
             ensureListeners()
 
             // Tạo ringtone TRƯỚC khi await để tránh race condition:
@@ -1177,16 +1202,27 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
     }, [callState, callType, attachRemote, isGroupCall, localStream])
 
     const participantCount = isGroupCall ? Math.max(1, groupParticipantIds.length) : Math.max(1, remoteStreams.length + 1)
+    // Build a Set of confirmed participant IDs for tile status display
+    const confirmedParticipantSet = useMemo(() => new Set(groupParticipantIds), [groupParticipantIds])
+    const getTrackHash = (stream) => {
+        if (!stream) return ''
+        return stream.getTracks().map(t => `${t.id}:${t.readyState}:${t.enabled}`).join(',')
+    }
     const groupVideoTiles = isGroupCall
         ? [
-            { userId: currentUserId, isLocal: true, stream: localStream },
+            { userId: currentUserId, isLocal: true, stream: localStream, isConfirmedParticipant: true, trackHash: getTrackHash(localStream) },
             ...groupParticipantIds
                 .filter((userId) => userId && userId !== currentUserId)
-                .map((userId) => ({
-                    userId,
-                    isLocal: false,
-                    stream: groupRemoteStreamsRef.current.get(userId) || null,
-                }))
+                .map((userId) => {
+                    const s = groupRemoteStreamsRef.current.get(userId) || null
+                    return {
+                        userId,
+                        isLocal: false,
+                        stream: s,
+                        isConfirmedParticipant: confirmedParticipantSet.has(userId),
+                        trackHash: getTrackHash(s)
+                    }
+                })
         ]
         : []
     const incomingSubtitle = isGroupCall
@@ -1211,10 +1247,11 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                         ref={(element) => setGroupAudioElement(userId, element)}
                         autoPlay
                         playsInline
+                        muted={callType === 'video'}
                         style={{ display: 'none' }}
                     />
                 ))
-                : <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />}
+                : <audio ref={remoteAudioRef} autoPlay playsInline muted={callType === 'video'} style={{ display: 'none' }} />}
 
             {connectionWarning && (
                 <div className="absolute top-5 left-1/2 z-20 max-w-md -translate-x-1/2 rounded-xl bg-amber-500/95 px-4 py-2 text-center text-sm font-semibold text-slate-950 shadow-lg">
@@ -1225,7 +1262,7 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
             {callState === 'active' && callType === 'video' && isGroupCall ? (
                 <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
                     <div className={`grid h-full w-full auto-rows-fr gap-2 p-2 ${getGroupGridColumns(groupVideoTiles.length)}`}>
-                        {groupVideoTiles.map(({ userId, isLocal, stream }) => {
+                        {groupVideoTiles.map(({ userId, isLocal, stream, isConfirmedParticipant, trackHash }) => {
                             const participant = getParticipantInfo(userId)
                             return (
                                 <GroupVideoTile
@@ -1234,6 +1271,8 @@ export default function CallModal({ callInfo, onClose, isIncoming }) {
                                     stream={stream}
                                     participant={participant}
                                     isCamOff={isCamOff}
+                                    isConfirmedParticipant={isConfirmedParticipant}
+                                    trackHash={trackHash}
                                 />
                             )
                         })}
